@@ -802,12 +802,61 @@ public actor HuaweiOntClient {
         return value
     }
 
+    private static func normalizedMac(_ raw: String?) -> String {
+        (raw ?? "").lowercased().filter { "0123456789abcdef".contains($0) }
+    }
+
+    /// Reads RSSI fields from any router record that also identifies a client MAC. Huawei firmware
+    /// varies the associated-station record name, so inspect constructor field names instead of
+    /// depending on one endpoint-specific class name.
+    private static func wifiSignalByMac(in text: String) -> [String: Double] {
+        var result: [String: Double] = [:]
+        let definitions = HuaweiJs.definitions(in: text)
+        for (recordName, fields) in definitions {
+            let macField = fields.first { field in
+                let key = field.lowercased().filter(\.isLetter)
+                return key.contains("mac") && (key.contains("addr") || key == "mac")
+            }
+            let signalFields = fields.filter { field in
+                let key = field.lowercased().filter(\.isLetter)
+                return key.contains("rssi") || key.contains("signal")
+            }
+            guard let macField, !signalFields.isEmpty else { continue }
+
+            for record in HuaweiJs.records(of: recordName, in: text) {
+                guard let mac = record[macField], !normalizedMac(mac).isEmpty,
+                      let rssi = parseRssiDbm(in: record, keys: signalFields) else { continue }
+                result[normalizedMac(mac)] = rssi
+            }
+        }
+        return result
+    }
+
+    private static func parseRssiDbm(in record: [String: String], keys: [String]? = nil) -> Double? {
+        let candidates = keys ?? record.keys.filter { key in
+            let normalized = key.lowercased().filter(\.isLetter)
+            return normalized.contains("rssi") || normalized.contains("signal")
+        }
+        for key in candidates {
+            guard let raw = record[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { continue }
+            let pattern = #"-?\d+(?:\.\d+)?"#
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let match = regex.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
+                  let range = Range(match.range, in: raw),
+                  let value = Double(raw[range]),
+                  value <= 0, value >= -120 else { continue }
+            return value
+        }
+        return nil
+    }
+
     /// All known devices, online first, de-duplicated by MAC (the page lists some twice).
     /// Supports both 18-arg `USERDevice` (checked first so traffic rates are kept) and 17-arg `USERDeviceNew`.
     /// `ssidBands` maps SSID index to band from the Wi-Fi list; without it bands are guessed.
     static func parseDevices(_ text: String, ssidBands: [Int: String] = [:]) -> [OntDevice] {
         var seen = Set<String>()
         var devices: [OntDevice] = []
+        let signalByMac = wifiSignalByMac(in: text)
         let candidates = HuaweiJs.records(of: "USERDevice", in: text, fallbackParams: userDeviceParams)
             + HuaweiJs.records(of: "USERDeviceNew", in: text, fallbackParams: userDeviceNewParams)
 
@@ -819,6 +868,11 @@ public actor HuaweiOntClient {
 
             let rawType = cleanPlaceholder(r["UserSpecifiedDeviceType"])
             let lease = Int(r["LeaseTimeRemaining"] ?? "").flatMap { $0 > 0 ? $0 : nil }
+            let rawPort = cleanPlaceholder(r["Port"])
+            let interfaceType = [r["PortType"], r["InterfaceType"], r["interfacetype"]]
+                .compactMap { $0 }
+                .map { cleanPlaceholder($0) }
+                .first(where: { !$0.isEmpty }) ?? ""
 
             devices.append(OntDevice(
                 domain: r["Domain"] ?? "",
@@ -827,13 +881,14 @@ public actor HuaweiOntClient {
                 hostName: cleanPlaceholder(r["HostName"]),
                 routerAlias: cleanPlaceholder(r["UserDevAlias"]),
                 dhcpVendor: cleanPlaceholder(r["DevType"]),
-                port: ConnectionPort(raw: cleanPlaceholder(r["Port"]), ssidBands: ssidBands),
+                port: ConnectionPort(raw: rawPort, ssidBands: ssidBands, fallbackRaw: interfaceType),
                 isOnline: (r["DevStatus"] ?? "").lowercased() == "online",
                 connectedTime: r["Time"] ?? "",
                 userSpecifiedDeviceType: rawType.isEmpty ? "0" : rawType,
                 trafficSendRate: parseNonZeroRate(r["TrafficSendRate"]),
                 trafficRecvRate: parseNonZeroRate(r["TrafficRecvRate"]),
-                leaseSecondsRemaining: lease
+                leaseSecondsRemaining: lease,
+                rssiDbm: parseRssiDbm(in: r) ?? signalByMac[normalizedMac(mac)]
             ))
         }
         return devices.sorted { a, b in
@@ -888,3 +943,4 @@ public actor HuaweiOntClient {
         }
     }
 }
+

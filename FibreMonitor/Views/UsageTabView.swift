@@ -3,6 +3,7 @@ import SwiftUI
 public struct UsageTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
+    @State private var showSettings = false
 
     public init(viewModel: MonitorViewModel) {
         self.viewModel = viewModel
@@ -29,13 +30,14 @@ public struct UsageTabView: View {
                 .padding(.bottom, 24)
             }
             .background { LiquidGlassBackground() }
+            .liquidGlassScrollEdges()
             .refreshable { await viewModel.refreshAll() }
             .navigationTitle("Usage")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     RouterSwitcherMenu(viewModel: viewModel, settings: settings) {
-                        viewModel.selectedTab = .settings
+                        showSettings = true
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -50,6 +52,9 @@ public struct UsageTabView: View {
                     }
                     .disabled(viewModel.isRefreshing || !settings.isConfigured)
                 }
+            }
+            .navigationDestination(isPresented: $showSettings) {
+                SettingsTabView(viewModel: viewModel)
             }
         }
     }
@@ -66,7 +71,7 @@ public struct UsageTabView: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
-            Button("Open Settings") { viewModel.selectedTab = .settings }
+            Button("Open Settings") { showSettings = true }
                 .liquidGlassActionButton()
         }
         .frame(maxWidth: .infinity)
@@ -244,7 +249,7 @@ private struct DailyUsageHistoryCard: View {
                         RoundedRectangle(cornerRadius: 5, style: .continuous)
                             .stroke(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
                             .overlay {
-                                Text("â€“")
+                                Text("–")
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                             }

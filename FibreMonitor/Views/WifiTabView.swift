@@ -52,6 +52,7 @@ public struct WifiTabView: View {
                 .padding(.bottom, 24)
             }
             .background { LiquidGlassBackground() }
+            .liquidGlassScrollEdges()
             .refreshable { await viewModel.refreshAll() }
             .navigationTitle("Wi-Fi")
             .navigationBarTitleDisplayMode(.large)
@@ -758,3 +759,4 @@ private struct WifiEmptyCard: View {
         .liquidGlassCard()
     }
 }
+

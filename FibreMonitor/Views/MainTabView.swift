@@ -4,6 +4,7 @@ public struct MainTabView: View {
     @StateObject private var viewModel = MonitorViewModel()
     @ObservedObject private var settings = SettingsStore.shared
     @Environment(\.scenePhase) private var scenePhase
+    @State private var showInitialSettings = false
 
     public init() {}
 
@@ -33,14 +34,19 @@ public struct MainTabView: View {
                 }
                 .tag(AppTab.wifi)
 
-            SettingsTabView(viewModel: viewModel)
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .tag(AppTab.settings)
         }
         .sheet(isPresented: $viewModel.awaitingRouterSelection) {
             RouterLaunchPickerView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $showInitialSettings) {
+            NavigationStack {
+                SettingsTabView(viewModel: viewModel)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Done") { showInitialSettings = false }
+                        }
+                    }
+            }
         }
         .alert(
             viewModel.actionMessage ?? "",
@@ -56,7 +62,8 @@ public struct MainTabView: View {
         .onAppear {
             if !viewModel.awaitingRouterSelection {
                 if !viewModel.settings.isConfigured {
-                    viewModel.selectedTab = .settings
+                    viewModel.selectedTab = .home
+                    showInitialSettings = true
                 } else {
                     viewModel.startPolling()
                 }

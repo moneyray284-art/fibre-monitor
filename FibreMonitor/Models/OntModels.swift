@@ -137,18 +137,37 @@ public enum ConnectionPort: Equatable, Sendable {
 
     /// `ssidBands` (SSID index -> "2.4GHz"/"5GHz", from the router's Wi-Fi list) decides the band.
     /// Without it, the usual Huawei layout is assumed: SSID1-4 on 2.4 GHz, SSID5-8 on 5 GHz.
-    public init(raw: String, ssidBands: [Int: String] = [:]) {
-        let upper = raw.uppercased()
-        if upper.hasPrefix("SSID"), let n = Int(upper.dropFirst(4)) {
-            if let band = ssidBands[n] {
+    public init(raw: String, ssidBands: [Int: String] = [:], fallbackRaw: String? = nil) {
+        let primary = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = (fallbackRaw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidates = [primary, fallback].filter { !$0.isEmpty }
+        let upper = (candidates.first ?? "").uppercased()
+        let compact = upper.replacingOccurrences(of: " ", with: "")
+        if compact.hasPrefix("SSID"), let n = Int(compact.dropFirst(4).prefix(while: \.isNumber)) {
+            let explicitBand = candidates.map { $0.uppercased().replacingOccurrences(of: " ", with: "") }
+            if explicitBand.contains(where: { $0.contains("5GHZ") || $0.contains("5G") }) {
+                self = .wifi5(ssidIndex: n)
+            } else if explicitBand.contains(where: { $0.contains("2.4GHZ") || $0.contains("2.4G") }) {
+                self = .wifi24(ssidIndex: n)
+            } else if let band = ssidBands[n] {
                 self = band.hasPrefix("5") ? .wifi5(ssidIndex: n) : .wifi24(ssidIndex: n)
             } else {
                 self = n >= 5 ? .wifi5(ssidIndex: n) : .wifi24(ssidIndex: n)
             }
-        } else if upper.hasPrefix("LAN"), let n = Int(upper.dropFirst(3)) {
-            self = .lan(n)
         } else {
-            self = .other(raw)
+            let normalized = candidates.map { $0.uppercased().replacingOccurrences(of: " ", with: "") }
+            if normalized.contains(where: { $0.contains("5GHZ") || $0.contains("5G") }) {
+                self = .wifi5(ssidIndex: 0)
+            } else if normalized.contains(where: { $0.contains("2.4GHZ") || $0.contains("2.4G") }) {
+                self = .wifi24(ssidIndex: 0)
+            } else if let lan = normalized.first(where: { $0.hasPrefix("LAN") || $0.contains("ETHERNET") || $0 == "ETH" || $0 == "WIRED" }) {
+                let digits = lan.drop(while: { !$0.isNumber }).prefix(while: \.isNumber)
+                self = .lan(Int(digits) ?? 0)
+            } else if normalized.contains(where: { $0.contains("WIFI") || $0.contains("WI-FI") || $0.contains("WLAN") || $0.contains("WIRELESS") }) {
+                self = .wifi24(ssidIndex: 0)
+            } else {
+                self = .other(primary.isEmpty ? fallback : primary)
+            }
         }
     }
 
@@ -156,8 +175,17 @@ public enum ConnectionPort: Equatable, Sendable {
         switch self {
         case .wifi24: return "2.4 GHz"
         case .wifi5: return "5 GHz"
-        case .lan(let n): return "LAN \(n)"
-        case .other(let s): return s.isEmpty ? "â€”" : s
+        case .lan(let n): return n > 0 ? "LAN \(n)" : "LAN"
+        case .other(let s): return s.isEmpty ? "—" : s
+        }
+    }
+
+    public var compactLabel: String {
+        switch self {
+        case .wifi24: return "2.4G"
+        case .wifi5: return "5G"
+        case .lan: return "LAN"
+        case .other(let value): return value.trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }
 
@@ -166,6 +194,15 @@ public enum ConnectionPort: Equatable, Sendable {
         case .wifi24, .wifi5: return true
         default: return false
         }
+    }
+
+    public var isLan: Bool {
+        if case .lan = self { return true }
+        if case .other(let value) = self {
+            let upper = value.uppercased()
+            return upper.contains("LAN") || upper.contains("ETHERNET") || upper == "ETH" || upper == "WIRED"
+        }
+        return false
     }
 }
 
@@ -186,6 +223,8 @@ public struct OntDevice: Identifiable, Equatable, Sendable {
     public var trafficSendRate: Int? = nil
     public var trafficRecvRate: Int? = nil
     public var leaseSecondsRemaining: Int? = nil
+    /// Wi-Fi signal strength reported by the router, in dBm. Nil when the router does not expose RSSI.
+    public var rssiDbm: Double? = nil
 
     public init(
         domain: String = "",
@@ -200,7 +239,8 @@ public struct OntDevice: Identifiable, Equatable, Sendable {
         userSpecifiedDeviceType: String = "0",
         trafficSendRate: Int? = nil,
         trafficRecvRate: Int? = nil,
-        leaseSecondsRemaining: Int? = nil
+        leaseSecondsRemaining: Int? = nil,
+        rssiDbm: Double? = nil
     ) {
         self.domain = domain
         self.mac = mac
@@ -215,6 +255,7 @@ public struct OntDevice: Identifiable, Equatable, Sendable {
         self.trafficSendRate = trafficSendRate
         self.trafficRecvRate = trafficRecvRate
         self.leaseSecondsRemaining = leaseSecondsRemaining
+        self.rssiDbm = rssiDbm
     }
 
     public var hasTrafficRates: Bool {

@@ -4,7 +4,7 @@ import SwiftUI
 import UIKit
 
 public enum AppTab: Hashable, Sendable {
-    case home, usage, clients, wifi, settings
+    case home, usage, clients, wifi
 }
 
 @MainActor
@@ -360,7 +360,7 @@ public final class MonitorViewModel: ObservableObject {
         guard !isDiagnosing else { return }
         let mode = diagnosticMode, host = diagnosticHost, count = pingCount
         isDiagnosing = true
-        diagnosticOutput = DiagnosticOutput(text: "Starting \(mode.rawValue.lowercased()) to \(host)â€¦\n")
+        diagnosticOutput = DiagnosticOutput(text: "Starting \(mode.rawValue.lowercased()) to \(host)…\n")
         diagnosticTask = Task { [weak self] in
             guard let self else { return }
             defer { self.isDiagnosing = false }

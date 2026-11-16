@@ -3,7 +3,7 @@ import SwiftUI
 public struct DashboardView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
-    @State private var showRebootAlert = false
+    @State private var showSettings = false
 
     public init(viewModel: MonitorViewModel) {
         self.viewModel = viewModel
@@ -16,7 +16,7 @@ public struct DashboardView: View {
                 VStack(spacing: 14) {
                     if !settings.isConfigured {
                         NoRouterCard {
-                            viewModel.selectedTab = .settings
+                            showSettings = true
                         }
                     } else {
                         RouterHeaderCard(viewModel: viewModel, settings: settings)
@@ -26,27 +26,15 @@ public struct DashboardView: View {
                                 message: err,
                                 suggestFallback: viewModel.shouldSuggestFallbackHost,
                                 onTryFallback: { Task { await viewModel.useFallbackHost() } },
-                                openSettings: { viewModel.selectedTab = .settings }
+                                openSettings: { showSettings = true }
                             )
                         }
 
-                        FibreCard(optical: viewModel.optical)
-                        SpeedSection(traffic: viewModel.traffic)
-                        MetricsTileGrid(viewModel: viewModel)
+                        CompactSpeedCard(traffic: viewModel.traffic)
+                        HomeUsageCard(summary: settings.dataUsageSummary) {
+                            viewModel.selectedTab = .usage
+                        }
                         ConnectionHistoryCard(events: settings.connectionHistory)
-
-                        if !viewModel.wan.gateway.isEmpty || !viewModel.wan.dnsServers.isEmpty {
-                            WanExtrasCard(wan: viewModel.wan)
-                        }
-
-                        if viewModel.health.hasCpuOrMemory {
-                            SystemLoadCard(health: viewModel.health)
-                        }
-
-                        RebootSection(
-                            isEnabled: viewModel.isConnected && !viewModel.isLoggedOut,
-                            action: { showRebootAlert = true }
-                        )
                     }
                 }
                 .padding(.horizontal)
@@ -54,36 +42,40 @@ public struct DashboardView: View {
                 .padding(.bottom, 24)
             }
             .background { LiquidGlassBackground() }
+            .liquidGlassScrollEdges()
             .refreshable { await viewModel.refreshAll() }
             .navigationTitle("Home")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     RouterSwitcherMenu(viewModel: viewModel, settings: settings) {
-                        viewModel.selectedTab = .settings
+                        showSettings = true
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("Settings")
+
                     Button {
                         Task { await viewModel.refreshAll() }
                     } label: {
                         if viewModel.isRefreshing {
                             ProgressView()
                         } else {
-                            Label("Refresh", systemImage: "arrow.clockwise")
+                            Image(systemName: "arrow.clockwise")
                         }
                     }
+                    .accessibilityLabel("Refresh")
                     .disabled(viewModel.isRefreshing || !settings.isConfigured)
                 }
             }
-        }
-        .alert("Restart Router?", isPresented: $showRebootAlert) {
-            Button("Cancel", role: .cancel) {}
-            Button("Restart", role: .destructive) {
-                Task { await viewModel.reboot() }
+            .navigationDestination(isPresented: $showSettings) {
+                SettingsTabView(viewModel: viewModel)
             }
-        } message: {
-            Text("Internet and Wi-Fi drop for about 2 minutes while the router restarts.")
         }
     }
 }
@@ -99,7 +91,7 @@ private struct RouterHeaderCard: View {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .fill(Color.green.opacity(0.16))
                         .frame(width: 44, height: 44)
-                    Image(systemName: "antenna.radiowaves.left.and.right")
+                    Image(systemName: "wifi.router")
                         .font(.title3.weight(.semibold))
                         .foregroundColor(.green)
                 }
@@ -109,7 +101,7 @@ private struct RouterHeaderCard: View {
                     Text(settings.activeProfile?.name ?? "Fibre Router")
                         .font(.headline)
                         .lineLimit(1)
-                    Text("\(viewModel.displayModelName) Â· \(settings.host)")
+                    Text(viewModel.displayModelName)
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
@@ -134,7 +126,7 @@ private struct RouterHeaderCard: View {
                     .font(.caption.weight(.bold))
                     .foregroundColor(statusColor)
                 if let last = viewModel.lastUpdate, viewModel.isConnected, !viewModel.isLoggedOut {
-                    Text("â€¢ Updated \(last.formatted(date: .omitted, time: .standard))")
+                    Text("• Updated \(last.formatted(date: .omitted, time: .standard))")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -159,7 +151,109 @@ private struct RouterHeaderCard: View {
 
     private var statusText: String {
         if viewModel.isLoggedOut { return "LOGGED OUT" }
-        return viewModel.isConnected ? "LIVE" : (viewModel.isRefreshing ? "CONNECTING" : "OFFLINE")
+        return viewModel.isConnected ? "CONNECTED" : (viewModel.isRefreshing ? "CONNECTING" : "OFFLINE")
+    }
+}
+
+private struct CompactSpeedCard: View {
+    let traffic: TrafficState
+
+    var body: some View {
+        HStack(spacing: 13) {
+            speedMetric(
+                title: "Download",
+                value: traffic.downloadMbps,
+                icon: "arrow.down",
+                tint: .blue
+            )
+
+            Rectangle()
+                .fill(Color.primary.opacity(0.1))
+                .frame(width: 1, height: 35)
+
+            speedMetric(
+                title: "Upload",
+                value: traffic.uploadMbps,
+                icon: "arrow.up",
+                tint: .green
+            )
+        }
+        .padding(.vertical, 2)
+        .liquidGlassCard(padding: 13)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Live speed")
+        .accessibilityValue(
+            String(format: "Download %.1f megabits per second, upload %.1f megabits per second", traffic.downloadMbps, traffic.uploadMbps)
+        )
+    }
+
+    private func speedMetric(title: String, value: Double, icon: String, tint: Color) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 30, height: 30)
+                .background(tint.opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(value >= 100 ? String(format: "%.0f", value) : String(format: "%.1f", value))
+                        .font(.system(.title3, design: .rounded).weight(.bold))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                    Text("Mbps")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct HomeUsageCard: View {
+    let summary: DataUsageSummary
+    let openUsage: () -> Void
+
+    private var monthTotalBytes: UInt64 {
+        let (total, overflow) = summary.monthDownloadBytes.addingReportingOverflow(summary.monthUploadBytes)
+        return overflow ? UInt64.max : total
+    }
+
+    var body: some View {
+        Button(action: openUsage) {
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.up.arrow.down.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.accentColor)
+                    .frame(width: 38, height: 38)
+                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("THIS MONTH · UNLIMITED PLAN")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(clamping: monthTotalBytes), countStyle: .file))
+                        .font(.headline.weight(.bold))
+                        .monospacedDigit()
+                    Text("Router counter total · View Usage")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlassCard(padding: 13)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens the Usage tab")
     }
 }
 
@@ -181,11 +275,11 @@ private struct MetricsTileGrid: View {
                 icon: "globe",
                 iconTint: wan.isConnected ? .green : .orange,
                 title: "WAN IP",
-                value: wan.ipAddress.isEmpty ? "â€”" : wan.ipAddress,
+                value: wan.ipAddress.isEmpty ? "—" : wan.ipAddress,
                 pill: wan.isCarrierNat ? ("CGNAT", .orange) : (wan.isConnected ? ("Up", .green) : nil),
                 subtitle: [wan.connectionType, wan.vlanId.isEmpty ? "" : "VLAN \(wan.vlanId)"]
                     .filter { !$0.isEmpty }
-                    .joined(separator: " Â· ")
+                    .joined(separator: " · ")
             )
 
             MetricTile(
@@ -212,14 +306,14 @@ private struct MetricsTileGrid: View {
                     iconTint: .purple,
                     title: "Tx Laser Power",
                     value: String(format: "%.2f dBm", tx),
-                    subtitle: optical.temperatureC.map { String(format: "Temp %.0f Â°C", $0) }
+                    subtitle: optical.temperatureC.map { String(format: "Temp %.0f °C", $0) }
                 )
             } else if let temp = optical.temperatureC {
                 MetricTile(
                     icon: "thermometer.medium",
                     iconTint: .orange,
                     title: "Optics Temp",
-                    value: String(format: "%.0f Â°C", temp)
+                    value: String(format: "%.0f °C", temp)
                 )
             }
 

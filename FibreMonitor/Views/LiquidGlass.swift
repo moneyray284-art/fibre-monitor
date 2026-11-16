@@ -163,4 +163,41 @@ public extension View {
     func liquidGlassSmallButton() -> some View {
         modifier(LiquidGlassSmallButtonModifier())
     }
+
+    /// Feather scrolling content beneath navigation and tab bars on iOS 26.
+    func liquidGlassScrollEdges() -> some View {
+        modifier(LiquidGlassScrollEdgeEffectModifier())
+    }
+
+    /// A compact capsule surface for controls such as the Clients filter menu.
+    func liquidGlassCapsule() -> some View {
+        modifier(LiquidGlassCapsuleModifier())
+    }
 }
+
+private struct LiquidGlassScrollEdgeEffectModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .scrollEdgeEffectStyle(.soft, for: .top)
+                .scrollEdgeEffectStyle(.soft, for: .bottom)
+        } else {
+            content
+        }
+    }
+}
+
+private struct LiquidGlassCapsuleModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular, in: .capsule)
+        } else {
+            content
+                .background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.16), lineWidth: 0.8))
+        }
+    }
+}
+

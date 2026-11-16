@@ -1,11 +1,20 @@
+import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
+import UIKit
 
 public struct SettingsTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
+    @ObservedObject private var avatarStore = ProfileAvatarStore.shared
 
     @State private var editorMode: RouterProfileEditorView.Mode?
     @State private var pendingDelete: RouterProfile?
+    @State private var selectedAvatarPhoto: PhotosPickerItem?
+    @State private var isShowingAvatarPicker = false
+    @State private var isImportingAvatar = false
+    @State private var photoErrorMessage: String?
+    @State private var showRebootAlert = false
 
     public init(viewModel: MonitorViewModel) {
         self.viewModel = viewModel
@@ -13,8 +22,61 @@ public struct SettingsTabView: View {
     }
 
     public var body: some View {
-        NavigationStack {
-            Form {
+        Form {
+                Section("Profile") {
+                    HStack(spacing: 12) {
+                        Menu {
+                            Button {
+                                isShowingAvatarPicker = true
+                            } label: {
+                                Label("Choose from Photos", systemImage: "photo")
+                            }
+
+                            Button {
+                                isImportingAvatar = true
+                            } label: {
+                                Label("Choose from Files", systemImage: "folder")
+                            }
+
+                            if avatarStore.image != nil {
+                                Button(role: .destructive) {
+                                    avatarStore.remove()
+                                } label: {
+                                    Label("Remove Photo", systemImage: "person.crop.circle.badge.xmark")
+                                }
+                            }
+                        } label: {
+                            ProfileAvatarView(size: 54)
+                        }
+                        .accessibilityLabel("Profile photo options")
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Profile picture")
+                                .font(.subheadline.weight(.semibold))
+                            Text(avatarStore.image == nil ? "Default LinkWave badge" : "Tap the avatar to change it")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .photosPicker(
+                        isPresented: $isShowingAvatarPicker,
+                        selection: $selectedAvatarPhoto,
+                        matching: .images
+                    )
+                    .fileImporter(
+                        isPresented: $isImportingAvatar,
+                        allowedContentTypes: [.image],
+                        allowsMultipleSelection: false,
+                        onCompletion: importAvatar
+                    )
+                    .onChange(of: selectedAvatarPhoto) { item in
+                        guard let item else { return }
+                        Task { await loadAvatar(from: item) }
+                    }
+                } footer: {
+                    Text("Your photo is resized and saved on this iPhone. Remove Photo restores the LW initials badge.")
+                }
+
                 Section {
                     if settings.profiles.isEmpty {
                         Text("No routers saved yet. Add your router to connect.")
@@ -96,6 +158,50 @@ public struct SettingsTabView: View {
                     .pickerStyle(.menu)
                 }
 
+                Section("Network Details") {
+                    LabeledContent("Gateway", value: viewModel.wan.gateway.isEmpty ? "—" : viewModel.wan.gateway)
+                    LabeledContent(
+                        "ISP DNS",
+                        value: viewModel.wan.dnsServers.isEmpty ? "—" : viewModel.wan.dnsServers.joined(separator: ", ")
+                    )
+                    LabeledContent("WAN IP", value: viewModel.wan.ipAddress.isEmpty ? "—" : viewModel.wan.ipAddress)
+                    if !viewModel.wan.connectionType.isEmpty {
+                        LabeledContent("Connection type", value: viewModel.wan.connectionType)
+                    }
+                }
+
+                Section("Advanced Diagnostics") {
+                    if !viewModel.wan.connectionStatus.isEmpty {
+                        LabeledContent(
+                            viewModel.wan.connectionType == "IPoE" ? "WAN status" : "PPPoE status",
+                            value: viewModel.wan.connectionStatus
+                        )
+                    }
+                    if viewModel.wan.uptimeSeconds > 0 {
+                        LabeledContent(
+                            viewModel.wan.connectionType == "IPoE" ? "WAN uptime" : "PPPoE uptime",
+                            value: InternetCard.uptime(viewModel.wan.uptimeSeconds)
+                        )
+                    }
+                    if let rx = viewModel.optical.rxPowerDbm {
+                        LabeledContent("Optical Rx power", value: String(format: "%.2f dBm", rx))
+                    }
+                    if let cpu = viewModel.health.cpuPercent {
+                        LabeledContent("CPU load", value: "\(cpu)%")
+                    }
+                    if let memory = viewModel.health.memoryPercent {
+                        LabeledContent("Memory load", value: "\(memory)%")
+                    }
+                    if viewModel.wan.connectionStatus.isEmpty,
+                       viewModel.wan.uptimeSeconds <= 0,
+                       viewModel.optical.rxPowerDbm == nil,
+                       !viewModel.health.hasCpuOrMemory {
+                        Text("Connect to the router to view available diagnostics.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("Tools & Network") {
                     NavigationLink {
                         DiagnosticsScreen(viewModel: viewModel)
@@ -111,6 +217,15 @@ public struct SettingsTabView: View {
                 }
 
                 if settings.isConfigured {
+                    Section("Router Controls") {
+                        Button(role: .destructive) {
+                            showRebootAlert = true
+                        } label: {
+                            Label("Restart Fibre Router", systemImage: "power")
+                        }
+                        .disabled(!viewModel.isConnected || viewModel.isLoggedOut)
+                    }
+
                     Section {
                         if viewModel.isLoggedOut {
                             Button {
@@ -145,17 +260,25 @@ public struct SettingsTabView: View {
                         LabeledContent("Hardware", value: viewModel.health.hardware)
                     }
                 }
-            }
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.large)
-            .refreshable { await viewModel.refreshAll() }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if !settings.profiles.isEmpty {
-                        EditButton()
-                    }
+        }
+        .liquidGlassScrollEdges()
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await viewModel.refreshAll() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if !settings.profiles.isEmpty {
+                    EditButton()
                 }
             }
+        }
+        .alert("Restart Router?", isPresented: $showRebootAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Restart", role: .destructive) {
+                Task { await viewModel.reboot() }
+            }
+        } message: {
+            Text("Internet and Wi-Fi drop for about 2 minutes while the router restarts.")
         }
         .sheet(item: $editorMode) { mode in
             RouterProfileEditorView(mode: mode, settings: settings) { savedProfile in
@@ -189,6 +312,52 @@ public struct SettingsTabView: View {
         } message: {
             Text("This removes the profile, its Keychain password, and its saved device names from this iPhone.")
         }
+        .alert(
+            "Couldn’t Update Profile Photo",
+            isPresented: Binding(
+                get: { photoErrorMessage != nil },
+                set: { if !$0 { photoErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { photoErrorMessage = nil }
+        } message: {
+            Text(photoErrorMessage ?? "Please choose another image.")
+        }
+    }
+
+    private func loadAvatar(from selection: PhotosPickerItem) async {
+        do {
+            guard let data = try await selection.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else {
+                photoErrorMessage = "The selected photo couldn’t be opened."
+                selectedAvatarPhoto = nil
+                return
+            }
+            try avatarStore.save(image)
+        } catch {
+            photoErrorMessage = error.localizedDescription
+        }
+        selectedAvatarPhoto = nil
+    }
+
+    private func importAvatar(_ result: Result<URL, Error>) {
+        do {
+            let url = try result.get()
+            let didStartAccessing = url.startAccessingSecurityScopedResource()
+            defer {
+                if didStartAccessing {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+            let data = try Data(contentsOf: url)
+            guard let image = UIImage(data: data) else {
+                photoErrorMessage = "The selected file doesn’t contain a supported image."
+                return
+            }
+            try avatarStore.save(image)
+        } catch {
+            photoErrorMessage = error.localizedDescription
+        }
     }
 
     private var activeRouterDescription: String {
@@ -216,6 +385,7 @@ private struct DiagnosticsScreen: View {
                 .padding()
         }
         .background { LiquidGlassBackground() }
+        .liquidGlassScrollEdges()
         .navigationTitle("Diagnostics")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -251,8 +421,10 @@ private struct LanScreen: View {
             .padding()
         }
         .background { LiquidGlassBackground() }
+        .liquidGlassScrollEdges()
         .refreshable { await viewModel.refreshAll() }
         .navigationTitle("Home Network")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
+
