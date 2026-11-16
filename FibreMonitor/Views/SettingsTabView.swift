@@ -97,7 +97,7 @@ public struct SettingsTabView: View {
     }
 
     private var profileSection: some View {
-        Section("Profile") {
+        Section {
             HStack(spacing: 12) {
                 Menu {
                     Button {
@@ -135,12 +135,21 @@ public struct SettingsTabView: View {
                 isPresented: $isImportingAvatar,
                 allowedContentTypes: [.image],
                 allowsMultipleSelection: false,
-                onCompletion: importAvatar
+                onCompletion: { result in
+                    switch result {
+                    case .success(let urls):
+                        if let url = urls.first { importAvatar(.success(url)) }
+                    case .failure(let error):
+                        photoErrorMessage = error.localizedDescription
+                    }
+                }
             )
             .onChange(of: selectedAvatarPhoto) { item in
                 guard let item else { return }
                 Task { await loadAvatar(from: item) }
             }
+        } header: {
+            Text("Profile")
         } footer: {
             Text("Your photo is resized and saved on this iPhone. Remove Photo restores the LW initials badge.")
         }
