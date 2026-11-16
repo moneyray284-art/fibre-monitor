@@ -175,37 +175,42 @@ public extension View {
     }
 }
 
-struct RouterSyncToolbarControl: View {
+struct RouterRefreshToolbarButton: View {
     @ObservedObject var viewModel: MonitorViewModel
     var isEnabled = true
 
     var body: some View {
-        HStack(spacing: 7) {
-            if let lastUpdate = viewModel.lastUpdate {
-                Text("Updated \(lastUpdate, style: .relative)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            } else {
-                Text("Not synced")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
-
-            Button {
-                Task { await viewModel.refreshAll() }
-            } label: {
+        Button {
+            Task { await viewModel.refreshAll() }
+        } label: {
+            Group {
                 if viewModel.isRefreshing {
-                    ProgressView()
-                        .frame(width: 18, height: 18)
+                    ProgressView().controlSize(.mini)
                 } else {
                     Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 15, weight: .semibold))
                 }
             }
-            .accessibilityLabel("Refresh router data")
-            .disabled(viewModel.isRefreshing || !isEnabled)
+            .frame(width: 38, height: 38)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .modifier(LiquidGlassToolbarCircleModifier())
+        .frame(width: 38, height: 38)
+        .accessibilityLabel("Refresh router data")
+        .disabled(viewModel.isRefreshing || !isEnabled)
+    }
+}
+
+struct LiquidGlassToolbarCircleModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular, in: Circle())
+        } else {
+            content
+                .background(.regularMaterial, in: Circle())
+                .overlay(Circle().stroke(Color.primary.opacity(0.1), lineWidth: 0.8))
         }
     }
 }

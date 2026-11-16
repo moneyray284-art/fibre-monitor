@@ -8,7 +8,7 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     GENERATE_INFOPLIST_FILE: false
-    CURRENT_PROJECT_VERSION: 6
+    CURRENT_PROJECT_VERSION: 7
     MARKETING_VERSION: "2.2.0"
     CODE_SIGN_IDENTITY: ""
     CODE_SIGNING_REQUIRED: "NO"
@@ -26,6 +26,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mattdev0.fibremonitor
+        PRODUCT_NAME: LinkWave
+        PRODUCT_MODULE_NAME: FibreMonitor
         INFOPLIST_FILE: FibreMonitor/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIconOrange AppIconBlue AppIconPurple AppIconGreen"
@@ -33,6 +35,9 @@ targets:
         CODE_SIGN_ENTITLEMENTS: FibreMonitor/Resources/FibreMonitor.entitlements
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         TARGETED_DEVICE_FAMILY: "1"
+      configs:
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
     dependencies:
       - target: LinkWaveWidget
         embed: true
@@ -51,6 +56,9 @@ targets:
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
         TARGETED_DEVICE_FAMILY: "1"
+      configs:
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
 
   FibreMonitorTests:
     type: bundle.unit-test

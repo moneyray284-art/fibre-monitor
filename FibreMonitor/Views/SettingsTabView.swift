@@ -270,12 +270,6 @@ public struct SettingsTabView: View {
                 HStack(spacing: 7) {
                     Text(appVersion)
                         .font(.subheadline.monospacedDigit())
-                    Text("Beta")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.accentColor.opacity(0.12), in: Capsule())
                 }
             }
             LabeledContent("Router", value: activeRouterDescription)

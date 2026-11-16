@@ -108,23 +108,10 @@ public struct DashboardView: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .modifier(HomeToolbarCircleGlass())
+        .modifier(LiquidGlassToolbarCircleModifier())
         .frame(width: 38, height: 38)
         .accessibilityLabel(label)
         .disabled(isDisabled)
-    }
-}
-
-private struct HomeToolbarCircleGlass: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.regular, in: Circle())
-        } else {
-            content
-                .background(.regularMaterial, in: Circle())
-                .overlay(Circle().stroke(Color.primary.opacity(0.1), lineWidth: 0.8))
-        }
     }
 }
 

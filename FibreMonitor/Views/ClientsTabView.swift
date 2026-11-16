@@ -252,9 +252,11 @@ public struct ClientsTabView: View {
             .navigationTitle("Clients")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarTrailing) {
                     filterMenu
-                    RouterSyncToolbarControl(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured)
                 }
             }
         }
@@ -514,6 +516,10 @@ public struct ClientsTabView: View {
                     .font(.caption2.weight(.bold))
             }
             .font(.caption.weight(.semibold))
+            .padding(.horizontal, 10)
+            .frame(height: 38)
+            .contentShape(Capsule())
+            .liquidGlassCapsule()
         }
         .accessibilityLabel("Filter devices")
         .accessibilityValue("\(selectedFilter.menuTitle), \(selectedCount) devices")

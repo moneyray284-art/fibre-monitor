@@ -57,11 +57,8 @@ public struct WifiTabView: View {
             .navigationTitle("Wi-Fi")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    RouterSyncToolbarControl(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured)
-                    if viewModel.isWifiSaving {
-                        ProgressView()
-                    }
+                ToolbarItem(placement: .topBarTrailing) {
+                    RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured)
                 }
             }
         }

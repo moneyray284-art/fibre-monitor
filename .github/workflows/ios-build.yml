@@ -10,10 +10,6 @@ on:
         required: false
         type: boolean
         default: false
-      release_tag:
-        description: 'Release tag (default: v<MARKETING_VERSION>-ios)'
-        required: false
-        type: string
 
 permissions:
   contents: write
@@ -75,51 +71,60 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            SWIFT_OPTIMIZATION_LEVEL=-O \
             clean build
 
       - name: Verify Info.plist
         run: |
           # Without a launch screen key iOS runs the app letterboxed (legacy mode).
-          PLIST=build/Build/Products/Release-iphoneos/FibreMonitor.app/Info.plist
+          PLIST=build/Build/Products/Release-iphoneos/LinkWave.app/Info.plist
           for key in UILaunchScreen NSLocalNetworkUsageDescription NSAppTransportSecurity; do
             /usr/libexec/PlistBuddy -c "Print :$key" "$PLIST" > /dev/null || { echo "::error::$key missing from built Info.plist"; exit 1; }
           done
           for icon in AppIconOrange AppIconBlue AppIconPurple AppIconGreen; do
             /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundleAlternateIcons:$icon" "$PLIST" > /dev/null || { echo "::error::Alternate icon $icon missing from built Info.plist"; exit 1; }
           done
-          APP=build/Build/Products/Release-iphoneos/FibreMonitor.app
+          APP=build/Build/Products/Release-iphoneos/LinkWave.app
           EXT="$APP/PlugIns/LinkWaveWidget.appex"
+          test -f "$APP/LinkWave" || { echo "::error::Release app executable is missing"; exit 1; }
           test -d "$EXT" || { echo "::error::LinkWaveWidget.appex was not embedded in the app"; exit 1; }
+          test -f "$EXT/LinkWaveWidget" || { echo "::error::Release widget executable is missing"; exit 1; }
           /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$EXT/Info.plist" | grep -q 'com.apple.widgetkit-extension' || { echo "::error::WidgetKit extension point is missing"; exit 1; }
-          echo "Version: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST") ($(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST"))"
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")
+          BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Expected a numeric stable marketing version, found $VERSION"; exit 1; }
+          [[ "$BUILD" =~ ^[0-9]+$ ]] || { echo "::error::Expected a numeric build number, found $BUILD"; exit 1; }
+          echo "LINKWAVE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "LINKWAVE_IPA_NAME=LinkWave-v$VERSION.ipa" >> "$GITHUB_ENV"
+          echo "Version: $VERSION ($BUILD)"
 
       - name: Package IPA
         run: |
           mkdir -p build/Payload
-          cp -r build/Build/Products/Release-iphoneos/FibreMonitor.app build/Payload/
+          cp -r build/Build/Products/Release-iphoneos/LinkWave.app build/Payload/
+          test -f build/Payload/LinkWave.app/PlugIns/LinkWaveWidget.appex/LinkWaveWidget || { echo "::error::Release widget was not packaged inside Payload"; exit 1; }
           cd build
-          zip -r -q LinkWave.ipa Payload
+          zip -r -q "$LINKWAVE_IPA_NAME" Payload
+          echo "LINKWAVE_IPA_PATH=build/$LINKWAVE_IPA_NAME" >> "$GITHUB_ENV"
           echo "IPA Size:"
-          ls -lh LinkWave.ipa
+          ls -lh "$LINKWAVE_IPA_NAME"
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LinkWave-iOS-IPA
-          path: build/LinkWave.ipa
+          name: LinkWave-${{ env.LINKWAVE_VERSION }}-IPA
+          path: ${{ env.LINKWAVE_IPA_PATH }}
           retention-days: 30
 
       - name: Create GitHub Release
-        if: ${{ github.event.inputs.create_release == 'true' || github.event_name == 'release' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.inputs.release_tag }}"
-          if [ -z "$TAG" ]; then
-            TAG="v$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Build/Products/Release-iphoneos/FibreMonitor.app/Info.plist)-ios"
-          fi
-          gh release create "$TAG" build/LinkWave.ipa \
-            --title "LinkWave for iOS ($TAG)" \
+          TAG="v${LINKWAVE_VERSION}"
+          gh release create "$TAG" "$LINKWAVE_IPA_PATH" \
+            --target "$GITHUB_SHA" \
+            --title "LinkWave $TAG" \
             --notes "Unsigned build for Huawei OptiXstar HG8145X6 fibre routers. Install with Sideloadly, AltStore or SideStore." \
             --draft=false \
-            --prerelease=false || gh release upload "$TAG" build/LinkWave.ipa --clobber
+            --prerelease=false

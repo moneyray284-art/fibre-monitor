@@ -43,7 +43,7 @@ public struct UsageTabView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    RouterSyncToolbarControl(viewModel: viewModel, isEnabled: settings.isConfigured)
+                    RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: settings.isConfigured)
                 }
             }
             .navigationDestination(isPresented: $showSettings) {
@@ -78,13 +78,7 @@ private struct SyncStatusCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            CardHeader(icon: "arrow.triangle.2.circlepath", title: "Router Sync") {
-                if let syncDate = summary.lastSuccessfulSyncAt {
-                    Text(syncDate, style: .relative)
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.secondary)
-                }
-            }
+            CardHeader(icon: "arrow.triangle.2.circlepath", title: "Router Sync") { EmptyView() }
 
             if let syncDate = summary.lastSuccessfulSyncAt {
                 Text("Last successful check: \(syncDate.formatted(date: .abbreviated, time: .shortened))")
