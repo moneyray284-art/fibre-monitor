@@ -197,6 +197,8 @@ public actor HuaweiOntClient {
     }
 
     private func apply(counters: (rx: UInt64, tx: UInt64), at now: Date) {
+        traffic.cumulativeDownloadBytes = counters.rx
+        traffic.cumulativeUploadBytes = counters.tx
         defer { lastCounters = (counters.rx, counters.tx, now) }
         guard let last = lastCounters else { return }
         let seconds = now.timeIntervalSince(last.time)

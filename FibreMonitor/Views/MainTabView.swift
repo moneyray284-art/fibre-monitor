@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct MainTabView: View {
     @StateObject private var viewModel = MonitorViewModel()
+    @ObservedObject private var settings = SettingsStore.shared
     @Environment(\.scenePhase) private var scenePhase
 
     public init() {}
@@ -44,6 +45,8 @@ public struct MainTabView: View {
         ) {
             Button("OK", role: .cancel) {}
         }
+        .preferredColorScheme(settings.theme.colorScheme)
+        .tint(settings.accentColor.color)
         .onAppear {
             if !viewModel.awaitingRouterSelection {
                 if !viewModel.settings.isConfigured {

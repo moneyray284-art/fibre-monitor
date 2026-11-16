@@ -32,6 +32,7 @@ public struct DashboardView: View {
 
                         FibreCard(optical: viewModel.optical)
                         SpeedSection(traffic: viewModel.traffic)
+                        DataUsageCard(summary: settings.dataUsageSummary)
                         MetricsTileGrid(viewModel: viewModel)
 
                         if !viewModel.wan.gateway.isEmpty || !viewModel.wan.dnsServers.isEmpty {
@@ -84,6 +85,61 @@ public struct DashboardView: View {
         } message: {
             Text("Internet and Wi-Fi drop for about 2 minutes while the router restarts.")
         }
+    }
+}
+
+private struct DataUsageCard: View {
+    let summary: DataUsageSummary
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Label("Data Usage", systemImage: "arrow.up.arrow.down.circle")
+                    .font(.headline)
+                Spacer()
+                Text("WAN")
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(.secondary)
+            }
+
+            HStack {
+                Text("Period")
+                Spacer(minLength: 4)
+                Text("Download")
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                Text("Upload")
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .font(.caption2.weight(.medium))
+            .foregroundColor(.secondary)
+
+            usageRow("Today", download: summary.todayDownloadBytes, upload: summary.todayUploadBytes)
+            usageRow("This month", download: summary.monthDownloadBytes, upload: summary.monthUploadBytes)
+            usageRow("Since tracking", download: summary.totalDownloadBytes, upload: summary.totalUploadBytes)
+
+            Text("Usage is based on router counters. When the app was closed, catch-up is credited when it reconnects. Router counter resets can affect totals.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .liquidGlassCard()
+        .accessibilityElement(children: .combine)
+    }
+
+    private func usageRow(_ title: String, download: UInt64, upload: UInt64) -> some View {
+        HStack {
+            Text(title)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(Self.format(download))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            Text(Self.format(upload))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .font(.subheadline.monospacedDigit())
+    }
+
+    private static func format(_ bytes: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
     }
 }
 

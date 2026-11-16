@@ -1,5 +1,49 @@
 import Foundation
 import Security
+import SwiftUI
+
+public enum AppTheme: String, CaseIterable, Identifiable, Hashable {
+    case system
+    case light
+    case dark
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    public var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
+public enum AppAccentColor: String, CaseIterable, Identifiable, Hashable {
+    case blue
+    case green
+    case purple
+    case orange
+
+    public var id: String { rawValue }
+    public var title: String { rawValue.capitalized }
+
+    public var color: Color {
+        switch self {
+        case .blue: .blue
+        case .green: .green
+        case .purple: .purple
+        case .orange: .orange
+        }
+    }
+}
 
 /// Seam around Keychain password storage so unit tests can inspect per-profile accounts.
 public protocol PasswordStore {
@@ -59,6 +103,9 @@ public final class SettingsStore: ObservableObject {
         static let activeProfileId = "active_router_profile_id"
         static let profileAliases = "profile_device_aliases"
         static let pollInterval = "poll_interval_seconds"
+        static let theme = "app_theme"
+        static let accentColor = "app_accent_color"
+        static let dataUsage = "data_usage_v1"
         static let migrated = "v2_profiles_migrated"
 
         // Legacy 1.x keys
@@ -70,15 +117,39 @@ public final class SettingsStore: ObservableObject {
 
     private let defaults: UserDefaults
     private let passwordStore: PasswordStore
+    private var usageByProfile: [String: ProfileUsage] = [:]
 
     @Published public private(set) var profiles: [RouterProfile] = []
     @Published public var activeProfileId: UUID? {
-        didSet { saveActiveProfileId() }
+        didSet {
+            saveActiveProfileId()
+            refreshDataUsageSummary()
+        }
     }
     @Published public var pollIntervalSeconds: Int {
         didSet { defaults.set(pollIntervalSeconds, forKey: Keys.pollInterval) }
     }
+    @Published public var theme: AppTheme {
+        didSet { defaults.set(theme.rawValue, forKey: Keys.theme) }
+    }
+    @Published public var accentColor: AppAccentColor {
+        didSet { defaults.set(accentColor.rawValue, forKey: Keys.accentColor) }
+    }
+    @Published public private(set) var dataUsageSummary = DataUsageSummary()
     @Published public private(set) var profileAliases: [String: [String: String]] = [:]
+
+    private struct ProfileUsage: Codable {
+        struct Day: Codable {
+            var downloadBytes: UInt64 = 0
+            var uploadBytes: UInt64 = 0
+        }
+
+        var lastDownloadCounter: UInt64?
+        var lastUploadCounter: UInt64?
+        var totalDownloadBytes: UInt64 = 0
+        var totalUploadBytes: UInt64 = 0
+        var days: [String: Day] = [:]
+    }
 
     public init(defaults: UserDefaults = .standard, passwordStore: PasswordStore = SystemKeychainStore()) {
         self.defaults = defaults
@@ -86,6 +157,12 @@ public final class SettingsStore: ObservableObject {
 
         let interval = defaults.integer(forKey: Keys.pollInterval)
         self.pollIntervalSeconds = interval > 0 ? interval : 2
+        self.theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .system
+        self.accentColor = AppAccentColor(rawValue: defaults.string(forKey: Keys.accentColor) ?? "") ?? .blue
+        if let data = defaults.data(forKey: Keys.dataUsage),
+           let decoded = try? JSONDecoder().decode([String: ProfileUsage].self, from: data) {
+            self.usageByProfile = decoded
+        }
 
         if defaults.bool(forKey: Keys.migrated) || defaults.data(forKey: Keys.profiles) != nil {
             if let data = defaults.data(forKey: Keys.profiles),
@@ -103,6 +180,7 @@ public final class SettingsStore: ObservableObject {
         } else {
             migrateFromV1()
         }
+        refreshDataUsageSummary()
     }
 
     public var activeProfile: RouterProfile? {
@@ -176,6 +254,8 @@ public final class SettingsStore: ObservableObject {
     public func deleteProfile(_ id: UUID) {
         profiles.removeAll { $0.id == id }
         passwordStore.deletePassword(forAccount: id.uuidString)
+        usageByProfile.removeValue(forKey: id.uuidString)
+        saveUsage()
         profileAliases.removeValue(forKey: id.uuidString)
         saveAliases()
         if activeProfileId == id {
@@ -194,6 +274,85 @@ public final class SettingsStore: ObservableObject {
         profiles[index].lastUsed = Date()
         activeProfileId = id
         saveProfiles()
+        refreshDataUsageSummary()
+    }
+
+    /// Records cumulative WAN counters. Comparing against the last persisted sample lets usage
+    /// catch up after the app was closed, provided the router did not reset its counters.
+    public func recordTrafficCounters(download: UInt64, upload: UInt64, for profileId: UUID, at date: Date = Date()) {
+        let key = profileId.uuidString
+        var usage = usageByProfile[key] ?? ProfileUsage()
+
+        guard let previousDownload = usage.lastDownloadCounter,
+              let previousUpload = usage.lastUploadCounter else {
+            usage.lastDownloadCounter = download
+            usage.lastUploadCounter = upload
+            usageByProfile[key] = usage
+            saveUsage()
+            refreshDataUsageSummary()
+            return
+        }
+
+        let downloadDelta = Self.usageCounterDelta(previous: previousDownload, current: download)
+        let uploadDelta = Self.usageCounterDelta(previous: previousUpload, current: upload)
+        usage.lastDownloadCounter = download
+        usage.lastUploadCounter = upload
+        usage.totalDownloadBytes += downloadDelta
+        usage.totalUploadBytes += uploadDelta
+
+        let dayKey = Self.dayKey(for: date)
+        var day = usage.days[dayKey] ?? ProfileUsage.Day()
+        day.downloadBytes += downloadDelta
+        day.uploadBytes += uploadDelta
+        usage.days[dayKey] = day
+
+        // Keep one year of daily detail while retaining all-time totals.
+        let cutoff = Self.dayKey(for: Calendar.current.date(byAdding: .day, value: -366, to: date) ?? date)
+        usage.days = usage.days.filter { $0.key >= cutoff }
+
+        usageByProfile[key] = usage
+        saveUsage()
+        refreshDataUsageSummary()
+    }
+
+    private func refreshDataUsageSummary() {
+        guard let profileId = activeProfile?.id,
+              let usage = usageByProfile[profileId.uuidString] else {
+            dataUsageSummary = DataUsageSummary()
+            return
+        }
+
+        let todayKey = Self.dayKey(for: Date())
+        let monthPrefix = String(todayKey.prefix(7))
+        let monthDays = usage.days.filter { $0.key.hasPrefix(monthPrefix) }.values
+        dataUsageSummary = DataUsageSummary(
+            todayDownloadBytes: usage.days[todayKey]?.downloadBytes ?? 0,
+            todayUploadBytes: usage.days[todayKey]?.uploadBytes ?? 0,
+            monthDownloadBytes: monthDays.reduce(0) { $0 + $1.downloadBytes },
+            monthUploadBytes: monthDays.reduce(0) { $0 + $1.uploadBytes },
+            totalDownloadBytes: usage.totalDownloadBytes,
+            totalUploadBytes: usage.totalUploadBytes
+        )
+    }
+
+    private func saveUsage() {
+        if let data = try? JSONEncoder().encode(usageByProfile) {
+            defaults.set(data, forKey: Keys.dataUsage)
+        }
+    }
+
+    private static func usageCounterDelta(previous: UInt64, current: UInt64) -> UInt64 {
+        if current >= previous { return current - previous }
+        if previous <= UInt64(UInt32.max), previous > UInt64(UInt32.max) / 2 {
+            return (UInt64(UInt32.max) + 1 - previous) + current
+        }
+        // The WAN session likely reset. Count bytes since the reset and resume from this value.
+        return current
+    }
+
+    private static func dayKey(for date: Date) -> String {
+        let parts = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }
 
     public func recordDetection(for profileId: UUID, model: String?, cfgMode: String?) {

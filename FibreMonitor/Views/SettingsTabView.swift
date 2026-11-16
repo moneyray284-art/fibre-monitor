@@ -74,6 +74,28 @@ public struct SettingsTabView: View {
                     )
                 }
 
+                Section("Appearance") {
+                    Picker("Theme", selection: $settings.theme) {
+                        ForEach(AppTheme.allCases) { theme in
+                            Text(theme.title).tag(theme)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Picker("Accent Color", selection: $settings.accentColor) {
+                        ForEach(AppAccentColor.allCases) { accent in
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill(accent.color)
+                                    .frame(width: 12, height: 12)
+                                Text(accent.title)
+                            }
+                            .tag(accent)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+
                 Section("Tools & Network") {
                     NavigationLink {
                         DiagnosticsScreen(viewModel: viewModel)

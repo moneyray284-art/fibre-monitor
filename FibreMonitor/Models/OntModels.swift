@@ -12,6 +12,18 @@ public struct TrafficState: Equatable, Sendable {
     public var peakDownloadMbps: Double = 0
     public var peakUploadMbps: Double = 0
     public var history: [ThroughputSample] = []
+    /// Cumulative counters from the active WAN interface, used for persisted usage totals.
+    public var cumulativeDownloadBytes: UInt64?
+    public var cumulativeUploadBytes: UInt64?
+}
+
+public struct DataUsageSummary: Equatable, Sendable {
+    public var todayDownloadBytes: UInt64 = 0
+    public var todayUploadBytes: UInt64 = 0
+    public var monthDownloadBytes: UInt64 = 0
+    public var monthUploadBytes: UInt64 = 0
+    public var totalDownloadBytes: UInt64 = 0
+    public var totalUploadBytes: UInt64 = 0
 }
 
 public struct WanInfo: Equatable, Sendable {

@@ -227,6 +227,11 @@ public final class MonitorViewModel: ObservableObject {
         defer { isRefreshing = false }
         do {
             traffic = try await client.pollTraffic()
+            if let profileId = settings.activeProfile?.id,
+               let downloaded = traffic.cumulativeDownloadBytes,
+               let uploaded = traffic.cumulativeUploadBytes {
+                settings.recordTrafficCounters(download: downloaded, upload: uploaded, for: profileId)
+            }
             if let activeId = settings.activeProfile?.id, let identity = await client.detectedIdentity {
                 settings.recordDetection(for: activeId, model: identity.model, cfgMode: identity.cfgMode)
             }
