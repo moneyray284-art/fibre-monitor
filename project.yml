@@ -26,8 +26,6 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mattdev0.fibremonitor
-        PRODUCT_NAME: LinkWave
-        PRODUCT_MODULE_NAME: FibreMonitor
         INFOPLIST_FILE: FibreMonitor/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIconOrange AppIconBlue AppIconPurple AppIconGreen"

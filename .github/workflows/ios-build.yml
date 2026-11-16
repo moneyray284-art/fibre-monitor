@@ -77,16 +77,16 @@ jobs:
       - name: Verify Info.plist
         run: |
           # Without a launch screen key iOS runs the app letterboxed (legacy mode).
-          PLIST=build/Build/Products/Release-iphoneos/LinkWave.app/Info.plist
+          PLIST=build/Build/Products/Release-iphoneos/FibreMonitor.app/Info.plist
           for key in UILaunchScreen NSLocalNetworkUsageDescription NSAppTransportSecurity; do
             /usr/libexec/PlistBuddy -c "Print :$key" "$PLIST" > /dev/null || { echo "::error::$key missing from built Info.plist"; exit 1; }
           done
           for icon in AppIconOrange AppIconBlue AppIconPurple AppIconGreen; do
             /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundleAlternateIcons:$icon" "$PLIST" > /dev/null || { echo "::error::Alternate icon $icon missing from built Info.plist"; exit 1; }
           done
-          APP=build/Build/Products/Release-iphoneos/LinkWave.app
+          APP=build/Build/Products/Release-iphoneos/FibreMonitor.app
           EXT="$APP/PlugIns/LinkWaveWidget.appex"
-          test -f "$APP/LinkWave" || { echo "::error::Release app executable is missing"; exit 1; }
+          test -f "$APP/FibreMonitor" || { echo "::error::Release app executable is missing"; exit 1; }
           test -d "$EXT" || { echo "::error::LinkWaveWidget.appex was not embedded in the app"; exit 1; }
           test -f "$EXT/LinkWaveWidget" || { echo "::error::Release widget executable is missing"; exit 1; }
           /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$EXT/Info.plist" | grep -q 'com.apple.widgetkit-extension' || { echo "::error::WidgetKit extension point is missing"; exit 1; }
@@ -101,7 +101,7 @@ jobs:
       - name: Package IPA
         run: |
           mkdir -p build/Payload
-          cp -r build/Build/Products/Release-iphoneos/LinkWave.app build/Payload/
+          cp -r build/Build/Products/Release-iphoneos/FibreMonitor.app build/Payload/LinkWave.app
           test -f build/Payload/LinkWave.app/PlugIns/LinkWaveWidget.appex/LinkWaveWidget || { echo "::error::Release widget was not packaged inside Payload"; exit 1; }
           cd build
           zip -r -q "$LINKWAVE_IPA_NAME" Payload
