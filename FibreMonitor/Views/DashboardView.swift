@@ -179,7 +179,7 @@ private struct CompactSpeedCard: View {
             )
         }
         .padding(.vertical, 2)
-        .liquidGlassCard(padding: 13)
+        .liquidGlassCard()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Live speed")
         .accessibilityValue(
@@ -228,7 +228,7 @@ private struct HomeUsageCard: View {
             HStack(spacing: 12) {
                 Image(systemName: "arrow.up.arrow.down.circle.fill")
                     .font(.title3)
-                    .foregroundStyle(.accentColor)
+                    .foregroundStyle(Color.accentColor)
                     .frame(width: 38, height: 38)
                     .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
@@ -250,7 +250,7 @@ private struct HomeUsageCard: View {
                     .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlassCard(padding: 13)
+            .liquidGlassCard()
         }
         .buttonStyle(.plain)
         .accessibilityHint("Opens the Usage tab")
