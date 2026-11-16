@@ -122,6 +122,7 @@ struct RouterProfileEditorView: View {
     @State private var host = ""
     @State private var username = "root"
     @State private var password = ""
+    @State private var routerType: RouterType = .huaweiONT
 
     private var trimmedHost: String { host.trimmingCharacters(in: .whitespaces) }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -141,6 +142,7 @@ struct RouterProfileEditorView: View {
                             host = template.host
                             username = template.username
                             password = ""
+                            routerType = .huaweiONT
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -183,6 +185,11 @@ struct RouterProfileEditorView: View {
                 }
 
                 Section {
+                    Picker("Router Type", selection: $routerType) {
+                        ForEach(RouterType.allCases) { type in
+                            Text(type.title).tag(type)
+                        }
+                    }
                     LabeledContent("Profile name") {
                         TextField("New router (MTN)", text: $name)
                             .multilineTextAlignment(.trailing)
@@ -207,7 +214,9 @@ struct RouterProfileEditorView: View {
                 } header: {
                     Text("Router login")
                 } footer: {
-                    if !trimmedHost.isEmpty && !isHostValid {
+                    if routerType == .generic {
+                        Text("Generic router monitoring depends on a compatible router adapter. Huawei-specific controls require Huawei ONT.")
+                    } else if !trimmedHost.isEmpty && !isHostValid {
                         Text("Enter a valid IP address or hostname without http:// (for example 192.168.2.1 or 192.168.100.1).")
                             .foregroundColor(.red)
                     } else {
@@ -241,6 +250,7 @@ struct RouterProfileEditorView: View {
                     name = profile.name
                     host = profile.host
                     username = profile.username
+                    routerType = profile.resolvedRouterType
                     password = settings.password(for: profile.id)
                 }
             }
@@ -255,13 +265,14 @@ struct RouterProfileEditorView: View {
     private func save() {
         switch mode {
         case .add:
-            let profile = RouterProfile(name: trimmedName, host: trimmedHost, username: username)
+            let profile = RouterProfile(name: trimmedName, host: trimmedHost, username: username, routerType: routerType)
             let saved = settings.addProfile(profile, password: password, select: true)
             onSave(saved)
         case .edit(var existing):
             existing.name = trimmedName
             existing.host = trimmedHost
             existing.username = username
+            existing.routerType = routerType
             settings.updateProfile(existing, password: password)
             onSave(existing)
         }

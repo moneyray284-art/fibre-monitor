@@ -51,23 +51,19 @@ public struct DashboardView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        HStack(spacing: 9) {
-                            ProfileAvatarView(size: 36)
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("LinkWave")
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.secondary)
-                                Text("Home")
-                                    .font(.headline.weight(.semibold))
-                                    .foregroundStyle(.primary)
-                            }
+                    HStack(spacing: 9) {
+                        ProfileAvatarView(size: 36)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("LinkWave")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            Text("Home")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.primary)
                         }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("LinkWave Home. Open profile and settings.")
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("LinkWave Home")
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
@@ -399,7 +395,7 @@ private struct HomeSummaryRow: View {
                     .font(.system(size: 9, weight: .medium, design: .rounded))
                     .lineLimit(1)
                 }
-                .frame(maxWidth: .infinity, minHeight: 108, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 108, maxHeight: .infinity, alignment: .topLeading)
                 .liquidGlassCard()
             }
             .buttonStyle(.plain)
@@ -428,12 +424,13 @@ private struct HomeSummaryRow: View {
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(Color.accentColor)
                 }
-                .frame(maxWidth: .infinity, minHeight: 108, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 108, maxHeight: .infinity, alignment: .topLeading)
                 .liquidGlassCard()
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Connected devices, \(onlineCount) online. Open Clients tab.")
         }
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private static func format(_ bytes: UInt64) -> String {
@@ -602,4 +599,3 @@ private struct ErrorBanner: View {
         .liquidGlassPanel(padding: 12)
     }
 }
-

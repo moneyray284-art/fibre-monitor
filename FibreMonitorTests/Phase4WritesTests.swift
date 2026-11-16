@@ -275,9 +275,15 @@ final class Phase4WritesTests: XCTestCase {
 
         let all = HuaweiOntClient.parseWlanBasic(Fixtures.gnmtnWlanBasic())
         let c1WpaWpa2 = try XCTUnwrap(all.first { $0.ssidIndex == 1 })
-        XCTAssertThrowsError(try HuaweiOntClient.wifiEditRequest(config: c1WpaWpa2, newSsid: "X", newPassword: "Password123", token: "t")) { err in
-            XCTAssertEqual(err as? OntError, .unsupportedWifiSecurity("WPA/WPA2-PSK"))
-        }
+        XCTAssertTrue(c1WpaWpa2.authMode.isEditableWpa2Or3Psk)
+        let mixedRequest = try HuaweiOntClient.wifiEditRequest(config: c1WpaWpa2, newSsid: "MixedNet", newPassword: "Password123", token: "t")
+        let mixedFields = Dictionary(mixedRequest.form, uniquingKeysWith: { _, latest in latest })
+        XCTAssertEqual(mixedFields["y.BeaconType"], "WPAand11i")
+        XCTAssertEqual(mixedFields["y.SSID"], "MixedNet")
+        XCTAssertEqual(mixedFields["k.PreSharedKey"], "Password123")
+        XCTAssertEqual(mixedFields["w.MixAuthenticationMode"], "PSKAuthentication")
+        XCTAssertEqual(mixedFields["w.MixEncryptionModes"], "TKIPandAESEncryption")
+        XCTAssertEqual(mixedFields["w.WPAEncryptionModes"], "TKIPEncryption")
 
         let c5Open = try XCTUnwrap(all.first { $0.ssidIndex == 5 })
         XCTAssertThrowsError(try HuaweiOntClient.wifiEditRequest(config: c5Open, newSsid: "X", newPassword: "Password123", token: "t")) { err in

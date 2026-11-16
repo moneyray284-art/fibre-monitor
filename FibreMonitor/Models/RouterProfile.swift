@@ -1,5 +1,18 @@
 import Foundation
 
+public enum RouterType: String, Codable, CaseIterable, Identifiable, Sendable {
+    case huaweiONT
+    case generic
+
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .huaweiONT: "Huawei ONT"
+        case .generic: "Generic router"
+        }
+    }
+}
+
 /// A saved Huawei ONT connection profile with its own credentials and device aliases.
 public struct RouterProfile: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
@@ -9,6 +22,10 @@ public struct RouterProfile: Identifiable, Codable, Equatable, Sendable {
     public var lastUsed: Date?
     public var detectedModel: String?
     public var cfgMode: String?
+    /// Optional for backwards-compatible decoding of profiles saved before v2.2.
+    public var routerType: RouterType?
+
+    public var resolvedRouterType: RouterType { routerType ?? .huaweiONT }
 
     public init(
         id: UUID = UUID(),
@@ -17,7 +34,8 @@ public struct RouterProfile: Identifiable, Codable, Equatable, Sendable {
         username: String = "root",
         lastUsed: Date? = nil,
         detectedModel: String? = nil,
-        cfgMode: String? = nil
+        cfgMode: String? = nil,
+        routerType: RouterType? = .huaweiONT
     ) {
         self.id = id
         self.name = name
@@ -26,6 +44,7 @@ public struct RouterProfile: Identifiable, Codable, Equatable, Sendable {
         self.lastUsed = lastUsed
         self.detectedModel = detectedModel
         self.cfgMode = cfgMode
+        self.routerType = routerType
     }
 
     /// Pre-filled template for the MTN GNMTNNCE HG8145X6-10 router (password is never prefilled).

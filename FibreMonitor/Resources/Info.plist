@@ -31,6 +31,14 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>LinkWave connects to your fibre router on the local network to show its speed, signal and connected devices.</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.linkwave.refresh</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>
@@ -43,4 +51,3 @@
 	</array>
 </dict>
 </plist>
-

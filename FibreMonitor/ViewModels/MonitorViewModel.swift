@@ -15,6 +15,7 @@ public final class MonitorViewModel: ObservableObject {
     @Published public private(set) var wan = WanInfo()
     @Published public private(set) var optical = OpticalInfo()
     @Published public private(set) var devices: [OntDevice] = []
+    @Published public private(set) var blockedDevices: [BlockedRouterDevice] = []
     @Published public private(set) var health = RouterHealth()
     @Published public private(set) var wifi = WifiState()
     @Published public private(set) var lan = LanInfo()
@@ -38,7 +39,8 @@ public final class MonitorViewModel: ObservableObject {
     @Published public private(set) var isPhoneOnWifi = true
 
     public let settings: SettingsStore
-    private let client: HuaweiOntClient
+    private var client: any RouterProvider
+    private let transport: OntTransport
     private let pathMonitor = NWPathMonitor()
     private var pollTask: Task<Void, Never>?
     private var reachabilityFailureCount = 0
@@ -54,7 +56,8 @@ public final class MonitorViewModel: ObservableObject {
 
     public init(settings: SettingsStore = .shared, transport: OntTransport = URLSessionOntTransport()) {
         self.settings = settings
-        self.client = HuaweiOntClient(credentials: settings.credentials, transport: transport)
+        self.transport = transport
+        self.client = RouterProviderFactory.make(profile: settings.activeProfile, credentials: settings.credentials, transport: transport)
         self.awaitingRouterSelection = settings.profiles.count >= 2
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let onWifi = path.usesInterfaceType(.wifi)
@@ -72,6 +75,7 @@ public final class MonitorViewModel: ObservableObject {
     public var onlineDevices: [OntDevice] { devices.filter(\.isOnline) }
 
     public var displayModelName: String {
+        if settings.activeProfile?.resolvedRouterType == .generic { return "Generic router" }
         if !health.model.isEmpty { return health.model }
         if let detected = settings.activeProfile?.detectedModel, !detected.isEmpty { return detected }
         return "OptiXstar ONT"
@@ -140,6 +144,7 @@ public final class MonitorViewModel: ObservableObject {
 
         await client.logout()
         settings.selectProfile(profile.id)
+        client = RouterProviderFactory.make(profile: settings.activeProfile, credentials: settings.credentials, transport: transport)
         await client.switchCredentials(settings.credentials)
         await pollOnce()
     }
@@ -161,6 +166,7 @@ public final class MonitorViewModel: ObservableObject {
         awaitingRouterSelection = false
         Task {
             await client.logout()
+            client = RouterProviderFactory.make(profile: settings.activeProfile, credentials: settings.credentials, transport: transport)
             await client.switchCredentials(settings.credentials)
             if settings.isConfigured {
                 await pollOnce()
@@ -176,6 +182,7 @@ public final class MonitorViewModel: ObservableObject {
         isLoggedOut = false
         errorMessage = nil
         isConnectionFailure = false
+        client = RouterProviderFactory.make(profile: settings.activeProfile, credentials: settings.credentials, transport: transport)
         await client.switchCredentials(settings.credentials)
         await pollOnce()
     }
@@ -192,6 +199,7 @@ public final class MonitorViewModel: ObservableObject {
 
     private func clearViewState() {
         traffic = TrafficState()
+        blockedDevices = []
         wan = WanInfo()
         optical = OpticalInfo()
         devices = []
@@ -226,7 +234,7 @@ public final class MonitorViewModel: ObservableObject {
             errorMessage = OntError.notConfigured.errorDescription
             return
         }
-        if await client.isLoginBlocked {
+        if await client.loginIsBlocked() {
             isConnected = false
             isConnectionFailure = false
             errorMessage = OntError.loginRejected.errorDescription
@@ -236,14 +244,14 @@ public final class MonitorViewModel: ObservableObject {
         defer { isRefreshing = false }
         do {
             let requestStartedAt = ProcessInfo.processInfo.systemUptime
-            traffic = try await client.pollTraffic()
+            traffic = try await client.pollTraffic(now: Date())
             routerResponseTimeMs = max(0, Int((ProcessInfo.processInfo.systemUptime - requestStartedAt) * 1_000))
             if let profileId = settings.activeProfile?.id,
                let downloaded = traffic.cumulativeDownloadBytes,
                let uploaded = traffic.cumulativeUploadBytes {
                 settings.recordTrafficCounters(download: downloaded, upload: uploaded, for: profileId)
             }
-            if let activeId = settings.activeProfile?.id, let identity = await client.detectedIdentity {
+            if let activeId = settings.activeProfile?.id, let identity = await client.routerIdentity() {
                 settings.recordDetection(for: activeId, model: identity.model, cfgMode: identity.cfgMode)
             }
             if Date().timeIntervalSince(lastSlowPoll) >= slowInterval {
@@ -257,6 +265,9 @@ public final class MonitorViewModel: ObservableObject {
                     if let h = try? await client.fetchHealth() { health = h }
                 }
                 if let d = try? await client.fetchDevices() { devices = d }
+                if let blocked = try? await client.fetchWlanMacBlacklist() {
+                    blockedDevices = blocked.activeBlockedDevices
+                }
                 if Date().timeIntervalSince(lastLanPoll) >= lanInterval {
                     lastLanPoll = Date()
                     if let l = try? await client.fetchLan() { lan = l }
@@ -428,6 +439,46 @@ public final class MonitorViewModel: ObservableObject {
         }
     }
 
+    public func blockWifiDevice(_ device: OntDevice) async {
+        let ssidIndex: Int
+        switch device.port {
+        case .wifi24(let index), .wifi5(let index): ssidIndex = index
+        case .lan, .other:
+            actionMessage = "Only a Wi-Fi client can be blocked from the WLAN blacklist."
+            return
+        }
+        guard ssidIndex > 0 else {
+            actionMessage = "The router did not report this device's Wi-Fi network, so it cannot be blocked safely."
+            return
+        }
+        do {
+            let state = try await client.blockWifiDevice(
+                device,
+                name: name(for: device),
+                ssidName: "SSID-\(ssidIndex)"
+            )
+            blockedDevices = state.activeBlockedDevices
+            devices = (try? await client.fetchDevices()) ?? devices
+            Haptics.notify(.success)
+            actionMessage = "Blocked \(name(for: device)) from Wi-Fi."
+        } catch {
+            Haptics.notify(.error)
+            actionMessage = Self.describe(error, host: settings.host)
+        }
+    }
+
+    public func unblockWifiDevice(_ device: BlockedRouterDevice) async {
+        do {
+            let state = try await client.unblockWifiDevice(device)
+            blockedDevices = state.activeBlockedDevices
+            Haptics.notify(.success)
+            actionMessage = "Unblocked \(device.name.isEmpty ? device.mac : device.name)."
+        } catch {
+            Haptics.notify(.error)
+            actionMessage = Self.describe(error, host: settings.host)
+        }
+    }
+
     static func bandName(_ band: String) -> String {
         band.replacingOccurrences(of: "GHz", with: " GHz")
     }
@@ -485,4 +536,3 @@ public enum Haptics {
         generator.impactOccurred()
     }
 }
-

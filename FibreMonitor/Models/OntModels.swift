@@ -284,6 +284,33 @@ public struct OntDevice: Identifiable, Equatable, Sendable {
     }
 }
 
+/// A device entry stored in the Huawei WLAN MAC blacklist.
+public struct BlockedRouterDevice: Identifiable, Equatable, Sendable {
+    public var id: String { domain }
+    public var domain: String
+    public var mac: String
+    public var ssidName: String
+    public var name: String
+
+    public init(domain: String, mac: String, ssidName: String, name: String = "") {
+        self.domain = domain
+        self.mac = mac
+        self.ssidName = ssidName
+        self.name = name
+    }
+}
+
+public struct WlanMacBlacklistState: Equatable, Sendable {
+    public var isEnabled: Bool
+    /// Huawei uses 0 for blacklist and 1 for whitelist.
+    public var policy: String
+    public var devices: [BlockedRouterDevice]
+
+    public var activeBlockedDevices: [BlockedRouterDevice] {
+        isEnabled && policy == "0" ? devices : []
+    }
+}
+
 public enum OntError: LocalizedError, Equatable {
     case notConfigured
     case loginRejected
@@ -298,6 +325,7 @@ public enum OntError: LocalizedError, Equatable {
     case invalidWifiPassword
     case unsupportedWifiSecurity(String)
     case incompleteWifiConfig([String])
+    case macFilterPolicyConflict
 
     public var errorDescription: String? {
         switch self {
@@ -325,6 +353,8 @@ public enum OntError: LocalizedError, Equatable {
             return "This network uses \(mode). Change it in the router's web page."
         case .incompleteWifiConfig(let fields):
             return "Cannot edit this Wi-Fi network safely because required settings were missing from WlanBasic.asp: \(fields.joined(separator: ", "))."
+        case .macFilterPolicyConflict:
+            return "The router has existing access-control entries under a different policy. Clear those entries in router settings before enabling the blacklist."
         case .notConfirmed:
             return "Sent, but the router hasn't confirmed the change yet. If this iPhone was on that band, reconnect to Wi-Fi and refresh."
         }
@@ -427,9 +457,9 @@ public enum WifiAuthMode: Equatable, Sendable {
         }
     }
 
-    /// Modes supported by the captured `#704` SSID/password edit flow (WPA2-PSK only).
+    /// Modes supported by the captured `#704` SSID/password edit flow.
     public var isEditableWpa2Or3Psk: Bool {
-        self == .wpa2Psk
+        self == .wpa2Psk || self == .wpaWpa2Psk
     }
 
     /// Authentication label shown in the UI and QR sheet.
@@ -590,9 +620,13 @@ public struct WifiSsidConfig: Equatable, Sendable, Identifiable {
         if encryptionLevel.isEmpty { missing.append("w.WEPEncryptionLevel") }
         if wpaRekey.isEmpty { missing.append("y.X_HW_GroupRekey") }
         if !hasWlanWifiRecord || standard.isEmpty { missing.append("w.Standard") }
-        if authMode == .wpa2Psk {
+        if authMode == .wpa2Psk || authMode == .wpaWpa2Psk {
             if ieee11iAuthenticationMode.isEmpty { missing.append("y.IEEE11iAuthenticationMode") }
             if ieee11iEncryptionModes.isEmpty { missing.append("y.IEEE11iEncryptionModes") }
+        }
+        if authMode == .wpaWpa2Psk {
+            if mixAuthenticationMode.isEmpty { missing.append("w.MixAuthenticationMode") }
+            if mixEncryptionModes.isEmpty { missing.append("w.MixEncryptionModes") }
         }
         if !hasPskRecord || isPasswordMasked || psk.isEmpty { missing.append("PreSharedKey") }
         if !hasWpsRecord || wpsEnable.isEmpty || wpsConfigMethod.isEmpty || wpsPinGenerator.isEmpty || wpsDevicePassword.isEmpty {
@@ -692,4 +726,3 @@ public enum TrafficRateFormatter {
         return "\(clamped) B/s"
     }
 }
-

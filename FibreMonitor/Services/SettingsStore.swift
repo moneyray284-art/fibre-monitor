@@ -298,17 +298,18 @@ public final class SettingsStore: ObservableObject {
         var observedDays = Set(usage.observedDayKeys ?? Array(usage.days.keys))
         var incompleteDays = Set(usage.incompleteDayKeys ?? [])
 
-        if let previousSample = usage.lastCounterSampleAt,
-           date.timeIntervalSince(previousSample) > 5 * 60 {
+        if let previousSample = usage.lastCounterSampleAt {
             let calendar = Calendar.current
             var cursor = calendar.startOfDay(for: previousSample)
             let finalDay = calendar.startOfDay(for: date)
             var daysMarked = 0
-            while cursor <= finalDay && daysMarked < 367 {
-                incompleteDays.insert(Self.dayKey(for: cursor))
-                daysMarked += 1
-                guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
-                cursor = next
+            if cursor < finalDay {
+                while cursor <= finalDay && daysMarked < 367 {
+                    incompleteDays.insert(Self.dayKey(for: cursor))
+                    daysMarked += 1
+                    guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+                    cursor = next
+                }
             }
         }
 
@@ -594,4 +595,3 @@ public final class SettingsStore: ObservableObject {
         return trimmed.isEmpty ? "root" : trimmed
     }
 }
-

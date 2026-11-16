@@ -442,6 +442,126 @@ public actor HuaweiOntClient {
         return try await fetchDevices()
     }
 
+    // MARK: WLAN access control
+
+    private static let wlanMacFilterPage = "/html/bbsp/wlanmacfilter/wlanmacfilter.asp"
+    private static let wlanMacFilterObject = "InternetGatewayDevice.X_HW_Security.WLANMacFilter"
+
+    public func fetchWlanMacBlacklist() async throws -> WlanMacBlacklistState {
+        let page = try await fetch(.init(.get, Self.wlanMacFilterPage, ajax: false), expect: "MacFilterSrc")
+        return Self.parseWlanMacBlacklist(page)
+    }
+
+    static func parseWlanMacBlacklist(_ page: String) -> WlanMacBlacklistState {
+        let rows = HuaweiJs.instances(of: "stMacFilter", in: page)
+        let devices = rows.compactMap { row -> BlockedRouterDevice? in
+            guard let domain = row.first else { return nil }
+            let values = Array(row.dropFirst())
+            let mac = values.map(normalizedFilterMac).first(where: { !$0.isEmpty }) ?? ""
+            let ssidName = values.first(where: { $0.localizedCaseInsensitiveContains("ssid") }) ?? ""
+            let name = values.first(where: {
+                !$0.localizedCaseInsensitiveContains("ssid") && normalizedFilterMac($0).isEmpty
+            }) ?? ""
+            guard domain.hasPrefix(Self.wlanMacFilterObject + "."),
+                  let index = Int(domain.dropFirst(Self.wlanMacFilterObject.count + 1)), index > 0,
+                  !mac.isEmpty else { return nil }
+            return BlockedRouterDevice(
+                domain: domain,
+                mac: mac,
+                ssidName: ssidName,
+                name: name
+            )
+        }
+        return WlanMacBlacklistState(
+            isEnabled: HuaweiJs.stringVar("enableFilter", in: page) == "1",
+            policy: HuaweiJs.stringVar("Mode", in: page) ?? "",
+            devices: devices
+        )
+    }
+
+    private static func normalizedFilterMac(_ value: String) -> String {
+        let mac = HuaweiJs.clean(value).replacingOccurrences(of: "-", with: ":").lowercased()
+        let octets = mac.split(separator: ":")
+        guard octets.count == 6,
+              octets.allSatisfy({ $0.count == 2 && $0.allSatisfy(\.isHexDigit) }),
+              let first = UInt8(octets[0], radix: 16), first & 1 == 0,
+              mac != "00:00:00:00:00:00" else { return "" }
+        return mac
+    }
+
+    public func blockWifiDevice(
+        _ device: OntDevice,
+        name: String,
+        ssidName: String
+    ) async throws -> WlanMacBlacklistState {
+        let isWifi: Bool
+        switch device.port {
+        case .wifi24, .wifi5: isWifi = true
+        case .lan, .other: isWifi = false
+        }
+        guard isWifi, ssidName.hasPrefix("SSID-"),
+              let index = Int(ssidName.dropFirst("SSID-".count)), (1...8).contains(index) else {
+            throw OntError.badResponse("Wi-Fi association")
+        }
+        let mac = Self.normalizedFilterMac(device.mac)
+        guard !mac.isEmpty else { throw OntError.badResponse("device MAC address") }
+
+        var state = try await fetchWlanMacBlacklist()
+        if state.policy != "0" || !state.isEnabled {
+            // Changing an existing whitelist would invert the meaning of every current entry.
+            // Only switch policy automatically when both WLAN and LAN filter lists are empty.
+            let wiredPage = try await fetch(.init(.get, "/html/bbsp/macfilter/macfilter.asp", ajax: false), expect: "MacFilter")
+            let hasWiredEntries = !HuaweiJs.instances(of: "stMacFilter", in: wiredPage).isEmpty
+            guard state.devices.isEmpty, !hasWiredEntries else { throw OntError.macFilterPolicyConflict }
+            let token = try await freshTokenLoggingIn()
+            _ = try await transport.send(.init(.post,
+                "/html/bbsp/wlanmacfilter/set.cgi?x=InternetGatewayDevice.X_HW_Security&RequestFile=html/bbsp/wlanmacfilter/wlanmacfilter.asp",
+                form: [
+                    ("x.MacFilterPolicy", "0"),
+                    ("x.MacFilterRight", "1"),
+                    ("x.X_HW_Token", token)
+                ], ajax: false), host: credentials.host)
+            state = try await fetchWlanMacBlacklist()
+            guard state.policy == "0", state.isEnabled, state.devices.isEmpty else {
+                throw OntError.notConfirmed
+            }
+        }
+
+        if state.activeBlockedDevices.contains(where: { $0.mac == mac }) { return state }
+        let token = try await freshTokenLoggingIn()
+        let path = "/html/bbsp/wlanmacfilter/add.cgi?x=\(Self.wlanMacFilterObject)&RequestFile=html/bbsp/wlanmacfilter/wlanmacfilter.asp"
+        _ = try await transport.send(.init(.post, path, form: [
+            ("x.SourceMACAddress", mac),
+            ("x.SSIDName", ssidName),
+            ("x.DeviceName", name),
+            ("x.Enable", "1"),
+            ("x.X_HW_Token", token)
+        ], ajax: false), host: credentials.host)
+
+        state = try await fetchWlanMacBlacklist()
+        guard state.activeBlockedDevices.contains(where: { $0.mac == mac }) else {
+            throw OntError.notConfirmed
+        }
+        return state
+    }
+
+    public func unblockWifiDevice(_ device: BlockedRouterDevice) async throws -> WlanMacBlacklistState {
+        let prefix = Self.wlanMacFilterObject + "."
+        guard device.domain.hasPrefix(prefix),
+              let index = Int(device.domain.dropFirst(prefix.count)), index > 0 else {
+            throw OntError.badResponse("blacklist record")
+        }
+        let token = try await freshTokenLoggingIn()
+        let path = "/html/bbsp/wlanmacfilter/del.cgi?x=\(Self.wlanMacFilterObject)&RequestFile=html/bbsp/wlanmacfilter/wlanmacfilter.asp"
+        _ = try await transport.send(.init(.post, path, form: [
+            (device.domain, ""),
+            ("x.X_HW_Token", token)
+        ], ajax: false), host: credentials.host)
+        let state = try await fetchWlanMacBlacklist()
+        guard !state.devices.contains(where: { $0.mac == device.mac }) else { throw OntError.notConfirmed }
+        return state
+    }
+
     // MARK: Router health
 
     private static func looksLikeLoginPage(_ text: String) -> Bool {
@@ -706,13 +826,13 @@ public actor HuaweiOntClient {
             ("w.Enable", config.enable),
             ("w.Standard", config.standard),
             ("w.BasicAuthenticationMode", config.basicAuthenticationMode),
-            ("w.BasicEncryptionModes", encryptionMode),
-            ("w.WPAAuthenticationMode", "EAPAuthentication"),
-            ("w.WPAEncryptionModes", encryptionMode),
+            ("w.BasicEncryptionModes", config.basicEncryptionModes),
+            ("w.WPAAuthenticationMode", config.wpaAuthenticationMode),
+            ("w.WPAEncryptionModes", config.wpaEncryptionModes),
             ("w.IEEE11iAuthenticationMode", ieeeAuth),
             ("w.IEEE11iEncryptionModes", encryptionMode),
-            ("w.MixAuthenticationMode", "EAPAuthentication"),
-            ("w.MixEncryptionModes", encryptionMode),
+            ("w.MixAuthenticationMode", config.mixAuthenticationMode),
+            ("w.MixEncryptionModes", config.mixEncryptionModes),
             ("w.SSIDAdvertisementEnabled", config.wlHide),
             ("w.WMMEnable", config.wmmEnable),
             ("w.MaxAssociateNum", config.deviceNum),
@@ -943,4 +1063,3 @@ public actor HuaweiOntClient {
         }
     }
 }
-
