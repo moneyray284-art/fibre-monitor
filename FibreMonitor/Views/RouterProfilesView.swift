@@ -226,6 +226,7 @@ struct RouterProfileEditorView: View {
             }
             .navigationTitle(isEditing ? "Edit Router" : "Add Router")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .tabBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

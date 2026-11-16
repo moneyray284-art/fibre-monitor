@@ -9,7 +9,7 @@ on:
         description: 'Publish as a GitHub Release'
         required: false
         type: boolean
-        default: true
+        default: false
       release_tag:
         description: 'Release tag (default: v<MARKETING_VERSION>-ios)'
         required: false
@@ -39,6 +39,16 @@ jobs:
       - name: Install XcodeGen
         run: |
           brew install xcodegen
+
+      - name: Generate LinkWave app icons
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Render app icon asset sets
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          python tools/generate_linkwave_icons.py
 
       - name: Generate Xcode Project
         working-directory: .
@@ -74,6 +84,13 @@ jobs:
           for key in UILaunchScreen NSLocalNetworkUsageDescription NSAppTransportSecurity; do
             /usr/libexec/PlistBuddy -c "Print :$key" "$PLIST" > /dev/null || { echo "::error::$key missing from built Info.plist"; exit 1; }
           done
+          for icon in AppIconOrange AppIconBlue AppIconPurple AppIconGreen; do
+            /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundleAlternateIcons:$icon" "$PLIST" > /dev/null || { echo "::error::Alternate icon $icon missing from built Info.plist"; exit 1; }
+          done
+          APP=build/Build/Products/Release-iphoneos/FibreMonitor.app
+          EXT="$APP/PlugIns/LinkWaveWidget.appex"
+          test -d "$EXT" || { echo "::error::LinkWaveWidget.appex was not embedded in the app"; exit 1; }
+          /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$EXT/Info.plist" | grep -q 'com.apple.widgetkit-extension' || { echo "::error::WidgetKit extension point is missing"; exit 1; }
           echo "Version: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST") ($(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST"))"
 
       - name: Package IPA
@@ -106,4 +123,3 @@ jobs:
             --notes "Unsigned build for Huawei OptiXstar HG8145X6 fibre routers. Install with Sideloadly, AltStore or SideStore." \
             --draft=false \
             --prerelease=false || gh release upload "$TAG" build/LinkWave.ipa --clobber
-

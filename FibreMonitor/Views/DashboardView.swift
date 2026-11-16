@@ -34,6 +34,7 @@ public struct DashboardView: View {
                         HomeSummaryRow(
                             summary: settings.dataUsageSummary,
                             onlineCount: viewModel.onlineDevices.count,
+                            offlineCount: viewModel.devices.filter { !$0.isOnline }.count,
                             openUsage: { viewModel.selectedTab = .usage },
                             openClients: { viewModel.selectedTab = .clients }
                         )
@@ -47,23 +48,22 @@ public struct DashboardView: View {
             .background { LiquidGlassBackground() }
             .liquidGlassScrollEdges()
             .refreshable { await viewModel.refreshAll() }
-            .navigationTitle("")
+            .navigationTitle("Home")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 9) {
-                        ProfileAvatarView(size: 36)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("LinkWave")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                            Text("Home")
-                                .font(.headline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                        }
+                    ProfileAvatarPickerButton(size: 38)
+                        .frame(width: 38, height: 38)
+                }
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 0) {
+                        Text("LinkWave")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Text("Home")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(.primary)
                     }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("LinkWave Home")
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
@@ -73,21 +73,12 @@ public struct DashboardView: View {
                     }
                     .accessibilityLabel("Settings")
 
-                    Button {
-                        Task { await viewModel.refreshAll() }
-                    } label: {
-                        if viewModel.isRefreshing {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                    .accessibilityLabel("Refresh")
-                    .disabled(viewModel.isRefreshing || !settings.isConfigured)
+                    RouterSyncToolbarControl(viewModel: viewModel, isEnabled: settings.isConfigured)
                 }
             }
             .navigationDestination(isPresented: $showSettings) {
                 SettingsTabView(viewModel: viewModel)
+                    .toolbar(.hidden, for: .tabBar)
             }
         }
     }
@@ -138,11 +129,6 @@ private struct RouterHeaderCard: View {
                 Text(statusText)
                     .font(.caption.weight(.bold))
                     .foregroundColor(statusColor)
-                if let last = viewModel.lastUpdate, viewModel.isConnected, !viewModel.isLoggedOut {
-                    Text("• Updated \(last.formatted(date: .omitted, time: .standard))")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
                 Spacer()
                 if viewModel.isLoggedOut {
                     Button("Reconnect") {
@@ -363,6 +349,7 @@ private struct CompactSpeedCard: View {
 private struct HomeSummaryRow: View {
     let summary: DataUsageSummary
     let onlineCount: Int
+    let offlineCount: Int
     let openUsage: () -> Void
     let openClients: () -> Void
 
@@ -419,6 +406,9 @@ private struct HomeSummaryRow: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
                     }
+                    Text("\(offlineCount) offline")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                     Label("View clients", systemImage: "chevron.right")
                         .font(.caption2.weight(.medium))
@@ -428,7 +418,7 @@ private struct HomeSummaryRow: View {
                 .liquidGlassCard()
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Connected devices, \(onlineCount) online. Open Clients tab.")
+            .accessibilityLabel("Connected devices, \(onlineCount) online and \(offlineCount) offline. Open Clients tab.")
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }

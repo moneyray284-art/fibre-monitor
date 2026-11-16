@@ -43,20 +43,12 @@ public struct UsageTabView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await viewModel.refreshAll() }
-                    } label: {
-                        if viewModel.isRefreshing {
-                            ProgressView()
-                        } else {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                    }
-                    .disabled(viewModel.isRefreshing || !settings.isConfigured)
+                    RouterSyncToolbarControl(viewModel: viewModel, isEnabled: settings.isConfigured)
                 }
             }
             .navigationDestination(isPresented: $showSettings) {
                 SettingsTabView(viewModel: viewModel)
+                    .toolbar(.hidden, for: .tabBar)
             }
         }
     }
@@ -224,6 +216,15 @@ private struct DailyUsageHistoryCard: View {
     let todayDownloadBytes: UInt64
     let todayUploadBytes: UInt64
     let missingDayCount: Int
+    @State private var selectedDate = Date()
+
+    private var selectedPoint: DailyUsagePoint? {
+        points.first { Calendar.current.isDate($0.date, inSameDayAs: selectedDate) }
+    }
+
+    private var isSelectedToday: Bool {
+        Calendar.current.isDateInToday(selectedDate)
+    }
 
     private var maximumBytes: Double {
         max(1, Double(points.compactMap { barBytes(for: $0) }.max() ?? 0))
@@ -260,10 +261,17 @@ private struct DailyUsageHistoryCard: View {
             } else {
                 HStack(alignment: .bottom, spacing: 7) {
                     ForEach(points) { point in
-                        dayBar(point)
+                        Button {
+                            selectedDate = point.date
+                        } label: {
+                            dayBar(point, isSelected: Calendar.current.isDate(point.date, inSameDayAs: selectedDate))
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .frame(height: 138)
+
+                selectedUsageDetails
             }
 
             if hasPartialTodayUsage {
@@ -280,7 +288,35 @@ private struct DailyUsageHistoryCard: View {
         .liquidGlassCard()
     }
 
-    private func dayBar(_ point: DailyUsagePoint) -> some View {
+    private var selectedUsageDetails: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(selectedDate.formatted(date: .long, time: .omitted))
+                .font(.subheadline.weight(.semibold))
+
+            HStack(spacing: 8) {
+                usageValue("Download", bytes: isSelectedToday ? todayDownloadBytes : selectedPoint?.downloadBytes)
+                usageValue("Upload", bytes: isSelectedToday ? todayUploadBytes : selectedPoint?.uploadBytes)
+                usageValue("Total", bytes: isSelectedToday ? todayTotalBytes : selectedPoint?.totalBytes)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 2)
+    }
+
+    private func usageValue(_ title: String, bytes: UInt64?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(bytes.map(Self.format) ?? "Incomplete")
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func dayBar(_ point: DailyUsagePoint, isSelected: Bool) -> some View {
         let displayedBytes = barBytes(for: point)
         return VStack(spacing: 6) {
             GeometryReader { geometry in
@@ -301,6 +337,11 @@ private struct DailyUsageHistoryCard: View {
                                     .foregroundColor(.secondary)
                             }
                     }
+
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .stroke(Color.primary.opacity(0.68), lineWidth: 1.5)
+                    }
                 }
             }
             .accessibilityElement(children: .ignore)
@@ -308,9 +349,10 @@ private struct DailyUsageHistoryCard: View {
             .accessibilityValue(accessibilityValue(for: point, displayedBytes: displayedBytes))
 
             Text(point.label)
-                .font(.caption2)
-                .foregroundColor(.secondary)
+                .font(.system(size: 10))
+                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity)
     }
@@ -327,4 +369,3 @@ private struct DailyUsageHistoryCard: View {
         ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
     }
 }
-

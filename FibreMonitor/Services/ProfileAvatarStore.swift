@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
 import UIKit
 
 @MainActor
@@ -103,3 +105,105 @@ public struct ProfileAvatarView: View {
     }
 }
 
+public struct ProfileAvatarPickerButton: View {
+    @ObservedObject private var store = ProfileAvatarStore.shared
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var isShowingPhotos = false
+    @State private var isImportingFile = false
+    @State private var errorMessage: String?
+
+    private let size: CGFloat
+
+    public init(size: CGFloat = 38) {
+        self.size = size
+    }
+
+    public var body: some View {
+        Menu {
+            Button {
+                isShowingPhotos = true
+            } label: {
+                Label("Choose from Photos", systemImage: "photo")
+            }
+            Button {
+                isImportingFile = true
+            } label: {
+                Label("Choose from Files", systemImage: "folder")
+            }
+            if store.image != nil {
+                Button(role: .destructive) {
+                    store.remove()
+                } label: {
+                    Label("Remove Photo", systemImage: "person.crop.circle.badge.xmark")
+                }
+            }
+        } label: {
+            ProfileAvatarView(size: size)
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .contentShape(Circle())
+        .accessibilityLabel("Profile photo options")
+        .photosPicker(isPresented: $isShowingPhotos, selection: $selectedPhoto, matching: .images)
+        .fileImporter(
+            isPresented: $isImportingFile,
+            allowedContentTypes: [.image],
+            allowsMultipleSelection: false,
+            onCompletion: { result in
+                if case .success(let urls) = result, let url = urls.first {
+                    importImage(from: url)
+                } else if case .failure(let error) = result {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        )
+        .onChange(of: selectedPhoto) { item in
+            guard let item else { return }
+            Task { await loadImage(from: item) }
+        }
+        .alert(
+            "Couldn’t Update Profile Photo",
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "Please choose another image.")
+        }
+    }
+
+    @MainActor
+    private func loadImage(from item: PhotosPickerItem) async {
+        defer { selectedPhoto = nil }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else {
+                errorMessage = "The selected photo couldn’t be opened."
+                return
+            }
+            try store.save(image)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func importImage(from url: URL) {
+        let didStartAccessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessing { url.stopAccessingSecurityScopedResource() }
+        }
+        do {
+            let data = try Data(contentsOf: url)
+            guard let image = UIImage(data: data) else {
+                errorMessage = "The selected file doesn’t contain a supported image."
+                return
+            }
+            try store.save(image)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}

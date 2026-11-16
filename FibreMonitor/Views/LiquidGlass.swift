@@ -175,6 +175,41 @@ public extension View {
     }
 }
 
+struct RouterSyncToolbarControl: View {
+    @ObservedObject var viewModel: MonitorViewModel
+    var isEnabled = true
+
+    var body: some View {
+        HStack(spacing: 7) {
+            if let lastUpdate = viewModel.lastUpdate {
+                Text("Updated \(lastUpdate, style: .relative)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            } else {
+                Text("Not synced")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+
+            Button {
+                Task { await viewModel.refreshAll() }
+            } label: {
+                if viewModel.isRefreshing {
+                    ProgressView()
+                        .frame(width: 18, height: 18)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+            .accessibilityLabel("Refresh router data")
+            .disabled(viewModel.isRefreshing || !isEnabled)
+        }
+    }
+}
+
 private struct LiquidGlassScrollEdgeEffectModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -200,4 +235,3 @@ private struct LiquidGlassCapsuleModifier: ViewModifier {
         }
     }
 }
-

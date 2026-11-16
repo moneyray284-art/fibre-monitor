@@ -60,12 +60,13 @@ public struct MainTabView: View {
         .preferredColorScheme(settings.theme.colorScheme)
         .tint(settings.accentColor.color)
         .onAppear {
+            AppIconManager.apply(settings.appIconChoice)
             if !viewModel.awaitingRouterSelection {
                 if !viewModel.settings.isConfigured {
                     viewModel.selectedTab = .home
                     showInitialSettings = true
                 } else {
-                    viewModel.startPolling()
+                    Task { await viewModel.refreshIfStale(force: true) }
                 }
             }
         }
@@ -73,14 +74,19 @@ public struct MainTabView: View {
             switch phase {
             case .active:
                 if !viewModel.awaitingRouterSelection && viewModel.settings.isConfigured && !viewModel.isLoggedOut {
-                    viewModel.startPolling()
+                    Task { await viewModel.refreshIfStale(force: true) }
                 }
             case .background:
-                viewModel.stopPolling()
+                viewModel.endForegroundSession()
             default:
                 break
             }
         }
+        .onChange(of: viewModel.selectedTab) { _ in
+            Task { await viewModel.refreshIfStale(maxAge: 10) }
+        }
+        .onChange(of: settings.appIconChoice) { choice in
+            AppIconManager.apply(choice)
+        }
     }
 }
-

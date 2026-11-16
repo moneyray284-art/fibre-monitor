@@ -1,19 +1,10 @@
-import PhotosUI
 import SwiftUI
-import UniformTypeIdentifiers
-import UIKit
 
 public struct SettingsTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
-    @ObservedObject private var avatarStore = ProfileAvatarStore.shared
-
     @State private var editorMode: RouterProfileEditorView.Mode?
     @State private var pendingDelete: RouterProfile?
-    @State private var selectedAvatarPhoto: PhotosPickerItem?
-    @State private var isShowingAvatarPicker = false
-    @State private var isImportingAvatar = false
-    @State private var photoErrorMessage: String?
     @State private var showRebootAlert = false
 
     public init(viewModel: MonitorViewModel) {
@@ -23,7 +14,6 @@ public struct SettingsTabView: View {
 
     public var body: some View {
         Form {
-            profileSection
             routersSection
             updatesSection
             appearanceSection
@@ -37,6 +27,7 @@ public struct SettingsTabView: View {
             aboutSection
         }
         .liquidGlassScrollEdges()
+        .toolbar(.hidden, for: .tabBar)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await viewModel.refreshAll() }
@@ -77,76 +68,6 @@ public struct SettingsTabView: View {
             Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: {
             Text("This removes the profile, its Keychain password, and its saved device names from this iPhone.")
-        }
-        .alert(
-            "Couldn’t Update Profile Photo",
-            isPresented: Binding(
-                get: { photoErrorMessage != nil },
-                set: { if !$0 { photoErrorMessage = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) { photoErrorMessage = nil }
-        } message: {
-            Text(photoErrorMessage ?? "Please choose another image.")
-        }
-    }
-
-    private var profileSection: some View {
-        Section {
-            HStack(spacing: 12) {
-                Menu {
-                    Button {
-                        isShowingAvatarPicker = true
-                    } label: {
-                        Label("Choose from Photos", systemImage: "photo")
-                    }
-                    Button {
-                        isImportingAvatar = true
-                    } label: {
-                        Label("Choose from Files", systemImage: "folder")
-                    }
-                    if avatarStore.image != nil {
-                        Button(role: .destructive) {
-                            avatarStore.remove()
-                        } label: {
-                            Label("Remove Photo", systemImage: "person.crop.circle.badge.xmark")
-                        }
-                    }
-                } label: {
-                    ProfileAvatarView(size: 54)
-                }
-                .accessibilityLabel("Profile photo options")
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Profile picture")
-                        .font(.subheadline.weight(.semibold))
-                    Text(avatarStore.image == nil ? "Default LinkWave badge" : "Tap the avatar to change it")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .photosPicker(isPresented: $isShowingAvatarPicker, selection: $selectedAvatarPhoto, matching: .images)
-            .fileImporter(
-                isPresented: $isImportingAvatar,
-                allowedContentTypes: [.image],
-                allowsMultipleSelection: false,
-                onCompletion: { result in
-                    switch result {
-                    case .success(let urls):
-                        if let url = urls.first { importAvatar(.success(url)) }
-                    case .failure(let error):
-                        photoErrorMessage = error.localizedDescription
-                    }
-                }
-            )
-            .onChange(of: selectedAvatarPhoto) { item in
-                guard let item else { return }
-                Task { await loadAvatar(from: item) }
-            }
-        } header: {
-            Text("Profile")
-        } footer: {
-            Text("Your photo is resized and saved on this iPhone. Remove Photo restores the LW initials badge.")
         }
     }
 
@@ -206,11 +127,9 @@ public struct SettingsTabView: View {
 
     private var updatesSection: some View {
         Section("Updates") {
-            Stepper(
-                "Poll every \(settings.pollIntervalSeconds) second\(settings.pollIntervalSeconds == 1 ? "" : "s")",
-                value: $settings.pollIntervalSeconds,
-                in: 1...10
-            )
+            Label("Syncs on launch, when the app returns, and when a tab is more than 10 seconds out of date.", systemImage: "arrow.triangle.2.circlepath")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -235,6 +154,17 @@ public struct SettingsTabView: View {
                 }
             }
             .pickerStyle(.menu)
+
+            Picker("App Icon", selection: $settings.appIconChoice) {
+                ForEach(AppIconChoice.allCases) { choice in
+                    Text(choice.title).tag(choice)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(settings.autoMatchAppIconToAccentColor)
+
+            Toggle("Auto-Match Accent Theme", isOn: $settings.autoMatchAppIconToAccentColor)
+                .accessibilityHint("Automatically uses the app icon that matches the selected accent color.")
         }
     }
 
@@ -361,41 +291,6 @@ public struct SettingsTabView: View {
         }
     }
 
-    private func loadAvatar(from selection: PhotosPickerItem) async {
-        do {
-            guard let data = try await selection.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data) else {
-                photoErrorMessage = "The selected photo couldn’t be opened."
-                selectedAvatarPhoto = nil
-                return
-            }
-            try avatarStore.save(image)
-        } catch {
-            photoErrorMessage = error.localizedDescription
-        }
-        selectedAvatarPhoto = nil
-    }
-
-    private func importAvatar(_ result: Result<URL, Error>) {
-        do {
-            let url = try result.get()
-            let didStartAccessing = url.startAccessingSecurityScopedResource()
-            defer {
-                if didStartAccessing {
-                    url.stopAccessingSecurityScopedResource()
-                }
-            }
-            let data = try Data(contentsOf: url)
-            guard let image = UIImage(data: data) else {
-                photoErrorMessage = "The selected file doesn’t contain a supported image."
-                return
-            }
-            try avatarStore.save(image)
-        } catch {
-            photoErrorMessage = error.localizedDescription
-        }
-    }
-
     private var activeRouterDescription: String {
         if !viewModel.health.model.isEmpty {
             return "Huawei OptiXstar \(viewModel.health.model)"
@@ -424,6 +319,7 @@ private struct DiagnosticsScreen: View {
         .liquidGlassScrollEdges()
         .navigationTitle("Diagnostics")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
     }
 }
 
@@ -461,6 +357,6 @@ private struct LanScreen: View {
         .refreshable { await viewModel.refreshAll() }
         .navigationTitle("Home Network")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
     }
 }
-

@@ -42,17 +42,17 @@ public final class MonitorViewModel: ObservableObject {
     private var client: any RouterProvider
     private let transport: OntTransport
     private let pathMonitor = NWPathMonitor()
-    private var pollTask: Task<Void, Never>?
     private var reachabilityFailureCount = 0
     private var reachabilityFailureStartedAt: Date?
+    private var refreshRequestedAfterCurrent = false
     private let reachabilityFailureThreshold = 3
-    private var lastSlowPoll: Date = .distantPast
-    private let slowInterval: TimeInterval = 10
-    // Health, Wi-Fi and LAN come from full web pages (50-130 KB), so poll them rarely.
-    private var lastPagePoll: Date = .distantPast
-    private let pageInterval: TimeInterval = 30
-    private var lastLanPoll: Date = .distantPast
-    private let lanInterval: TimeInterval = 300
+    private var lastCoreSync: Date = .distantPast
+    private let coreSyncInterval: TimeInterval = 10
+    // Health, Wi-Fi and LAN come from full web pages (50-130 KB), so sync them rarely.
+    private var lastPageSync: Date = .distantPast
+    private let pageSyncInterval: TimeInterval = 30
+    private var lastLanSync: Date = .distantPast
+    private let lanSyncInterval: TimeInterval = 300
 
     public init(settings: SettingsStore = .shared, transport: OntTransport = URLSessionOntTransport()) {
         self.settings = settings
@@ -89,32 +89,22 @@ public final class MonitorViewModel: ObservableObject {
         settings.alias(for: device.mac) ?? device.displayName
     }
 
-    // MARK: Polling & Router Switching
+    // MARK: Event-driven Sync & Router Switching
 
-    public func startPolling() {
-        guard pollTask == nil, !awaitingRouterSelection, !isLoggedOut else { return }
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                await self.pollOnce()
-                let seconds = max(1, self.settings.pollIntervalSeconds)
-                try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
-            }
-        }
+    public func refreshIfStale(maxAge: TimeInterval = 10, force: Bool = false) async {
+        guard !awaitingRouterSelection, settings.isConfigured, !isLoggedOut else { return }
+        if !force, let lastUpdate, Date().timeIntervalSince(lastUpdate) <= maxAge { return }
+        await refreshAll()
     }
 
-    /// Stops polling and logs out, so the router's web page stays usable for others.
-    public func stopPolling() {
-        pollTask?.cancel()
-        pollTask = nil
+    /// Closes the router session when the app backgrounds so its web UI stays usable for others.
+    public func endForegroundSession() {
         resetReachabilityFailures()
         Task { await client.logout() }
     }
 
-    /// Explicit user-triggered logout from Settings. Pauses polling until Reconnect is tapped.
+    /// Explicit user-triggered logout from Settings. Pauses automatic sync until Reconnect is tapped.
     public func logoutSession() async {
-        pollTask?.cancel()
-        pollTask = nil
         diagnosticTask?.cancel()
         diagnosticTask = nil
         isLoggedOut = true
@@ -129,13 +119,11 @@ public final class MonitorViewModel: ObservableObject {
     public func reconnectSession() {
         isLoggedOut = false
         errorMessage = nil
-        startPolling()
+        Task { await refreshAll() }
     }
 
-    /// Switches to a different router profile: logs out of the old session, resets cookies & view state, and polls the new one.
+    /// Switches to a different router profile: logs out of the old session, resets cookies & view state, and syncs the new one.
     public func switchRouter(to profile: RouterProfile) async {
-        pollTask?.cancel()
-        pollTask = nil
         diagnosticTask?.cancel()
         diagnosticTask = nil
         clearViewState()
@@ -146,19 +134,16 @@ public final class MonitorViewModel: ObservableObject {
         settings.selectProfile(profile.id)
         client = RouterProviderFactory.make(profile: settings.activeProfile, credentials: settings.credentials, transport: transport)
         await client.switchCredentials(settings.credentials)
-        await pollOnce()
+        await syncRouter()
     }
 
     public func selectRouterAndStart(_ profile: RouterProfile) {
         Task {
             await switchRouter(to: profile)
-            startPolling()
         }
     }
 
     public func settingsChanged() {
-        pollTask?.cancel()
-        pollTask = nil
         diagnosticTask?.cancel()
         diagnosticTask = nil
         clearViewState()
@@ -169,8 +154,7 @@ public final class MonitorViewModel: ObservableObject {
             client = RouterProviderFactory.make(profile: settings.activeProfile, credentials: settings.credentials, transport: transport)
             await client.switchCredentials(settings.credentials)
             if settings.isConfigured {
-                await pollOnce()
-                startPolling()
+                await syncRouter()
             }
         }
     }
@@ -184,17 +168,28 @@ public final class MonitorViewModel: ObservableObject {
         isConnectionFailure = false
         client = RouterProviderFactory.make(profile: settings.activeProfile, credentials: settings.credentials, transport: transport)
         await client.switchCredentials(settings.credentials)
-        await pollOnce()
+        await syncRouter()
     }
 
     public func refreshAll() async {
+        guard !isRefreshing else { return }
         isLoggedOut = false
-        lastSlowPoll = .distantPast
-        lastPagePoll = .distantPast
-        lastLanPoll = .distantPast
+        lastCoreSync = .distantPast
+        lastPageSync = .distantPast
+        lastLanSync = .distantPast
         resetReachabilityFailures()
-        await pollOnce()
-        startPolling()
+        await syncRouter()
+    }
+
+    private func refreshAfterMutation() async {
+        lastCoreSync = .distantPast
+        lastPageSync = .distantPast
+        lastLanSync = .distantPast
+        guard !isRefreshing else {
+            refreshRequestedAfterCurrent = true
+            return
+        }
+        await syncRouter()
     }
 
     private func clearViewState() {
@@ -215,13 +210,14 @@ public final class MonitorViewModel: ObservableObject {
         errorMessage = nil
         isConnectionFailure = false
         actionMessage = nil
-        lastSlowPoll = .distantPast
-        lastPagePoll = .distantPast
-        lastLanPoll = .distantPast
+        lastCoreSync = .distantPast
+        lastPageSync = .distantPast
+        lastLanSync = .distantPast
         resetReachabilityFailures()
     }
 
-    public func pollOnce() async {
+    public func syncRouter() async {
+        guard !isRefreshing else { return }
         guard settings.activeProfile != nil else {
             isConnected = false
             isConnectionFailure = false
@@ -241,7 +237,13 @@ public final class MonitorViewModel: ObservableObject {
             return
         }
         isRefreshing = true
-        defer { isRefreshing = false }
+        defer {
+            isRefreshing = false
+            if refreshRequestedAfterCurrent {
+                refreshRequestedAfterCurrent = false
+                Task { await self.refreshAll() }
+            }
+        }
         do {
             let requestStartedAt = ProcessInfo.processInfo.systemUptime
             traffic = try await client.pollTraffic(now: Date())
@@ -254,12 +256,12 @@ public final class MonitorViewModel: ObservableObject {
             if let activeId = settings.activeProfile?.id, let identity = await client.routerIdentity() {
                 settings.recordDetection(for: activeId, model: identity.model, cfgMode: identity.cfgMode)
             }
-            if Date().timeIntervalSince(lastSlowPoll) >= slowInterval {
-                lastSlowPoll = Date()
+            if Date().timeIntervalSince(lastCoreSync) >= coreSyncInterval {
+                lastCoreSync = Date()
                 if let w = try? await client.fetchWan() { wan = w }
                 if let o = try? await client.fetchOptical() { optical = o }
-                if Date().timeIntervalSince(lastPagePoll) >= pageInterval {
-                    lastPagePoll = Date()
+                if Date().timeIntervalSince(lastPageSync) >= pageSyncInterval {
+                    lastPageSync = Date()
                     // Wi-Fi first: it tells the device list which SSID is on which band.
                     if let w = try? await client.fetchWifi() { wifi = w }
                     if let h = try? await client.fetchHealth() { health = h }
@@ -268,8 +270,8 @@ public final class MonitorViewModel: ObservableObject {
                 if let blocked = try? await client.fetchWlanMacBlacklist() {
                     blockedDevices = blocked.activeBlockedDevices
                 }
-                if Date().timeIntervalSince(lastLanPoll) >= lanInterval {
-                    lastLanPoll = Date()
+                if Date().timeIntervalSince(lastLanSync) >= lanSyncInterval {
+                    lastLanSync = Date()
                     if let l = try? await client.fetchLan() { lan = l }
                 }
             }
@@ -283,6 +285,13 @@ public final class MonitorViewModel: ObservableObject {
             }
             resetReachabilityFailures()
             lastUpdate = syncDate
+            WidgetSnapshotStore.save(
+                rxPowerDbm: optical.rxPowerDbm,
+                summary: settings.dataUsageSummary,
+                onlineClientCount: onlineDevices.count,
+                pppoeUptimeSeconds: wan.connectionType.lowercased().contains("pppoe") ? wan.uptimeSeconds : nil,
+                at: syncDate
+            )
         } catch {
             if error is CancellationError || Self.isCancellationError(error) { return }
             isConnected = false
@@ -329,6 +338,7 @@ public final class MonitorViewModel: ObservableObject {
             wifi = try await client.setRadio(radio.index, enabled: enabled)
             Haptics.notify(.success)
             actionMessage = "\(Self.bandName(radio.band)) Wi-Fi turned \(enabled ? "on" : "off"), confirmed by the router."
+            await refreshAfterMutation()
         } catch {
             Haptics.notify(.error)
             actionMessage = Self.describe(error, host: settings.host)
@@ -351,7 +361,7 @@ public final class MonitorViewModel: ObservableObject {
                 newSsid: newSsid,
                 newPassword: newPassword
             )
-            lastPagePoll = Date()
+            lastPageSync = Date()
             if result.connectionDropped {
                 isConnected = false
                 isConnectionFailure = true
@@ -362,6 +372,7 @@ public final class MonitorViewModel: ObservableObject {
                 if let updatedWifi = result.wifi { wifi = updatedWifi }
                 Haptics.notify(.success)
                 actionMessage = "Wi-Fi updated to \"\(newSsid)\". Devices may take a few seconds to reconnect."
+                await refreshAfterMutation()
             }
             return result
         } catch {
@@ -422,6 +433,7 @@ public final class MonitorViewModel: ObservableObject {
             settings.setAlias("", for: device.mac)
             Haptics.notify(.success)
             actionMessage = "Renamed device on router to \(trimmed)."
+            await refreshAfterMutation()
         } catch {
             Haptics.notify(.error)
             throw error
@@ -433,6 +445,7 @@ public final class MonitorViewModel: ObservableObject {
             devices = try await client.deleteDevice(device)
             Haptics.notify(.success)
             actionMessage = "Removed \(name(for: device)) from the device list."
+            await refreshAfterMutation()
         } catch {
             Haptics.notify(.error)
             actionMessage = Self.describe(error, host: settings.host)
@@ -461,6 +474,7 @@ public final class MonitorViewModel: ObservableObject {
             devices = (try? await client.fetchDevices()) ?? devices
             Haptics.notify(.success)
             actionMessage = "Blocked \(name(for: device)) from Wi-Fi."
+            await refreshAfterMutation()
         } catch {
             Haptics.notify(.error)
             actionMessage = Self.describe(error, host: settings.host)
@@ -473,6 +487,7 @@ public final class MonitorViewModel: ObservableObject {
             blockedDevices = state.activeBlockedDevices
             Haptics.notify(.success)
             actionMessage = "Unblocked \(device.name.isEmpty ? device.mac : device.name)."
+            await refreshAfterMutation()
         } catch {
             Haptics.notify(.error)
             actionMessage = Self.describe(error, host: settings.host)

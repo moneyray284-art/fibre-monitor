@@ -57,7 +57,8 @@ public struct WifiTabView: View {
             .navigationTitle("Wi-Fi")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    RouterSyncToolbarControl(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured)
                     if viewModel.isWifiSaving {
                         ProgressView()
                     }
@@ -88,9 +89,11 @@ public struct WifiTabView: View {
         }
         .sheet(item: $qrTarget) { network in
             WifiQrSheet(viewModel: viewModel, network: network)
+                .toolbar(.hidden, for: .tabBar)
         }
         .sheet(item: $editTarget) { network in
             WifiEditSheet(viewModel: viewModel, network: network)
+                .toolbar(.hidden, for: .tabBar)
         }
     }
 
@@ -249,6 +252,7 @@ private struct WifiQrSheet: View {
             .background { LiquidGlassBackground() }
             .navigationTitle(network.name.isEmpty ? "Wi-Fi Network" : network.name)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .tabBar)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -482,6 +486,7 @@ private struct WifiEditSheet: View {
             }
             .navigationTitle("Edit Wi-Fi")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .tabBar)
             .interactiveDismissDisabled(isSaving)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -694,6 +699,7 @@ private struct WifiEditConfirmSheet: View {
             }
             .navigationTitle("Confirm Wi-Fi Change")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .tabBar)
             .interactiveDismissDisabled(isSaving)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -759,4 +765,3 @@ private struct WifiEmptyCard: View {
         .liquidGlassCard()
     }
 }
-

@@ -45,6 +45,26 @@ public enum AppAccentColor: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+public enum AppIconChoice: String, CaseIterable, Identifiable, Hashable {
+    case orange
+    case blue
+    case purple
+    case green
+
+    public var id: String { rawValue }
+    public var title: String { rawValue.capitalized }
+    public var alternateIconName: String { "AppIcon\(title)" }
+
+    public static func matching(_ accent: AppAccentColor) -> AppIconChoice {
+        switch accent {
+        case .blue: .blue
+        case .green: .green
+        case .purple: .purple
+        case .orange: .orange
+        }
+    }
+}
+
 /// Seam around Keychain password storage so unit tests can inspect per-profile accounts.
 public protocol PasswordStore {
     func password(forAccount account: String) -> String?
@@ -102,9 +122,10 @@ public final class SettingsStore: ObservableObject {
         static let profiles = "router_profiles"
         static let activeProfileId = "active_router_profile_id"
         static let profileAliases = "profile_device_aliases"
-        static let pollInterval = "poll_interval_seconds"
         static let theme = "app_theme"
         static let accentColor = "app_accent_color"
+        static let appIconChoice = "app_icon_choice"
+        static let autoMatchAppIcon = "auto_match_app_icon"
         static let dataUsage = "data_usage_v1"
         static let migrated = "v2_profiles_migrated"
 
@@ -126,14 +147,27 @@ public final class SettingsStore: ObservableObject {
             refreshDataUsageSummary()
         }
     }
-    @Published public var pollIntervalSeconds: Int {
-        didSet { defaults.set(pollIntervalSeconds, forKey: Keys.pollInterval) }
-    }
     @Published public var theme: AppTheme {
         didSet { defaults.set(theme.rawValue, forKey: Keys.theme) }
     }
     @Published public var accentColor: AppAccentColor {
-        didSet { defaults.set(accentColor.rawValue, forKey: Keys.accentColor) }
+        didSet {
+            defaults.set(accentColor.rawValue, forKey: Keys.accentColor)
+            if autoMatchAppIconToAccentColor {
+                appIconChoice = AppIconChoice.matching(accentColor)
+            }
+        }
+    }
+    @Published public var appIconChoice: AppIconChoice {
+        didSet { defaults.set(appIconChoice.rawValue, forKey: Keys.appIconChoice) }
+    }
+    @Published public var autoMatchAppIconToAccentColor: Bool {
+        didSet {
+            defaults.set(autoMatchAppIconToAccentColor, forKey: Keys.autoMatchAppIcon)
+            if autoMatchAppIconToAccentColor {
+                appIconChoice = AppIconChoice.matching(accentColor)
+            }
+        }
     }
     @Published public private(set) var dataUsageSummary = DataUsageSummary()
     @Published public private(set) var profileAliases: [String: [String: String]] = [:]
@@ -162,10 +196,13 @@ public final class SettingsStore: ObservableObject {
         self.defaults = defaults
         self.passwordStore = passwordStore
 
-        let interval = defaults.integer(forKey: Keys.pollInterval)
-        self.pollIntervalSeconds = interval > 0 ? interval : 2
         self.theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .system
-        self.accentColor = AppAccentColor(rawValue: defaults.string(forKey: Keys.accentColor) ?? "") ?? .blue
+        let accentColor = AppAccentColor(rawValue: defaults.string(forKey: Keys.accentColor) ?? "") ?? .blue
+        self.accentColor = accentColor
+        let autoMatchAppIcon = defaults.object(forKey: Keys.autoMatchAppIcon) as? Bool ?? true
+        self.autoMatchAppIconToAccentColor = autoMatchAppIcon
+        let savedIcon = AppIconChoice(rawValue: defaults.string(forKey: Keys.appIconChoice) ?? "") ?? .orange
+        self.appIconChoice = autoMatchAppIcon ? AppIconChoice.matching(accentColor) : savedIcon
         if let data = defaults.data(forKey: Keys.dataUsage),
            let decoded = try? JSONDecoder().decode([String: ProfileUsage].self, from: data) {
             self.usageByProfile = decoded
@@ -367,7 +404,7 @@ public final class SettingsStore: ObservableObject {
         refreshDataUsageSummary()
     }
 
-    /// Saves observed router reachability transitions. Call only while the app is actively polling.
+    /// Saves observed router reachability transitions. Call only while the app is actively syncing.
     public func recordConnectionObservation(
         isReachable: Bool,
         for profileId: UUID,
@@ -421,7 +458,7 @@ public final class SettingsStore: ObservableObject {
             let day = usage.days[key] ?? ProfileUsage.Day()
             return DailyUsagePoint(
                 date: date,
-                label: date.formatted(.dateTime.weekday(.abbreviated)),
+                label: date.formatted(.dateTime.month(.abbreviated).day()),
                 downloadBytes: isComplete ? day.downloadBytes : nil,
                 uploadBytes: isComplete ? day.uploadBytes : nil
             )

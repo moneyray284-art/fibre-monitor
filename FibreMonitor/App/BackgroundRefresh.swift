@@ -69,6 +69,7 @@ enum LinkWaveBackgroundRefresh {
             let sampledAt = Date()
             settings.recordTrafficCounters(download: download, upload: upload, for: profile.id, at: sampledAt)
             settings.recordSuccessfulSync(for: profile.id, at: sampledAt)
+            WidgetSnapshotStore.updateUsage(summary: settings.dataUsageSummary, at: sampledAt)
             await provider.logout()
             return true
         } catch {
