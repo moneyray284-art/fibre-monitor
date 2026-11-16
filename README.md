@@ -1,9 +1,10 @@
-# Fibre Monitor
+# LinkWave
 
 iPhone app for **Huawei OptiXstar HG8145X6** fibre routers (ONTs) across firmware variants (including HG8145X6-10 / `COMMON` and `GNMTNNCE`). It logs in to the router's web interface on the local network and provides:
 
-- **Multi-router profiles:** save multiple routers (each with Keychain credentials, detected model and config mode, and per-router device nicknames), pick on launch when 2+ profiles exist, or switch live from Dashboard / Settings
-- **Dashboard:** live download/upload speed with a 60-second sparkline, daily/monthly/all-time download and upload usage from WAN counters, optical Rx power range bar (`Good` / `Weak` / `Bad` / `Too strong`) and PON state, WAN connection details (PPPoE/IPoE, CGNAT flag, uptime, gateway, DNS), conditional ONT uptime / Tx laser power / CPU & memory load when reported by the firmware, and confirmed router restart
+- **Multi-router profiles:** save multiple routers (each with Keychain credentials, detected model and config mode, and per-router device nicknames), pick on launch when 2+ profiles exist, or switch live from Home / Settings
+- **Home:** live download/upload speed with a 60-second sparkline, optical Rx power range bar (`Good` / `Weak` / `Bad` / `Too strong`) and PON state, WAN connection details (PPPoE/IPoE, CGNAT flag, uptime, gateway, DNS), recent router connection interruptions, conditional ONT uptime / Tx laser power / CPU & memory load when reported by the firmware, and confirmed router restart
+- **Usage:** daily, calendar-month and all-time download/upload totals from WAN counters; seven-day history leaves gaps blank when the app missed a long interval and shows when the router was last checked
 - **Clients:** searchable online/offline device list with Wi-Fi band or LAN port badges, live per-device traffic rates (when non-zero), DHCP vendor & lease details, **Rename on Router** (`UserDevAlias`), local iPhone-only nicknames, and offline device removal
 - **Wi-Fi:** 2.4 GHz / 5 GHz radio switches (with connected-radio & last-radio safeguards), on-demand QR join code generation and passphrase reveal/copy (never saved on disk), and WPA2-PSK SSID & password editing (other security modes direct to the router's web page) with typed SSID confirmation
 - **Tools & LAN:** built-in router Ping / Traceroute diagnostics, LAN / DHCP pool & secondary subnet inspection, and explicit session logout
@@ -13,7 +14,7 @@ Native SwiftUI, iOS 16+, with system Liquid Glass on iOS 26+.
 
 ## Install
 
-GitHub Actions builds an unsigned IPA on every push (Xcode 26, no Mac needed). Download `FibreMonitor.ipa` from **Releases** (or the workflow run's artifacts) and install it with [Sideloadly](https://sideloadly.io/), AltStore, or SideStore using a free Apple ID. Open the app, allow **Local Network** access, and add your router profile in **Settings** (`192.168.100.1` or `192.168.2.1` depending on router/firmware). The iPhone must be on the router's Wi-Fi.
+GitHub Actions builds an unsigned IPA on every push (Xcode 26, no Mac needed). Download `LinkWave.ipa` from **Releases** (or the workflow run's artifacts) and install it with [Sideloadly](https://sideloadly.io/), AltStore, or SideStore using a free Apple ID. Open the app, allow **Local Network** access, and add your router profile in **Settings** (`192.168.100.1` or `192.168.2.1` depending on router/firmware). The iPhone must be on the router's Wi-Fi.
 
 ## How it talks to the router
 
@@ -21,7 +22,7 @@ Uses the same requests as the router's web UI:
 
 | Feature | Endpoint(s) |
 |---------|-------------|
-| Login & identity | `POST /asp/GetRandCount.asp` (token) → `POST /login.cgi` (base64 password) → `GET /index.asp` |
+| Login & identity | `POST /asp/GetRandCount.asp` (token) â†’ `POST /login.cgi` (base64 password) â†’ `GET /index.asp` |
 | CSRF token refresh | `POST /html/ssmp/common/GetRandToken.asp` |
 | Logout | `POST /logout.cgi?RequestFile=html/logout.html` |
 | Traffic counters | `GET /html/bbsp/common/get_wan_list_pppwanstat.asp`, `/html/bbsp/common/get_wan_list_ipwanstat.asp` |
@@ -36,7 +37,7 @@ Uses the same requests as the router's web UI:
 | Toggle Wi-Fi radio | `POST /html/amp/wlanbasic/set.cgi?x=InternetGatewayDevice.X_HW_DEBUG.AMP.SetWifiCoverEnable&y=InternetGatewayDevice.LANDevice.1.WiFi.Radio.<n>&RequestFile=html/amp/wlanbasic/WlanBasic.asp` |
 | Edit SSID / password | `POST /html/amp/wlanbasic/set.cgi?c1=...WLANConfigAction&w=...WifiCoverSetWlanBasic&y=<WlanDomain>&z=...WPS&k=...PreSharedKey.1&c2=...&RequestFile=html/amp/wlanbasic/WlanBasic.asp` |
 | LAN & DHCP | `GET /html/bbsp/dhcpservercfg/dhcp2.asp` |
-| Diagnostics | `POST /html/bbsp/maintenance/complex.cgi` → `GetPingResult.asp` / `GetRouteResult.asp` |
+| Diagnostics | `POST /html/bbsp/maintenance/complex.cgi` â†’ `GetPingResult.asp` / `GetRouteResult.asp` |
 | Restart router | `POST /CustomApp/set.cgi?x=InternetGatewayDevice.X_HW_DEBUG.SMP.DM.ResetBoard&RequestFile=../CustomApp/mainpage.asp` |
 
 Responses are JavaScript (`new Type("\x2e...")`) rather than JSON; `HuaweiJs` extracts constructors and string variables dynamically.
@@ -53,7 +54,8 @@ Safety & session behavior:
 FibreMonitor/Models      Data models, error types, router profiles
 FibreMonitor/Services    HuaweiOntClient, HuaweiJs, OntTransport, SettingsStore (Keychain)
 FibreMonitor/ViewModels  MonitorViewModel (polling, NWPathMonitor, actions, haptics)
-FibreMonitor/Views       4-tab Liquid Glass UI (Dashboard, Clients, Wi-Fi, Settings)
+FibreMonitor/Views       5-tab Liquid Glass UI (Home, Usage, Clients, Wi-Fi, Settings)
 FibreMonitorTests        Parser, session, multi-router, WlanBasic, and Phase 4 write unit tests
 tools/gen_icon.py        Regenerates the app icon
 ```
+

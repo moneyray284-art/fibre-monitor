@@ -32,8 +32,8 @@ public struct DashboardView: View {
 
                         FibreCard(optical: viewModel.optical)
                         SpeedSection(traffic: viewModel.traffic)
-                        DataUsageCard(summary: settings.dataUsageSummary)
                         MetricsTileGrid(viewModel: viewModel)
+                        ConnectionHistoryCard(events: settings.connectionHistory)
 
                         if !viewModel.wan.gateway.isEmpty || !viewModel.wan.dnsServers.isEmpty {
                             WanExtrasCard(wan: viewModel.wan)
@@ -55,7 +55,7 @@ public struct DashboardView: View {
             }
             .background { LiquidGlassBackground() }
             .refreshable { await viewModel.refreshAll() }
-            .navigationTitle("Dashboard")
+            .navigationTitle("Home")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -88,61 +88,6 @@ public struct DashboardView: View {
     }
 }
 
-private struct DataUsageCard: View {
-    let summary: DataUsageSummary
-
-    var body: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Label("Data Usage", systemImage: "arrow.up.arrow.down.circle")
-                    .font(.headline)
-                Spacer()
-                Text("WAN")
-                    .font(.caption.weight(.medium))
-                    .foregroundColor(.secondary)
-            }
-
-            HStack {
-                Text("Period")
-                Spacer(minLength: 4)
-                Text("Download")
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                Text("Upload")
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .font(.caption2.weight(.medium))
-            .foregroundColor(.secondary)
-
-            usageRow("Today", download: summary.todayDownloadBytes, upload: summary.todayUploadBytes)
-            usageRow("This month", download: summary.monthDownloadBytes, upload: summary.monthUploadBytes)
-            usageRow("Since tracking", download: summary.totalDownloadBytes, upload: summary.totalUploadBytes)
-
-            Text("Usage is based on router counters. When the app was closed, catch-up is credited when it reconnects. Router counter resets can affect totals.")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .liquidGlassCard()
-        .accessibilityElement(children: .combine)
-    }
-
-    private func usageRow(_ title: String, download: UInt64, upload: UInt64) -> some View {
-        HStack {
-            Text(title)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(Self.format(download))
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            Text(Self.format(upload))
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .font(.subheadline.monospacedDigit())
-    }
-
-    private static func format(_ bytes: UInt64) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
-    }
-}
-
 private struct RouterHeaderCard: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
@@ -164,7 +109,7 @@ private struct RouterHeaderCard: View {
                     Text(settings.activeProfile?.name ?? "Fibre Router")
                         .font(.headline)
                         .lineLimit(1)
-                    Text("\(viewModel.displayModelName) · \(settings.host)")
+                    Text("\(viewModel.displayModelName) Â· \(settings.host)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
@@ -189,7 +134,7 @@ private struct RouterHeaderCard: View {
                     .font(.caption.weight(.bold))
                     .foregroundColor(statusColor)
                 if let last = viewModel.lastUpdate, viewModel.isConnected, !viewModel.isLoggedOut {
-                    Text("• Updated \(last.formatted(date: .omitted, time: .standard))")
+                    Text("â€¢ Updated \(last.formatted(date: .omitted, time: .standard))")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -236,11 +181,11 @@ private struct MetricsTileGrid: View {
                 icon: "globe",
                 iconTint: wan.isConnected ? .green : .orange,
                 title: "WAN IP",
-                value: wan.ipAddress.isEmpty ? "—" : wan.ipAddress,
+                value: wan.ipAddress.isEmpty ? "â€”" : wan.ipAddress,
                 pill: wan.isCarrierNat ? ("CGNAT", .orange) : (wan.isConnected ? ("Up", .green) : nil),
                 subtitle: [wan.connectionType, wan.vlanId.isEmpty ? "" : "VLAN \(wan.vlanId)"]
                     .filter { !$0.isEmpty }
-                    .joined(separator: " · ")
+                    .joined(separator: " Â· ")
             )
 
             MetricTile(
@@ -267,14 +212,14 @@ private struct MetricsTileGrid: View {
                     iconTint: .purple,
                     title: "Tx Laser Power",
                     value: String(format: "%.2f dBm", tx),
-                    subtitle: optical.temperatureC.map { String(format: "Temp %.0f °C", $0) }
+                    subtitle: optical.temperatureC.map { String(format: "Temp %.0f Â°C", $0) }
                 )
             } else if let temp = optical.temperatureC {
                 MetricTile(
                     icon: "thermometer.medium",
                     iconTint: .orange,
                     title: "Optics Temp",
-                    value: String(format: "%.0f °C", temp)
+                    value: String(format: "%.0f Â°C", temp)
                 )
             }
 
@@ -379,3 +324,4 @@ private struct ErrorBanner: View {
         .liquidGlassPanel(padding: 12)
     }
 }
+

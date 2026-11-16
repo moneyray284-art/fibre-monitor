@@ -24,6 +24,44 @@ public struct DataUsageSummary: Equatable, Sendable {
     public var monthUploadBytes: UInt64 = 0
     public var totalDownloadBytes: UInt64 = 0
     public var totalUploadBytes: UInt64 = 0
+    public var lastSuccessfulSyncAt: Date? = nil
+    public var missingHistoryDayCount: Int = 0
+    public var dailyHistory: [DailyUsagePoint] = []
+}
+
+public struct DailyUsagePoint: Equatable, Sendable, Identifiable {
+    public var id: Date { date }
+    public var date: Date
+    public var label: String
+    /// Nil when the app did not sample the full day or a long gap made the daily split uncertain.
+    public var downloadBytes: UInt64?
+    public var uploadBytes: UInt64?
+
+    public var totalBytes: UInt64? {
+        guard let downloadBytes, let uploadBytes else { return nil }
+        let (total, overflow) = downloadBytes.addingReportingOverflow(uploadBytes)
+        return overflow ? UInt64.max : total
+    }
+}
+
+public struct ConnectionInterruption: Codable, Equatable, Sendable, Identifiable {
+    public var id: UUID
+    public var startedAt: Date
+    public var restoredAt: Date?
+    /// Filled only when the app observed the router throughout the interruption.
+    public var observedDurationSeconds: TimeInterval?
+
+    public init(
+        id: UUID = UUID(),
+        startedAt: Date,
+        restoredAt: Date? = nil,
+        observedDurationSeconds: TimeInterval? = nil
+    ) {
+        self.id = id
+        self.startedAt = startedAt
+        self.restoredAt = restoredAt
+        self.observedDurationSeconds = observedDurationSeconds
+    }
 }
 
 public struct WanInfo: Equatable, Sendable {
@@ -119,7 +157,7 @@ public enum ConnectionPort: Equatable, Sendable {
         case .wifi24: return "2.4 GHz"
         case .wifi5: return "5 GHz"
         case .lan(let n): return "LAN \(n)"
-        case .other(let s): return s.isEmpty ? "—" : s
+        case .other(let s): return s.isEmpty ? "â€”" : s
         }
     }
 
@@ -613,3 +651,4 @@ public enum TrafficRateFormatter {
         return "\(clamped) B/s"
     }
 }
+

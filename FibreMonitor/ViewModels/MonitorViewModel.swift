@@ -4,12 +4,12 @@ import SwiftUI
 import UIKit
 
 public enum AppTab: Hashable, Sendable {
-    case dashboard, clients, wifi, settings
+    case home, usage, clients, wifi, settings
 }
 
 @MainActor
 public final class MonitorViewModel: ObservableObject {
-    @Published public var selectedTab: AppTab = .dashboard
+    @Published public var selectedTab: AppTab = .home
     @Published public private(set) var isLoggedOut = false
     @Published public private(set) var traffic = TrafficState()
     @Published public private(set) var wan = WanInfo()
@@ -40,6 +40,9 @@ public final class MonitorViewModel: ObservableObject {
     private let client: HuaweiOntClient
     private let pathMonitor = NWPathMonitor()
     private var pollTask: Task<Void, Never>?
+    private var reachabilityFailureCount = 0
+    private var reachabilityFailureStartedAt: Date?
+    private let reachabilityFailureThreshold = 3
     private var lastSlowPoll: Date = .distantPast
     private let slowInterval: TimeInterval = 10
     // Health, Wi-Fi and LAN come from full web pages (50-130 KB), so poll them rarely.
@@ -99,6 +102,7 @@ public final class MonitorViewModel: ObservableObject {
     public func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
+        resetReachabilityFailures()
         Task { await client.logout() }
     }
 
@@ -111,6 +115,7 @@ public final class MonitorViewModel: ObservableObject {
         isLoggedOut = true
         isConnected = false
         isRefreshing = false
+        resetReachabilityFailures()
         await client.logout()
         Haptics.impact(.light)
         actionMessage = "Logged out of router."
@@ -179,6 +184,7 @@ public final class MonitorViewModel: ObservableObject {
         lastSlowPoll = .distantPast
         lastPagePoll = .distantPast
         lastLanPoll = .distantPast
+        resetReachabilityFailures()
         await pollOnce()
         startPolling()
     }
@@ -202,6 +208,7 @@ public final class MonitorViewModel: ObservableObject {
         lastSlowPoll = .distantPast
         lastPagePoll = .distantPast
         lastLanPoll = .distantPast
+        resetReachabilityFailures()
     }
 
     public func pollOnce() async {
@@ -254,12 +261,40 @@ public final class MonitorViewModel: ObservableObject {
             isConnected = true
             isConnectionFailure = false
             errorMessage = nil
-            lastUpdate = Date()
+            let syncDate = Date()
+            if let profileId = settings.activeProfile?.id {
+                settings.recordSuccessfulSync(for: profileId, at: syncDate)
+                settings.recordConnectionObservation(isReachable: true, for: profileId, at: syncDate)
+            }
+            resetReachabilityFailures()
+            lastUpdate = syncDate
         } catch {
             isConnected = false
             isConnectionFailure = Self.isReachabilityError(error)
             errorMessage = Self.describe(error, host: settings.host)
+            if isConnectionFailure, isPhoneOnWifi, let profileId = settings.activeProfile?.id {
+                let failureDate = Date()
+                if reachabilityFailureCount == 0 {
+                    reachabilityFailureStartedAt = failureDate
+                }
+                reachabilityFailureCount += 1
+                if reachabilityFailureCount >= reachabilityFailureThreshold {
+                    settings.recordConnectionObservation(
+                        isReachable: false,
+                        for: profileId,
+                        at: failureDate,
+                        interruptionStartedAt: reachabilityFailureStartedAt
+                    )
+                }
+            } else {
+                resetReachabilityFailures()
+            }
         }
+    }
+
+    private func resetReachabilityFailures() {
+        reachabilityFailureCount = 0
+        reachabilityFailureStartedAt = nil
     }
 
     public func fetchWifiSsidConfig(for network: WifiNetwork) async throws -> WifiSsidConfig {
@@ -325,7 +360,7 @@ public final class MonitorViewModel: ObservableObject {
         guard !isDiagnosing else { return }
         let mode = diagnosticMode, host = diagnosticHost, count = pingCount
         isDiagnosing = true
-        diagnosticOutput = DiagnosticOutput(text: "Starting \(mode.rawValue.lowercased()) to \(host)…\n")
+        diagnosticOutput = DiagnosticOutput(text: "Starting \(mode.rawValue.lowercased()) to \(host)â€¦\n")
         diagnosticTask = Task { [weak self] in
             guard let self else { return }
             defer { self.isDiagnosing = false }
@@ -439,3 +474,4 @@ public enum Haptics {
         generator.impactOccurred()
     }
 }
+

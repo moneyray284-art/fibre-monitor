@@ -149,6 +149,13 @@ public final class SettingsStore: ObservableObject {
         var totalDownloadBytes: UInt64 = 0
         var totalUploadBytes: UInt64 = 0
         var days: [String: Day] = [:]
+        // Optional so data saved by earlier versions still decodes.
+        var lastCounterSampleAt: Date?
+        var lastSuccessfulSyncAt: Date?
+        var observedDayKeys: [String]?
+        var incompleteDayKeys: [String]?
+        var lastConnectionObservationAt: Date?
+        var connectionInterruptions: [ConnectionInterruption]?
     }
 
     public init(defaults: UserDefaults = .standard, passwordStore: PasswordStore = SystemKeychainStore()) {
@@ -200,6 +207,12 @@ public final class SettingsStore: ObservableObject {
 
     public var isConfigured: Bool {
         activeProfile != nil && !host.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
+    }
+
+    public var connectionHistory: [ConnectionInterruption] {
+        guard let profileId = activeProfile?.id,
+              let events = usageByProfile[profileId.uuidString]?.connectionInterruptions else { return [] }
+        return events.sorted { $0.startedAt > $1.startedAt }
     }
 
     public var credentials: HuaweiOntClient.Credentials {
@@ -277,16 +290,41 @@ public final class SettingsStore: ObservableObject {
         refreshDataUsageSummary()
     }
 
-    /// Records cumulative WAN counters. Comparing against the last persisted sample lets usage
-    /// catch up after the app was closed, provided the router did not reset its counters.
+    /// Records cumulative WAN counters. Counter deltas can catch up after a pause, but a long
+    /// interval cannot be split accurately across days, so every affected day is marked incomplete.
     public func recordTrafficCounters(download: UInt64, upload: UInt64, for profileId: UUID, at date: Date = Date()) {
         let key = profileId.uuidString
         var usage = usageByProfile[key] ?? ProfileUsage()
+        var observedDays = Set(usage.observedDayKeys ?? Array(usage.days.keys))
+        var incompleteDays = Set(usage.incompleteDayKeys ?? [])
+
+        if let previousSample = usage.lastCounterSampleAt,
+           date.timeIntervalSince(previousSample) > 5 * 60 {
+            let calendar = Calendar.current
+            var cursor = calendar.startOfDay(for: previousSample)
+            let finalDay = calendar.startOfDay(for: date)
+            var daysMarked = 0
+            while cursor <= finalDay && daysMarked < 367 {
+                incompleteDays.insert(Self.dayKey(for: cursor))
+                daysMarked += 1
+                guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+                cursor = next
+            }
+        }
+
+        let dayKey = Self.dayKey(for: date)
+        observedDays.insert(dayKey)
+        usage.lastCounterSampleAt = date
 
         guard let previousDownload = usage.lastDownloadCounter,
               let previousUpload = usage.lastUploadCounter else {
             usage.lastDownloadCounter = download
             usage.lastUploadCounter = upload
+            // The initial counter read is only a baseline; it does not reveal earlier traffic today.
+            incompleteDays.insert(dayKey)
+            Self.trimDayKeys(&observedDays, &incompleteDays, relativeTo: date)
+            usage.observedDayKeys = observedDays.sorted()
+            usage.incompleteDayKeys = incompleteDays.sorted()
             usageByProfile[key] = usage
             saveUsage()
             refreshDataUsageSummary()
@@ -300,7 +338,6 @@ public final class SettingsStore: ObservableObject {
         usage.totalDownloadBytes += downloadDelta
         usage.totalUploadBytes += uploadDelta
 
-        let dayKey = Self.dayKey(for: date)
         var day = usage.days[dayKey] ?? ProfileUsage.Day()
         day.downloadBytes += downloadDelta
         day.uploadBytes += uploadDelta
@@ -309,8 +346,55 @@ public final class SettingsStore: ObservableObject {
         // Keep one year of daily detail while retaining all-time totals.
         let cutoff = Self.dayKey(for: Calendar.current.date(byAdding: .day, value: -366, to: date) ?? date)
         usage.days = usage.days.filter { $0.key >= cutoff }
+        Self.trimDayKeys(&observedDays, &incompleteDays, relativeTo: date)
+        usage.observedDayKeys = observedDays.sorted()
+        usage.incompleteDayKeys = incompleteDays.sorted()
 
         usageByProfile[key] = usage
+        saveUsage()
+        refreshDataUsageSummary()
+    }
+
+    public func recordSuccessfulSync(for profileId: UUID, at date: Date = Date()) {
+        var usage = usageByProfile[profileId.uuidString] ?? ProfileUsage()
+        if let lastSync = usage.lastSuccessfulSyncAt, date.timeIntervalSince(lastSync) < 60 {
+            return
+        }
+        usage.lastSuccessfulSyncAt = date
+        usageByProfile[profileId.uuidString] = usage
+        saveUsage()
+        refreshDataUsageSummary()
+    }
+
+    /// Saves observed router reachability transitions. Call only while the app is actively polling.
+    public func recordConnectionObservation(
+        isReachable: Bool,
+        for profileId: UUID,
+        at date: Date = Date(),
+        interruptionStartedAt: Date? = nil
+    ) {
+        var usage = usageByProfile[profileId.uuidString] ?? ProfileUsage()
+        var events = usage.connectionInterruptions ?? []
+
+        if isReachable {
+            guard let index = events.lastIndex(where: { $0.restoredAt == nil }) else { return }
+            let observationGap = usage.lastConnectionObservationAt.map { date.timeIntervalSince($0) } ?? .infinity
+            events[index].restoredAt = date
+            if observationGap <= 60 {
+                events[index].observedDurationSeconds = max(0, date.timeIntervalSince(events[index].startedAt))
+            }
+        } else if events.contains(where: { $0.restoredAt == nil }) {
+            if let lastObservation = usage.lastConnectionObservationAt,
+               date.timeIntervalSince(lastObservation) < 30 {
+                return
+            }
+        } else {
+            events.append(ConnectionInterruption(startedAt: interruptionStartedAt ?? date))
+        }
+
+        usage.lastConnectionObservationAt = date
+        usage.connectionInterruptions = Array(events.suffix(100))
+        usageByProfile[profileId.uuidString] = usage
         saveUsage()
         refreshDataUsageSummary()
     }
@@ -325,14 +409,40 @@ public final class SettingsStore: ObservableObject {
         let todayKey = Self.dayKey(for: Date())
         let monthPrefix = String(todayKey.prefix(7))
         let monthDays = usage.days.filter { $0.key.hasPrefix(monthPrefix) }.values
+        let observedDays = Set(usage.observedDayKeys ?? Array(usage.days.keys))
+        let incompleteDays = Set(usage.incompleteDayKeys ?? [])
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let history = (0..<7).compactMap { offset -> DailyUsagePoint? in
+            guard let date = calendar.date(byAdding: .day, value: offset - 6, to: today) else { return nil }
+            let key = Self.dayKey(for: date)
+            let isComplete = observedDays.contains(key) && !incompleteDays.contains(key)
+            let day = usage.days[key] ?? ProfileUsage.Day()
+            return DailyUsagePoint(
+                date: date,
+                label: date.formatted(.dateTime.weekday(.abbreviated)),
+                downloadBytes: isComplete ? day.downloadBytes : nil,
+                uploadBytes: isComplete ? day.uploadBytes : nil
+            )
+        }
         dataUsageSummary = DataUsageSummary(
             todayDownloadBytes: usage.days[todayKey]?.downloadBytes ?? 0,
             todayUploadBytes: usage.days[todayKey]?.uploadBytes ?? 0,
             monthDownloadBytes: monthDays.reduce(0) { $0 + $1.downloadBytes },
             monthUploadBytes: monthDays.reduce(0) { $0 + $1.uploadBytes },
             totalDownloadBytes: usage.totalDownloadBytes,
-            totalUploadBytes: usage.totalUploadBytes
+            totalUploadBytes: usage.totalUploadBytes,
+            lastSuccessfulSyncAt: usage.lastSuccessfulSyncAt,
+            missingHistoryDayCount: history.filter { $0.totalBytes == nil }.count,
+            dailyHistory: history
         )
+    }
+
+    private static func trimDayKeys(_ observedDays: inout Set<String>, _ incompleteDays: inout Set<String>, relativeTo date: Date) {
+        let cutoffDate = Calendar.current.date(byAdding: .day, value: -366, to: date) ?? date
+        let cutoff = dayKey(for: cutoffDate)
+        observedDays = observedDays.filter { $0 >= cutoff }
+        incompleteDays = incompleteDays.filter { $0 >= cutoff }
     }
 
     private func saveUsage() {
@@ -484,3 +594,4 @@ public final class SettingsStore: ObservableObject {
         return trimmed.isEmpty ? "root" : trimmed
     }
 }
+

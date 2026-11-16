@@ -81,15 +81,15 @@ jobs:
           mkdir -p build/Payload
           cp -r build/Build/Products/Release-iphoneos/FibreMonitor.app build/Payload/
           cd build
-          zip -r -q FibreMonitor.ipa Payload
+          zip -r -q LinkWave.ipa Payload
           echo "IPA Size:"
-          ls -lh FibreMonitor.ipa
+          ls -lh LinkWave.ipa
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FibreMonitor-iOS-IPA
-          path: build/FibreMonitor.ipa
+          name: LinkWave-iOS-IPA
+          path: build/LinkWave.ipa
           retention-days: 30
 
       - name: Create GitHub Release
@@ -101,8 +101,9 @@ jobs:
           if [ -z "$TAG" ]; then
             TAG="v$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Build/Products/Release-iphoneos/FibreMonitor.app/Info.plist)-ios"
           fi
-          gh release create "$TAG" build/FibreMonitor.ipa \
-            --title "Fibre Monitor for iOS ($TAG)" \
+          gh release create "$TAG" build/LinkWave.ipa \
+            --title "LinkWave for iOS ($TAG)" \
             --notes "Unsigned build for Huawei OptiXstar HG8145X6 fibre routers. Install with Sideloadly, AltStore or SideStore." \
             --draft=false \
-            --prerelease=false || gh release upload "$TAG" build/FibreMonitor.ipa --clobber
+            --prerelease=false || gh release upload "$TAG" build/LinkWave.ipa --clobber
+

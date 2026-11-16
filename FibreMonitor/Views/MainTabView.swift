@@ -11,9 +11,15 @@ public struct MainTabView: View {
         TabView(selection: $viewModel.selectedTab) {
             DashboardView(viewModel: viewModel)
                 .tabItem {
-                    Label("Dashboard", systemImage: "gauge.with.dots.needle.67percent")
+                    Label("Home", systemImage: "house")
                 }
-                .tag(AppTab.dashboard)
+                .tag(AppTab.home)
+
+            UsageTabView(viewModel: viewModel)
+                .tabItem {
+                    Label("Usage", systemImage: "arrow.up.arrow.down.circle")
+                }
+                .tag(AppTab.usage)
 
             ClientsTabView(viewModel: viewModel)
                 .tabItem {
@@ -70,3 +76,4 @@ public struct MainTabView: View {
         }
     }
 }
+
