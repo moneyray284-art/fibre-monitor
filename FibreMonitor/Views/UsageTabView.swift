@@ -282,7 +282,7 @@ private struct DailyUsageHistoryCard: View {
 
     private func dayBar(_ point: DailyUsagePoint) -> some View {
         let displayedBytes = barBytes(for: point)
-        VStack(spacing: 6) {
+        return VStack(spacing: 6) {
             GeometryReader { geometry in
                 ZStack(alignment: .bottom) {
                     RoundedRectangle(cornerRadius: 5, style: .continuous)
