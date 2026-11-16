@@ -86,8 +86,7 @@ def main():
             ("AppIcon-Tinted.png", render("#000000", "#000000", "#FFFFFF", tinted=True), "tinted"),
         ],
     )
-    for name, (accent, _) in accents.items():
-        top, bottom = accent
+    for name, (top, bottom) in accents.items():
         save_set(f"AppIcon{name}", [(f"AppIcon{name}.png", render(top, bottom, "#FFFFFF"), None)])
 
 
