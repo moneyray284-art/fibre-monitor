@@ -65,21 +65,65 @@ public struct DashboardView: View {
                             .foregroundStyle(.primary)
                     }
                 }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 10) {
+                        homeToolbarButton(symbol: "gearshape", label: "Settings") {
+                            showSettings = true
+                        }
+                        homeToolbarButton(
+                            symbol: "arrow.clockwise",
+                            label: "Refresh router data",
+                            isDisabled: viewModel.isRefreshing || !settings.isConfigured,
+                            isRefreshing: viewModel.isRefreshing
+                        ) {
+                            Task { await viewModel.refreshAll() }
+                        }
                     }
-                    .accessibilityLabel("Settings")
-
-                    RouterSyncToolbarControl(viewModel: viewModel, isEnabled: settings.isConfigured)
                 }
             }
             .navigationDestination(isPresented: $showSettings) {
                 SettingsTabView(viewModel: viewModel)
                     .toolbar(.hidden, for: .tabBar)
             }
+        }
+    }
+
+    private func homeToolbarButton(
+        symbol: String,
+        label: String,
+        isDisabled: Bool = false,
+        isRefreshing: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Group {
+                if isRefreshing {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 15, weight: .semibold))
+                }
+            }
+            .frame(width: 38, height: 38)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .modifier(HomeToolbarCircleGlass())
+        .frame(width: 38, height: 38)
+        .accessibilityLabel(label)
+        .disabled(isDisabled)
+    }
+}
+
+private struct HomeToolbarCircleGlass: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular, in: Circle())
+        } else {
+            content
+                .background(.regularMaterial, in: Circle())
+                .overlay(Circle().stroke(Color.primary.opacity(0.1), lineWidth: 0.8))
         }
     }
 }
@@ -129,6 +173,13 @@ private struct RouterHeaderCard: View {
                 Text(statusText)
                     .font(.caption.weight(.bold))
                     .foregroundColor(statusColor)
+                if let lastUpdate = viewModel.lastUpdate {
+                    Text("• Updated \(lastUpdate, style: .relative)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
                 Spacer()
                 if viewModel.isLoggedOut {
                     Button("Reconnect") {

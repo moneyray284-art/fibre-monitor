@@ -99,6 +99,7 @@ public final class MonitorViewModel: ObservableObject {
 
     /// Closes the router session when the app backgrounds so its web UI stays usable for others.
     public func endForegroundSession() {
+        WidgetSnapshotStore.updateUsage(summary: settings.dataUsageSummary, at: Date())
         resetReachabilityFailures()
         Task { await client.logout() }
     }
@@ -287,6 +288,7 @@ public final class MonitorViewModel: ObservableObject {
             lastUpdate = syncDate
             WidgetSnapshotStore.save(
                 rxPowerDbm: optical.rxPowerDbm,
+                routerHost: settings.activeProfile?.host,
                 summary: settings.dataUsageSummary,
                 onlineClientCount: onlineDevices.count,
                 pppoeUptimeSeconds: wan.connectionType.lowercased().contains("pppoe") ? wan.uptimeSeconds : nil,
@@ -452,32 +454,41 @@ public final class MonitorViewModel: ObservableObject {
         }
     }
 
-    public func blockWifiDevice(_ device: OntDevice) async {
+    @discardableResult
+    public func blockWifiDevice(_ device: OntDevice, clearConflictingEntries: Bool = false) async -> Bool {
         let ssidIndex: Int
         switch device.port {
         case .wifi24(let index), .wifi5(let index): ssidIndex = index
         case .lan, .other:
             actionMessage = "Only a Wi-Fi client can be blocked from the WLAN blacklist."
-            return
+            return false
         }
         guard ssidIndex > 0 else {
             actionMessage = "The router did not report this device's Wi-Fi network, so it cannot be blocked safely."
-            return
+            return false
         }
         do {
             let state = try await client.blockWifiDevice(
                 device,
                 name: name(for: device),
-                ssidName: "SSID-\(ssidIndex)"
+                ssidName: "SSID-\(ssidIndex)",
+                clearConflictingEntries: clearConflictingEntries
             )
             blockedDevices = state.activeBlockedDevices
             devices = (try? await client.fetchDevices()) ?? devices
             Haptics.notify(.success)
             actionMessage = "Blocked \(name(for: device)) from Wi-Fi."
             await refreshAfterMutation()
+            return false
         } catch {
+            if let ontError = error as? OntError,
+               ontError == .macFilterPolicyConflict,
+               !clearConflictingEntries {
+                return true
+            }
             Haptics.notify(.error)
             actionMessage = Self.describe(error, host: settings.host)
+            return false
         }
     }
 

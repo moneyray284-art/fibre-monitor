@@ -28,7 +28,7 @@ public protocol RouterProvider: Sendable {
     func renameDevice(_ device: OntDevice, alias: String) async throws -> [OntDevice]
     func reboot() async throws
     func fetchWlanMacBlacklist() async throws -> WlanMacBlacklistState
-    func blockWifiDevice(_ device: OntDevice, name: String, ssidName: String) async throws -> WlanMacBlacklistState
+    func blockWifiDevice(_ device: OntDevice, name: String, ssidName: String, clearConflictingEntries: Bool) async throws -> WlanMacBlacklistState
     func unblockWifiDevice(_ device: BlockedRouterDevice) async throws -> WlanMacBlacklistState
 }
 
@@ -76,7 +76,7 @@ public struct GenericRouterProvider: RouterProvider {
     public func renameDevice(_ device: OntDevice, alias: String) async throws -> [OntDevice] { try unsupported() }
     public func reboot() async throws { throw GenericRouterProviderError() }
     public func fetchWlanMacBlacklist() async throws -> WlanMacBlacklistState { try unsupported() }
-    public func blockWifiDevice(_ device: OntDevice, name: String, ssidName: String) async throws -> WlanMacBlacklistState { try unsupported() }
+    public func blockWifiDevice(_ device: OntDevice, name: String, ssidName: String, clearConflictingEntries: Bool) async throws -> WlanMacBlacklistState { try unsupported() }
     public func unblockWifiDevice(_ device: BlockedRouterDevice) async throws -> WlanMacBlacklistState { try unsupported() }
 }
 

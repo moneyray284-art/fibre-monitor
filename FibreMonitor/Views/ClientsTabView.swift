@@ -144,6 +144,8 @@ public struct ClientsTabView: View {
     @State private var actionDevice: OntDevice?
     @State private var actionBlockedDevice: BlockedRouterDevice?
     @State private var showDeviceActions = false
+    @State private var pendingBlockConflictDevice: OntDevice?
+    @State private var showBlockConflictAlert = false
 
     public init(viewModel: MonitorViewModel) {
         self.viewModel = viewModel
@@ -276,7 +278,7 @@ public struct ClientsTabView: View {
                 }
                 if device.port.isWifi && !isThisPhone(device) {
                     Button("Block Device", role: .destructive) {
-                        Task { await viewModel.blockWifiDevice(device) }
+                        requestBlock(device)
                         clearActionTarget()
                     }
                 }
@@ -295,10 +297,29 @@ public struct ClientsTabView: View {
                 Text("Restore Wi-Fi access for \(device.name.isEmpty ? device.mac : device.name).")
             }
         }
+        .alert("Existing Access-Control Entries", isPresented: $showBlockConflictAlert) {
+            Button("Clear & Block Device", role: .destructive) {
+                guard let device = pendingBlockConflictDevice else { return }
+                pendingBlockConflictDevice = nil
+                Task { await viewModel.blockWifiDevice(device, clearConflictingEntries: true) }
+            }
+            Button("Cancel", role: .cancel) { pendingBlockConflictDevice = nil }
+        } message: {
+            Text("This clears the router's existing WLAN and LAN MAC access-control entries, enables blacklist mode, and blocks the selected device.")
+        }
     }
 
     private func currentSnapshot(of device: OntDevice) -> OntDevice {
         viewModel.devices.first(where: { $0.id == device.id }) ?? device
+    }
+
+    private func requestBlock(_ device: OntDevice) {
+        Task { @MainActor in
+            if await viewModel.blockWifiDevice(device) {
+                pendingBlockConflictDevice = device
+                showBlockConflictAlert = true
+            }
+        }
     }
 
     private func clientButton(for device: OntDevice) -> some View {
@@ -571,9 +592,14 @@ private struct CollapsibleClientSectionHeader: View {
                     .frame(width: 16)
                     .accessibilityHidden(true)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.bar)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets())
         .accessibilityLabel("\(title), \(count) devices")
         .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
         .accessibilityHint("Double-tap to \(isExpanded ? "collapse" : "expand") this section")

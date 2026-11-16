@@ -446,6 +446,8 @@ public actor HuaweiOntClient {
 
     private static let wlanMacFilterPage = "/html/bbsp/wlanmacfilter/wlanmacfilter.asp"
     private static let wlanMacFilterObject = "InternetGatewayDevice.X_HW_Security.WLANMacFilter"
+    private static let lanMacFilterPage = "/html/bbsp/macfilter/macfilter.asp"
+    private static let lanMacFilterObject = "InternetGatewayDevice.X_HW_Security.MacFilter"
 
     public func fetchWlanMacBlacklist() async throws -> WlanMacBlacklistState {
         let page = try await fetch(.init(.get, Self.wlanMacFilterPage, ajax: false), expect: "MacFilterSrc")
@@ -492,7 +494,8 @@ public actor HuaweiOntClient {
     public func blockWifiDevice(
         _ device: OntDevice,
         name: String,
-        ssidName: String
+        ssidName: String,
+        clearConflictingEntries: Bool = false
     ) async throws -> WlanMacBlacklistState {
         let isWifi: Bool
         switch device.port {
@@ -509,10 +512,25 @@ public actor HuaweiOntClient {
         var state = try await fetchWlanMacBlacklist()
         if state.policy != "0" || !state.isEnabled {
             // Changing an existing whitelist would invert the meaning of every current entry.
-            // Only switch policy automatically when both WLAN and LAN filter lists are empty.
-            let wiredPage = try await fetch(.init(.get, "/html/bbsp/macfilter/macfilter.asp", ajax: false), expect: "MacFilter")
-            let hasWiredEntries = !HuaweiJs.instances(of: "stMacFilter", in: wiredPage).isEmpty
-            guard state.devices.isEmpty, !hasWiredEntries else { throw OntError.macFilterPolicyConflict }
+            // The UI must confirm before this explicit replacement path clears both lists.
+            let wlanPage = try await fetch(.init(.get, Self.wlanMacFilterPage, ajax: false), expect: "MacFilterSrc")
+            let wiredPage = try await fetch(.init(.get, Self.lanMacFilterPage, ajax: false), expect: "MacFilter")
+            let wlanRows = HuaweiJs.instances(of: "stMacFilter", in: wlanPage)
+            let wiredRows = HuaweiJs.instances(of: "stMacFilter", in: wiredPage)
+            let hasEntries = !wlanRows.isEmpty || !wiredRows.isEmpty
+            if hasEntries && !clearConflictingEntries { throw OntError.macFilterPolicyConflict }
+            if clearConflictingEntries {
+                try await clearMacFilterEntries(wlanRows: wlanRows, wiredRows: wiredRows)
+                state = try await fetchWlanMacBlacklist()
+                let verifiedWired = try await fetch(.init(.get, Self.lanMacFilterPage, ajax: false), expect: "MacFilter")
+                guard state.devices.isEmpty,
+                      HuaweiJs.instances(of: "stMacFilter", in: verifiedWired).isEmpty else {
+                    throw OntError.notConfirmed
+                }
+            } else if !state.devices.isEmpty {
+                throw OntError.macFilterPolicyConflict
+            }
+
             let token = try await freshTokenLoggingIn()
             _ = try await transport.send(.init(.post,
                 "/html/bbsp/wlanmacfilter/set.cgi?x=InternetGatewayDevice.X_HW_Security&RequestFile=html/bbsp/wlanmacfilter/wlanmacfilter.asp",
@@ -543,6 +561,32 @@ public actor HuaweiOntClient {
             throw OntError.notConfirmed
         }
         return state
+    }
+
+    private func clearMacFilterEntries(wlanRows: [[String]], wiredRows: [[String]]) async throws {
+        let wlanDomains = wlanRows.compactMap(\.first).filter { Self.isMacFilterRecord($0, in: Self.wlanMacFilterObject) }
+        let wiredDomains = wiredRows.compactMap(\.first).filter { Self.isMacFilterRecord($0, in: Self.lanMacFilterObject) }
+
+        for domain in wlanDomains {
+            let token = try await freshTokenLoggingIn()
+            let path = "/html/bbsp/wlanmacfilter/del.cgi?x=\(Self.wlanMacFilterObject)&RequestFile=html/bbsp/wlanmacfilter/wlanmacfilter.asp"
+            _ = try await transport.send(.init(.post, path, form: [
+                (domain, ""), ("x.X_HW_Token", token)
+            ], ajax: false), host: credentials.host)
+        }
+        for domain in wiredDomains {
+            let token = try await freshTokenLoggingIn()
+            let path = "/html/bbsp/macfilter/del.cgi?x=\(Self.lanMacFilterObject)&RequestFile=html/bbsp/macfilter/macfilter.asp"
+            _ = try await transport.send(.init(.post, path, form: [
+                (domain, ""), ("x.X_HW_Token", token)
+            ], ajax: false), host: credentials.host)
+        }
+    }
+
+    private static func isMacFilterRecord(_ domain: String, in object: String) -> Bool {
+        let prefix = object + "."
+        guard domain.hasPrefix(prefix) else { return false }
+        return Int(domain.dropFirst(prefix.count)) != nil
     }
 
     public func unblockWifiDevice(_ device: BlockedRouterDevice) async throws -> WlanMacBlacklistState {

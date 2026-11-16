@@ -4,6 +4,7 @@ import UIKit
 import WidgetKit
 
 private struct WidgetSnapshot: Codable {
+    var routerHost: String?
     var rxPowerDbm: Double?
     var todayDownloadBytes: UInt64
     var todayUploadBytes: UInt64
@@ -11,24 +12,43 @@ private struct WidgetSnapshot: Codable {
     var onlineClientCount: Int
     var pppoeUptimeSeconds: Int?
     var updatedAt: Date
+    var routerReachableAt: Date?
+
+    static let appGroupID = "group.dev.mattdev0.fibremonitor"
+    static let snapshotKey = "linkwave.widget.snapshot.v1"
+    static let snapshotFileName = "LinkWaveWidgetSnapshot.json"
 
     static let empty = WidgetSnapshot(
+        routerHost: nil,
         rxPowerDbm: nil,
         todayDownloadBytes: 0,
         todayUploadBytes: 0,
         todayTotalBytes: 0,
         onlineClientCount: 0,
         pppoeUptimeSeconds: nil,
-        updatedAt: .distantPast
+        updatedAt: .distantPast,
+        routerReachableAt: nil
     )
 
     static func load() -> WidgetSnapshot {
-        guard let defaults = UserDefaults(suiteName: "group.dev.mattdev0.fibremonitor"),
-              let data = defaults.data(forKey: "linkwave.widget.snapshot.v1"),
+        let defaultsData = UserDefaults(suiteName: appGroupID)?.data(forKey: snapshotKey)
+        let fileData = snapshotURL.flatMap { try? Data(contentsOf: $0) }
+        guard let data = defaultsData ?? fileData,
               let snapshot = try? JSONDecoder().decode(WidgetSnapshot.self, from: data) else {
             return .empty
         }
         return snapshot
+    }
+
+    static func persist(_ snapshot: WidgetSnapshot) {
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        UserDefaults(suiteName: appGroupID)?.set(data, forKey: snapshotKey)
+        if let snapshotURL { try? data.write(to: snapshotURL, options: .atomic) }
+    }
+
+    private static var snapshotURL: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
+            .appendingPathComponent(snapshotFileName, isDirectory: false)
     }
 }
 
@@ -42,13 +62,15 @@ private struct LinkWaveWidgetProvider: TimelineProvider {
         LinkWaveWidgetEntry(
             date: Date(),
             snapshot: WidgetSnapshot(
+                routerHost: nil,
                 rxPowerDbm: -15.8,
                 todayDownloadBytes: 880_000_000,
                 todayUploadBytes: 120_000_000,
                 todayTotalBytes: 1_000_000_000,
                 onlineClientCount: 7,
                 pppoeUptimeSeconds: 86_400,
-                updatedAt: Date()
+                updatedAt: Date(),
+                routerReachableAt: nil
             )
         )
     }
@@ -58,9 +80,54 @@ private struct LinkWaveWidgetProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<LinkWaveWidgetEntry>) -> Void) {
-        let now = Date()
-        let entry = LinkWaveWidgetEntry(date: now, snapshot: .load())
-        completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(30 * 60))))
+        Task {
+            let now = Date()
+            let snapshot = await WidgetRouterStatus.check(snapshot: .load())
+            let entry = LinkWaveWidgetEntry(date: now, snapshot: snapshot)
+            completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(30 * 60))))
+        }
+    }
+}
+
+/// Probes Huawei's unauthenticated token endpoint for local reachability. Credentials stay in the app's Keychain.
+private enum WidgetRouterStatus {
+    static func check(snapshot: WidgetSnapshot) async -> WidgetSnapshot {
+        let hostCandidates = [snapshot.routerHost, "192.168.100.1", "192.168.2.1"]
+            .compactMap { $0 }
+            .map(cleanHost)
+            .filter { !$0.isEmpty }
+        var tried = Set<String>()
+
+        for host in hostCandidates where tried.insert(host).inserted {
+            guard let url = URL(string: "http://\(host)/asp/GetRandCount.asp") else { continue }
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 2.5
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let response = response as? HTTPURLResponse,
+                      (200..<300).contains(response.statusCode),
+                      let html = String(data: data, encoding: .utf8),
+                      !html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      !html.contains("<html"),
+                      !html.contains("txt_Username") else { continue }
+                var refreshed = snapshot
+                refreshed.routerHost = host
+                refreshed.routerReachableAt = Date()
+                WidgetSnapshot.persist(refreshed)
+                return refreshed
+            } catch {
+                continue
+            }
+        }
+        return snapshot
+    }
+
+    private static func cleanHost(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "http://", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "https://", with: "", options: .caseInsensitive)
+            .split(separator: "/", maxSplits: 1)
+            .first.map(String.init) ?? ""
     }
 }
 
@@ -117,10 +184,20 @@ private struct LinkWaveWidgetView: View {
                     .foregroundStyle(Color.cyan)
                 Spacer()
                 if entry.snapshot.updatedAt == .distantPast {
-                    Text("Waiting for first sync")
+                    if let reachableAt = entry.snapshot.routerReachableAt {
+                        HStack(spacing: 3) {
+                            Text("Router online")
+                            Text(reachableAt, style: .relative)
+                        }
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    } else {
+                        Text("Waiting for first sync")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 } else {
                     HStack(spacing: 3) {
                         Text("Updated")

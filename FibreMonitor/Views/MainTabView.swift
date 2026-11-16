@@ -63,7 +63,6 @@ public struct MainTabView: View {
             AppIconManager.apply(settings.appIconChoice)
             if !viewModel.awaitingRouterSelection {
                 if !viewModel.settings.isConfigured {
-                    viewModel.selectedTab = .home
                     showInitialSettings = true
                 } else {
                     Task { await viewModel.refreshIfStale(force: true) }

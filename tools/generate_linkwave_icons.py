@@ -72,10 +72,10 @@ def save_set(name, variants):
 
 def main():
     accents = {
-        "Orange": ("#FF9B42", "#8D431F"),
-        "Blue": ("#65D8FF", "#1769D2"),
-        "Purple": ("#D9A0FF", "#7546D8"),
-        "Green": ("#77F0B3", "#168568"),
+        "Orange": ("#FFB34F", "#E34A20"),
+        "Blue": ("#5DE1FF", "#1758D4"),
+        "Purple": ("#E08EFF", "#6726C9"),
+        "Green": ("#71F2A7", "#08775B"),
     }
     primary_accent = accents["Blue"][0]
     save_set(
@@ -87,15 +87,8 @@ def main():
         ],
     )
     for name, (accent, _) in accents.items():
-        if name == "Orange":
-            top, bottom = "#3A241A", "#130D0A"
-        elif name == "Blue":
-            top, bottom = "#173B59", "#06111D"
-        elif name == "Purple":
-            top, bottom = "#38264B", "#110C1B"
-        else:
-            top, bottom = "#173D32", "#06130F"
-        save_set(f"AppIcon{name}", [(f"AppIcon{name}.png", render(top, bottom, accent), None)])
+        top, bottom = accent
+        save_set(f"AppIcon{name}", [(f"AppIcon{name}.png", render(top, bottom, "#FFFFFF"), None)])
 
 
 if __name__ == "__main__":
