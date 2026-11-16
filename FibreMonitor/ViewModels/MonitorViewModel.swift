@@ -30,6 +30,7 @@ public final class MonitorViewModel: ObservableObject {
     @Published public private(set) var isConnected = false
     @Published public private(set) var isRefreshing = false
     @Published public private(set) var lastUpdate: Date?
+    @Published public private(set) var routerResponseTimeMs: Int?
     @Published public var errorMessage: String?
     @Published public private(set) var isConnectionFailure = false
     @Published public var actionMessage: String?
@@ -202,6 +203,7 @@ public final class MonitorViewModel: ObservableObject {
         isConnected = false
         isRefreshing = false
         lastUpdate = nil
+        routerResponseTimeMs = nil
         errorMessage = nil
         isConnectionFailure = false
         actionMessage = nil
@@ -233,7 +235,9 @@ public final class MonitorViewModel: ObservableObject {
         isRefreshing = true
         defer { isRefreshing = false }
         do {
+            let requestStartedAt = ProcessInfo.processInfo.systemUptime
             traffic = try await client.pollTraffic()
+            routerResponseTimeMs = max(0, Int((ProcessInfo.processInfo.systemUptime - requestStartedAt) * 1_000))
             if let profileId = settings.activeProfile?.id,
                let downloaded = traffic.cumulativeDownloadBytes,
                let uploaded = traffic.cumulativeUploadBytes {
@@ -269,6 +273,7 @@ public final class MonitorViewModel: ObservableObject {
             resetReachabilityFailures()
             lastUpdate = syncDate
         } catch {
+            if error is CancellationError || Self.isCancellationError(error) { return }
             isConnected = false
             isConnectionFailure = Self.isReachabilityError(error)
             errorMessage = Self.describe(error, host: settings.host)
@@ -446,6 +451,12 @@ public final class MonitorViewModel: ObservableObject {
         default:
             return false
         }
+    }
+
+    static func isCancellationError(_ error: Error) -> Bool {
+        if let url = error as? URLError, url.code == .cancelled { return true }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 
     static func describe(_ error: Error, host: String = "") -> String {

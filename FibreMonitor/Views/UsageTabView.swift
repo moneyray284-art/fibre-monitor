@@ -19,6 +19,8 @@ public struct UsageTabView: View {
                         UsageTotalsCard(summary: settings.dataUsageSummary)
                         DailyUsageHistoryCard(
                             points: settings.dataUsageSummary.dailyHistory,
+                            todayDownloadBytes: settings.dataUsageSummary.todayDownloadBytes,
+                            todayUploadBytes: settings.dataUsageSummary.todayUploadBytes,
                             missingDayCount: settings.dataUsageSummary.missingHistoryDayCount
                         )
                     } else {
@@ -103,12 +105,21 @@ private struct SyncStatusCard: View {
             }
 
             if summary.missingHistoryDayCount > 0 {
-                Label(
-                    "No complete reading for \(summary.missingHistoryDayCount) of the last 7 days",
-                    systemImage: "exclamationmark.circle.fill"
-                )
-                .font(.caption.weight(.medium))
-                .foregroundColor(.orange)
+                if hasPartialTodayUsage {
+                    Label(
+                        "Today is partial; \(incompletePreviousDayCount) of the previous 6 days incomplete",
+                        systemImage: "exclamationmark.circle.fill"
+                    )
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(.orange)
+                } else {
+                    Label(
+                        "No complete reading for \(summary.missingHistoryDayCount) of the last 7 days",
+                        systemImage: "exclamationmark.circle.fill"
+                    )
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(.orange)
+                }
             } else {
                 Label("Daily history has readings for the last 7 days", systemImage: "checkmark.circle.fill")
                     .font(.caption.weight(.medium))
@@ -122,6 +133,19 @@ private struct SyncStatusCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .liquidGlassCard()
         .accessibilityElement(children: .combine)
+    }
+
+    private var hasPartialTodayUsage: Bool {
+        let hasTraffic = summary.todayDownloadBytes > 0 || summary.todayUploadBytes > 0
+        guard hasTraffic,
+              let today = summary.dailyHistory.first(where: { Calendar.current.isDateInToday($0.date) }) else {
+            return false
+        }
+        return today.totalBytes == nil
+    }
+
+    private var incompletePreviousDayCount: Int {
+        max(0, summary.missingHistoryDayCount - (hasPartialTodayUsage ? 1 : 0))
     }
 }
 
@@ -197,10 +221,28 @@ private struct UsageTotalsCard: View {
 
 private struct DailyUsageHistoryCard: View {
     let points: [DailyUsagePoint]
+    let todayDownloadBytes: UInt64
+    let todayUploadBytes: UInt64
     let missingDayCount: Int
 
     private var maximumBytes: Double {
-        max(1, Double(points.compactMap(\.totalBytes).max() ?? 0))
+        max(1, Double(points.compactMap { barBytes(for: $0) }.max() ?? 0))
+    }
+
+    private var todayTotalBytes: UInt64 {
+        let (total, overflow) = todayDownloadBytes.addingReportingOverflow(todayUploadBytes)
+        return overflow ? UInt64.max : total
+    }
+
+    private var hasPartialTodayUsage: Bool {
+        todayTotalBytes > 0
+            && points.contains { Calendar.current.isDateInToday($0.date) && $0.totalBytes == nil }
+    }
+
+    private func barBytes(for point: DailyUsagePoint) -> UInt64? {
+        if let total = point.totalBytes { return total }
+        if Calendar.current.isDateInToday(point.date), todayTotalBytes > 0 { return todayTotalBytes }
+        return nil
     }
 
     var body: some View {
@@ -224,7 +266,11 @@ private struct DailyUsageHistoryCard: View {
                 .frame(height: 138)
             }
 
-            if missingDayCount > 0 {
+            if hasPartialTodayUsage {
+                Text("Today’s bar shows recorded usage so far. Blank bars are days without a complete reading.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            } else if missingDayCount > 0 {
                 Text("Blank days have no complete reading. If the app missed a long interval, the router can provide the overall counter change, but it cannot split that amount accurately by day.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
@@ -235,13 +281,14 @@ private struct DailyUsageHistoryCard: View {
     }
 
     private func dayBar(_ point: DailyUsagePoint) -> some View {
+        let displayedBytes = barBytes(for: point)
         VStack(spacing: 6) {
             GeometryReader { geometry in
                 ZStack(alignment: .bottom) {
                     RoundedRectangle(cornerRadius: 5, style: .continuous)
                         .fill(Color.secondary.opacity(0.1))
 
-                    if let total = point.totalBytes {
+                    if let total = displayedBytes {
                         RoundedRectangle(cornerRadius: 5, style: .continuous)
                             .fill(Color.accentColor)
                             .frame(height: total == 0 ? 3 : max(3, geometry.size.height * CGFloat(Double(total) / maximumBytes)))
@@ -258,7 +305,7 @@ private struct DailyUsageHistoryCard: View {
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(point.date.formatted(date: .complete, time: .omitted))
-            .accessibilityValue(point.totalBytes.map(Self.format) ?? "No complete reading")
+            .accessibilityValue(accessibilityValue(for: point, displayedBytes: displayedBytes))
 
             Text(point.label)
                 .font(.caption2)
@@ -266,6 +313,14 @@ private struct DailyUsageHistoryCard: View {
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func accessibilityValue(for point: DailyUsagePoint, displayedBytes: UInt64?) -> String {
+        guard let displayedBytes else { return "No complete reading" }
+        let value = Self.format(displayedBytes)
+        return Calendar.current.isDateInToday(point.date) && point.totalBytes == nil
+            ? "\(value) so far, partial today"
+            : value
     }
 
     private static func format(_ bytes: UInt64) -> String {

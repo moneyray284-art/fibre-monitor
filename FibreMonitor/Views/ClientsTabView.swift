@@ -135,8 +135,7 @@ public struct ClientsTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @State private var searchText = ""
     @State private var selectedDevice: OntDevice?
-    @State private var showOffline = true
-    @State private var selectedFilter: ClientDeviceFilter = .all
+    @State private var selectedFilter: ClientDeviceFilter = .online
     @State private var localWiFiIPv4: String?
 
     public init(viewModel: MonitorViewModel) {
@@ -188,30 +187,20 @@ public struct ClientsTabView: View {
 
                         if !visibleOffline.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
-                                HStack {
-                                    CardHeader(icon: "moon.zzz", title: "Offline") {
-                                        Pill(text: "\(visibleOffline.count)", color: .secondary)
-                                    }
-                                    Button(showOffline ? "Hide" : "Show") {
-                                        withAnimation { showOffline.toggle() }
-                                    }
-                                    .font(.caption.weight(.semibold))
-                                    .liquidGlassSmallButton()
-                                    .accessibilityLabel(showOffline ? "Hide offline devices" : "Show offline devices")
+                                CardHeader(icon: "moon.zzz", title: "Offline") {
+                                    Pill(text: "\(visibleOffline.count)", color: .secondary)
                                 }
-                                if showOffline {
-                                    ForEach(visibleOffline) { device in
-                                        Button {
-                                            selectedDevice = device
-                                        } label: {
-                                            ClientRow(
-                                                device: device,
-                                                displayName: viewModel.name(for: device),
-                                                isThisPhone: isThisPhone(device)
-                                            )
-                                        }
-                                        .buttonStyle(.plain)
+                                ForEach(visibleOffline) { device in
+                                    Button {
+                                        selectedDevice = device
+                                    } label: {
+                                        ClientRow(
+                                            device: device,
+                                            displayName: viewModel.name(for: device),
+                                            isThisPhone: isThisPhone(device)
+                                        )
                                     }
+                                    .buttonStyle(.plain)
                                 }
                             }
                             .liquidGlassCard()
@@ -282,7 +271,7 @@ public struct ClientsTabView: View {
             } label: {
                 HStack {
                     Image(systemName: "square.grid.2x2")
-                    Text("All Devices (\(allCount))")
+                    Text("All (\(allCount))")
                     Spacer()
                     if selectedFilter == .all {
                         Image(systemName: "checkmark")

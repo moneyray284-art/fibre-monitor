@@ -40,11 +40,6 @@ public struct SettingsTabView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await viewModel.refreshAll() }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if !settings.profiles.isEmpty { EditButton() }
-            }
-        }
         .alert("Restart Router?", isPresented: $showRebootAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Restart", role: .destructive) {
@@ -199,7 +194,11 @@ public struct SettingsTabView: View {
                 Label("Add Router", systemImage: "plus.circle.fill")
             }
         } header: {
-            Text("Routers")
+            HStack {
+                Text("Routers")
+                Spacer()
+                if !settings.profiles.isEmpty { EditButton() }
+            }
         } footer: {
             Text("Tap a router to switch to it. Switching logs out of the current router session first. Swipe or tap Edit to reorder or remove a profile.")
         }
@@ -337,7 +336,18 @@ public struct SettingsTabView: View {
 
     private var aboutSection: some View {
         Section("About") {
-            LabeledContent("Version", value: appVersion)
+            LabeledContent("Version") {
+                HStack(spacing: 7) {
+                    Text(appVersion)
+                        .font(.subheadline.monospacedDigit())
+                    Text("Beta")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.accentColor.opacity(0.12), in: Capsule())
+                }
+            }
             LabeledContent("Router", value: activeRouterDescription)
             if let config = settings.activeProfile?.cfgMode, !config.isEmpty {
                 LabeledContent("Configuration", value: config)

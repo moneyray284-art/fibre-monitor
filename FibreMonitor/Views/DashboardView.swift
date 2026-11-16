@@ -31,9 +31,12 @@ public struct DashboardView: View {
                         }
 
                         CompactSpeedCard(traffic: viewModel.traffic)
-                        HomeUsageCard(summary: settings.dataUsageSummary) {
-                            viewModel.selectedTab = .usage
-                        }
+                        HomeSummaryRow(
+                            summary: settings.dataUsageSummary,
+                            onlineCount: viewModel.onlineDevices.count,
+                            openUsage: { viewModel.selectedTab = .usage },
+                            openClients: { viewModel.selectedTab = .clients }
+                        )
                         ConnectionHistoryCard(events: settings.connectionHistory)
                     }
                 }
@@ -44,13 +47,27 @@ public struct DashboardView: View {
             .background { LiquidGlassBackground() }
             .liquidGlassScrollEdges()
             .refreshable { await viewModel.refreshAll() }
-            .navigationTitle("Home")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    RouterSwitcherMenu(viewModel: viewModel, settings: settings) {
+                    Button {
                         showSettings = true
+                    } label: {
+                        HStack(spacing: 9) {
+                            ProfileAvatarView(size: 36)
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text("LinkWave")
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                Text("Home")
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                            }
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("LinkWave Home. Open profile and settings.")
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
@@ -90,10 +107,8 @@ private struct RouterHeaderCard: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .fill(Color.green.opacity(0.16))
-                        .frame(width: 44, height: 44)
-                    Image(systemName: "wifi.router")
-                        .font(.title3.weight(.semibold))
-                        .foregroundColor(.green)
+                        .frame(width: 66, height: 54)
+                    HuaweiOptiXstarIllustration(isOnline: viewModel.isConnected, wifiOnline: wifiOnline)
                 }
                 .accessibilityHidden(true)
 
@@ -109,10 +124,12 @@ private struct RouterHeaderCard: View {
 
                 Spacer(minLength: 8)
 
-                if !viewModel.optical.registrationState.isEmpty {
-                    Pill(
-                        text: viewModel.optical.registrationText,
-                        color: viewModel.optical.isRegistered ? .green : .orange
+                if let rxPower = viewModel.optical.rxPowerDbm {
+                    FibreSignalMeter(rxPowerDbm: rxPower)
+                } else {
+                    RouterConnectivityFallback(
+                        isOnline: viewModel.isConnected,
+                        responseTimeMs: viewModel.routerResponseTimeMs
                     )
                 }
             }
@@ -152,6 +169,139 @@ private struct RouterHeaderCard: View {
     private var statusText: String {
         if viewModel.isLoggedOut { return "LOGGED OUT" }
         return viewModel.isConnected ? "CONNECTED" : (viewModel.isRefreshing ? "CONNECTING" : "OFFLINE")
+    }
+
+    private var wifiOnline: Bool {
+        let reportedStates = viewModel.wifi.radios.map(\.enabled) + viewModel.wifi.networks.map(\.enabled)
+        return reportedStates.isEmpty ? viewModel.isConnected : reportedStates.contains(true)
+    }
+}
+
+private struct HuaweiOptiXstarIllustration: View {
+    let isOnline: Bool
+    let wifiOnline: Bool
+
+    private var ponLight: Color { isOnline ? .green : .red }
+    private var wlanLight: Color { isOnline && wifiOnline ? .green : .orange }
+
+    var body: some View {
+        ZStack {
+            Capsule()
+                .fill(LinearGradient(colors: [.white, Color(red: 0.80, green: 0.84, blue: 0.88)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 3, height: 22)
+                .offset(x: -16, y: -13)
+            Capsule()
+                .fill(LinearGradient(colors: [.white, Color(red: 0.80, green: 0.84, blue: 0.88)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 3, height: 22)
+                .offset(x: 16, y: -13)
+
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(LinearGradient(
+                    colors: [.white, Color(red: 0.94, green: 0.96, blue: 0.98)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ))
+                .frame(width: 62, height: 25)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(Color.primary.opacity(0.12), lineWidth: 0.8)
+                }
+                .overlay(alignment: .bottomLeading) {
+                    HStack(spacing: 5) {
+                        led("PON", color: ponLight)
+                        led("WLAN", color: wlanLight)
+                    }
+                    .padding(.leading, 7)
+                    .padding(.bottom, 5)
+                }
+                .overlay(alignment: .topTrailing) {
+                    HStack(spacing: 2) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            Capsule().fill(Color.gray.opacity(0.38)).frame(width: 1.5, height: 5)
+                        }
+                    }
+                    .padding(.top, 5)
+                    .padding(.trailing, 7)
+                }
+                .shadow(color: .black.opacity(0.16), radius: 3, y: 2)
+        }
+        .frame(width: 66, height: 50)
+        .accessibilityLabel("Huawei OptiXstar HG8145X6 router with PON and WLAN status lights")
+    }
+
+    private func led(_ label: String, color: Color) -> some View {
+        HStack(spacing: 2) {
+            Circle()
+                .fill(color)
+                .frame(width: 4, height: 4)
+                .shadow(color: color.opacity(0.8), radius: 2)
+            Text(label)
+                .font(.system(size: 4.5, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.gray)
+        }
+    }
+}
+
+private struct FibreSignalMeter: View {
+    let rxPowerDbm: Double
+
+    private var level: Int {
+        if rxPowerDbm >= -24 { return 4 }
+        if rxPowerDbm > -27 { return 3 }
+        if rxPowerDbm > -29 { return 2 }
+        return 1
+    }
+
+    private var tint: Color {
+        switch level {
+        case 4, 3: .green
+        case 2: .yellow
+        default: .red
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            HStack(alignment: .bottom, spacing: 2) {
+                ForEach(0..<4, id: \.self) { index in
+                    Capsule()
+                        .fill(index < level ? tint : Color.secondary.opacity(0.18))
+                        .frame(width: 4, height: CGFloat(7 + index * 4))
+                }
+            }
+            Text(String(format: "%.2f dBm", rxPowerDbm))
+                .font(.caption2.weight(.semibold).monospacedDigit())
+                .foregroundStyle(tint)
+            Text("FIBRE RX")
+                .font(.system(size: 8, weight: .bold, design: .rounded))
+                .foregroundStyle(.tertiary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Fibre signal")
+        .accessibilityValue("\(level) of 4 bars, \(String(format: "%.2f", rxPowerDbm)) dBm")
+    }
+}
+
+private struct RouterConnectivityFallback: View {
+    let isOnline: Bool
+    let responseTimeMs: Int?
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Label(isOnline ? "ONLINE" : "OFFLINE", systemImage: "circle.fill")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(isOnline ? Color.green : Color.red)
+            Text(isOnline ? responseLabel : "Router unreachable")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var responseLabel: String {
+        if let responseTimeMs { return "Latency \(responseTimeMs) ms" }
+        return "Latency unavailable"
     }
 }
 
@@ -214,46 +364,80 @@ private struct CompactSpeedCard: View {
     }
 }
 
-private struct HomeUsageCard: View {
+private struct HomeSummaryRow: View {
     let summary: DataUsageSummary
+    let onlineCount: Int
     let openUsage: () -> Void
+    let openClients: () -> Void
 
-    private var monthTotalBytes: UInt64 {
-        let (total, overflow) = summary.monthDownloadBytes.addingReportingOverflow(summary.monthUploadBytes)
+    private var todayTotalBytes: UInt64 {
+        let (total, overflow) = summary.todayDownloadBytes.addingReportingOverflow(summary.todayUploadBytes)
         return overflow ? UInt64.max : total
     }
 
     var body: some View {
-        Button(action: openUsage) {
-            HStack(spacing: 12) {
-                Image(systemName: "arrow.up.arrow.down.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 38, height: 38)
-                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("THIS MONTH · UNLIMITED PLAN")
-                        .font(.caption2.weight(.bold))
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: openUsage) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Today’s Usage")
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text(ByteCountFormatter.string(fromByteCount: Int64(clamping: monthTotalBytes), countStyle: .file))
-                        .font(.headline.weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text(Self.format(todayTotalBytes))
+                        .font(.system(.title3, design: .rounded).weight(.bold))
                         .monospacedDigit()
-                    Text("Router counter total · View Usage")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .contentTransition(.numericText())
+                    HStack(spacing: 7) {
+                        Label(Self.format(summary.todayDownloadBytes), systemImage: "arrow.down")
+                            .foregroundStyle(.blue)
+                        Label(Self.format(summary.todayUploadBytes), systemImage: "arrow.up")
+                            .foregroundStyle(.green)
+                    }
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .lineLimit(1)
                 }
-
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, minHeight: 108, alignment: .leading)
+                .liquidGlassCard()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlassCard()
+            .buttonStyle(.plain)
+            .accessibilityLabel("Today's usage, \(Self.format(todayTotalBytes)). Open Usage tab.")
+
+            Button(action: openClients) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Connected Devices")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(.green)
+                            .frame(width: 7, height: 7)
+                            .shadow(color: .green.opacity(0.6), radius: 3)
+                        Text("\(onlineCount) online")
+                            .font(.system(.title3, design: .rounded).weight(.bold))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                    Spacer(minLength: 0)
+                    Label("View clients", systemImage: "chevron.right")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(maxWidth: .infinity, minHeight: 108, alignment: .leading)
+                .liquidGlassCard()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Connected devices, \(onlineCount) online. Open Clients tab.")
         }
-        .buttonStyle(.plain)
-        .accessibilityHint("Opens the Usage tab")
+    }
+
+    private static func format(_ bytes: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
     }
 }
 
