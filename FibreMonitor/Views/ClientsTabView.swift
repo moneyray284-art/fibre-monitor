@@ -199,7 +199,7 @@ public struct ClientsTabView: View {
                                 action: {
                                     isOnlineExpanded.toggle()
                                 },
-                                content: clientRows(visibleOnline)
+                                content: AnyView(clientRows(visibleOnline))
                             )
                         }
 
@@ -213,7 +213,7 @@ public struct ClientsTabView: View {
                                 action: {
                                     isOfflineExpanded.toggle()
                                 },
-                                content: clientRows(visibleOffline)
+                                content: AnyView(clientRows(visibleOffline))
                             )
                         }
                     }
@@ -230,9 +230,9 @@ public struct ClientsTabView: View {
             .navigationTitle("Clients")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                StandaloneTopBarTrailingItem(content: filterMenu)
+                StandaloneTopBarTrailingItem(content: AnyView(filterMenu))
                 StandaloneTopBarTrailingItem(
-                    content: RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured)
+                    content: AnyView(RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured))
                 )
             }
         }
@@ -514,14 +514,14 @@ public struct ClientsTabView: View {
     }
 }
 
-private struct ClientDeviceSectionCard<Content: View>: View {
+private struct ClientDeviceSectionCard: View {
     let icon: String
     let title: String
     let count: Int
     let tint: Color
     let isExpanded: Bool
     let action: () -> Void
-    let content: Content
+    let content: AnyView
 
     init(
         icon: String,
@@ -530,7 +530,7 @@ private struct ClientDeviceSectionCard<Content: View>: View {
         tint: Color,
         isExpanded: Bool,
         action: @escaping () -> Void,
-        content: Content
+        content: AnyView
     ) {
         self.icon = icon
         self.title = title

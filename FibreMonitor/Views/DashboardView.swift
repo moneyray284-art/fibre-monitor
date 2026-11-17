@@ -67,19 +67,19 @@ public struct DashboardView: View {
                     }
                 }
                 StandaloneTopBarTrailingItem(
-                    content: homeToolbarButton(symbol: "gearshape", label: "Settings") {
+                    content: AnyView(homeToolbarButton(symbol: "gearshape", label: "Settings") {
                         showSettings = true
-                    }
+                    })
                 )
                 StandaloneTopBarTrailingItem(
-                    content: homeToolbarButton(
+                    content: AnyView(homeToolbarButton(
                         symbol: "arrow.clockwise",
                         label: "Refresh router data",
                         isDisabled: viewModel.isRefreshing || !settings.isConfigured,
                         isRefreshing: viewModel.isRefreshing
                     ) {
                         Task { await viewModel.refreshAll(forceReauthIfNeeded: true) }
-                    }
+                    })
                 )
             }
             .navigationDestination(isPresented: $showSettings) {

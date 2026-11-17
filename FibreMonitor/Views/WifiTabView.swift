@@ -59,7 +59,7 @@ public struct WifiTabView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 StandaloneTopBarTrailingItem(
-                    content: RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured)
+                    content: AnyView(RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured))
                 )
             }
         }

@@ -44,7 +44,7 @@ public struct UsageTabView: View {
                     }
                 }
                 StandaloneTopBarTrailingItem(
-                    content: RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: settings.isConfigured)
+                    content: AnyView(RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: settings.isConfigured))
                 )
             }
             .navigationDestination(isPresented: $showSettings) {

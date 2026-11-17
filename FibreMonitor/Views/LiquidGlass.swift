@@ -163,10 +163,10 @@ public extension View {
 }
 
 /// A standalone trailing control that does not share the system toolbar's glass background.
-struct StandaloneTopBarTrailingItem<Content: View>: ToolbarContent {
-    private let content: Content
+struct StandaloneTopBarTrailingItem: ToolbarContent {
+    private let content: AnyView
 
-    init(content: Content) {
+    init(content: AnyView) {
         self.content = content
     }
 
