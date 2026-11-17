@@ -559,6 +559,29 @@ public final class SettingsStore: ObservableObject {
         refreshDataUsageSummary()
     }
 
+    /// Restores the latest shared-widget daily counters when the profile's local usage store
+    /// has not yet been hydrated, without lowering any more recent locally stored totals.
+    public func restoreTodayUsageFromSharedSnapshot(
+        downloadBytes: UInt64,
+        uploadBytes: UInt64,
+        for profileId: UUID
+    ) {
+        guard activeProfile?.id == profileId else { return }
+        let profileKey = profileId.uuidString
+        var usage = usageByProfile[profileKey] ?? ProfileUsage()
+        let key = Self.dayKey(for: Date())
+        var day = usage.days[key] ?? ProfileUsage.Day()
+        let restoredDownload = max(day.downloadBytes, downloadBytes)
+        let restoredUpload = max(day.uploadBytes, uploadBytes)
+        guard restoredDownload != day.downloadBytes || restoredUpload != day.uploadBytes else { return }
+        day.downloadBytes = restoredDownload
+        day.uploadBytes = restoredUpload
+        usage.days[key] = day
+        usageByProfile[profileKey] = usage
+        saveUsage()
+        refreshDataUsageSummary()
+    }
+
     private func saveUsage() {
         if let data = try? JSONEncoder().encode(usageByProfile) {
             defaults.set(data, forKey: Keys.dataUsage)

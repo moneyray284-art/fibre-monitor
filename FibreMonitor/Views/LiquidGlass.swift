@@ -175,7 +175,7 @@ struct RouterRefreshToolbarButton: View {
 
     var body: some View {
         Button {
-            Task { await viewModel.refreshAll() }
+            Task { await viewModel.refreshAll(forceReauthIfNeeded: true) }
         } label: {
             Group {
                 if viewModel.isRefreshing {

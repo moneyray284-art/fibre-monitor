@@ -33,8 +33,8 @@ public struct DashboardView: View {
                         CompactSpeedCard(traffic: viewModel.traffic)
                         HomeSummaryRow(
                             summary: settings.dataUsageSummary,
-                            onlineCount: viewModel.onlineDevices.count,
-                            offlineCount: viewModel.devices.filter { !$0.isOnline }.count,
+                            onlineCount: viewModel.homeOnlineDeviceCount,
+                            offlineCount: viewModel.homeOfflineDeviceCount,
                             openUsage: { viewModel.selectedTab = .usage },
                             openClients: { viewModel.selectedTab = .clients }
                         )
@@ -48,7 +48,7 @@ public struct DashboardView: View {
             .background { LiquidGlassBackground() }
             .liquidGlassScrollEdges()
             .alwaysScrollBounce()
-            .refreshable { await viewModel.refreshAll() }
+            .refreshable { await viewModel.refreshAll(forceReauthIfNeeded: true) }
             .navigationTitle("Home")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -102,7 +102,7 @@ public struct DashboardView: View {
                 isDisabled: viewModel.isRefreshing || !settings.isConfigured,
                 isRefreshing: viewModel.isRefreshing
             ) {
-                Task { await viewModel.refreshAll() }
+                Task { await viewModel.refreshAll(forceReauthIfNeeded: true) }
             }
         }
     }

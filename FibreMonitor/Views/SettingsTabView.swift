@@ -30,7 +30,7 @@ public struct SettingsTabView: View {
         .toolbar(.hidden, for: .tabBar)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await viewModel.refreshAll() }
+        .refreshable { await viewModel.refreshAll(forceReauthIfNeeded: true) }
         .alert("Restart Router?", isPresented: $showRebootAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Restart", role: .destructive) {
@@ -348,7 +348,7 @@ private struct LanScreen: View {
         }
         .background { LiquidGlassBackground() }
         .liquidGlassScrollEdges()
-        .refreshable { await viewModel.refreshAll() }
+        .refreshable { await viewModel.refreshAll(forceReauthIfNeeded: true) }
         .navigationTitle("Home Network")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)

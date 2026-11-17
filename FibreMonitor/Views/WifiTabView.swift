@@ -54,7 +54,7 @@ public struct WifiTabView: View {
             .background { LiquidGlassBackground() }
             .liquidGlassScrollEdges()
             .alwaysScrollBounce()
-            .refreshable { await viewModel.refreshAll() }
+            .refreshable { await viewModel.refreshAll(forceReauthIfNeeded: true) }
             .navigationTitle("Wi-Fi")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {

@@ -2,12 +2,15 @@ import Foundation
 import WidgetKit
 
 public struct LinkWaveWidgetSnapshot: Codable, Sendable {
+    public var routerProfileID: String?
     public var routerHost: String?
+    public var routerModel: String?
     public var rxPowerDbm: Double?
     public var todayDownloadBytes: UInt64
     public var todayUploadBytes: UInt64
     public var todayTotalBytes: UInt64
     public var onlineClientCount: Int
+    public var offlineClientCount: Int?
     public var pppoeUptimeSeconds: Int?
     public var updatedAt: Date
     public var routerReachableAt: Date?
@@ -15,20 +18,26 @@ public struct LinkWaveWidgetSnapshot: Codable, Sendable {
     public init(
         rxPowerDbm: Double? = nil,
         routerHost: String? = nil,
+        routerProfileID: String? = nil,
+        routerModel: String? = nil,
         todayDownloadBytes: UInt64 = 0,
         todayUploadBytes: UInt64 = 0,
         todayTotalBytes: UInt64 = 0,
         onlineClientCount: Int = 0,
+        offlineClientCount: Int? = nil,
         pppoeUptimeSeconds: Int? = nil,
         updatedAt: Date = Date(),
         routerReachableAt: Date? = nil
     ) {
+        self.routerProfileID = routerProfileID
         self.routerHost = routerHost
+        self.routerModel = routerModel
         self.rxPowerDbm = rxPowerDbm
         self.todayDownloadBytes = todayDownloadBytes
         self.todayUploadBytes = todayUploadBytes
         self.todayTotalBytes = todayTotalBytes
         self.onlineClientCount = onlineClientCount
+        self.offlineClientCount = offlineClientCount
         self.pppoeUptimeSeconds = pppoeUptimeSeconds
         self.updatedAt = updatedAt
         self.routerReachableAt = routerReachableAt
@@ -44,19 +53,33 @@ public enum WidgetSnapshotStore {
     public static func save(
         rxPowerDbm: Double?,
         routerHost: String?,
+        routerProfileID: String? = nil,
+        routerModel: String? = nil,
         summary: DataUsageSummary,
-        onlineClientCount: Int,
+        onlineClientCount: Int? = nil,
+        offlineClientCount: Int? = nil,
         pppoeUptimeSeconds: Int?,
         at date: Date
     ) {
         let total = summary.todayDownloadBytes.addingReportingOverflow(summary.todayUploadBytes)
+        let previous = read()
+        let previousMatchesProfile: Bool
+        if let routerProfileID, let previousProfileID = previous?.routerProfileID {
+            previousMatchesProfile = previousProfileID == routerProfileID
+        } else {
+            previousMatchesProfile = previous?.routerHost?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                == routerHost?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
         let snapshot = LinkWaveWidgetSnapshot(
             rxPowerDbm: rxPowerDbm,
             routerHost: routerHost,
+            routerProfileID: routerProfileID,
+            routerModel: routerModel ?? (previousMatchesProfile ? previous?.routerModel : nil),
             todayDownloadBytes: summary.todayDownloadBytes,
             todayUploadBytes: summary.todayUploadBytes,
             todayTotalBytes: total.overflow ? UInt64.max : total.partialValue,
-            onlineClientCount: onlineClientCount,
+            onlineClientCount: onlineClientCount ?? (previousMatchesProfile ? previous?.onlineClientCount : nil) ?? 0,
+            offlineClientCount: offlineClientCount ?? (previousMatchesProfile ? previous?.offlineClientCount : nil),
             pppoeUptimeSeconds: pppoeUptimeSeconds,
             updatedAt: date
         )
@@ -74,6 +97,8 @@ public enum WidgetSnapshotStore {
         updated.updatedAt = date
         persist(updated)
     }
+
+    public static func load() -> LinkWaveWidgetSnapshot? { read() }
 
     private static func read() -> LinkWaveWidgetSnapshot? {
         let defaultsData = UserDefaults(suiteName: appGroupID)?.data(forKey: snapshotKey)

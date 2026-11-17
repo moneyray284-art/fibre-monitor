@@ -248,7 +248,7 @@ public struct ClientsTabView: View {
             .background { LiquidGlassBackground() }
             .liquidGlassScrollEdges()
             .alwaysScrollBounce()
-            .refreshable { await viewModel.refreshAll() }
+            .refreshable { await viewModel.refreshAll(forceReauthIfNeeded: true) }
             .searchable(text: $searchText, prompt: "Search name, IP, MAC, or vendor")
             .navigationTitle("Clients")
             .navigationBarTitleDisplayMode(.large)

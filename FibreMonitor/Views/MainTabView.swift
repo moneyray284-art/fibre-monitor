@@ -72,10 +72,12 @@ public struct MainTabView: View {
             if !viewModel.awaitingRouterSelection {
                 if !viewModel.settings.isConfigured {
                     showInitialSettings = true
-                } else {
-                    beginForegroundMonitoring()
                 }
             }
+        }
+        .task {
+            guard viewModel.settings.isConfigured else { return }
+            await viewModel.refreshAll(forceReauthIfNeeded: true)
         }
         .onChange(of: scenePhase) { phase in
             switch phase {
@@ -90,7 +92,7 @@ public struct MainTabView: View {
             }
         }
         .onChange(of: viewModel.selectedTab) { _ in
-            guard scenePhase == .active, viewModel.isForegroundSessionReady else { return }
+            guard scenePhase == .active else { return }
             Task { await viewModel.refreshIfStale(maxAge: 10) }
         }
         .onChange(of: viewModel.isForegroundSessionReady) { isReady in
