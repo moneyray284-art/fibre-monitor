@@ -17,7 +17,7 @@ permissions:
 jobs:
   build-ios:
     name: Build Native iOS App
-    runs-on: macos-15-intel
+    runs-on: macos-15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
