@@ -75,6 +75,6 @@ struct LanCard: View {
                 )
             }
         }
-        .liquidGlassCard()
+        .linkWaveGlassCard()
     }
 }

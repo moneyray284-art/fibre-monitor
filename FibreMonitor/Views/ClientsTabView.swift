@@ -1011,6 +1011,6 @@ private struct ClientsEmptyCard: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .liquidGlassCard()
+        .linkWaveGlassCard()
     }
 }

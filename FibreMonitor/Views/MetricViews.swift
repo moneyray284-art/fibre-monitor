@@ -13,7 +13,7 @@ struct SpeedSection: View {
             }
             Sparkline(samples: traffic.history)
                 .frame(height: 70)
-                .liquidGlassCard()
+                .linkWaveGlassCard()
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("60-second throughput history")
                 .accessibilityValue(
@@ -54,7 +54,7 @@ private struct SpeedCard: View {
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassCard(tint: tint)
+        .linkWaveGlassCard()
         .accessibilityElement(children: .combine)
     }
 }
@@ -118,7 +118,7 @@ struct FibreCard: View {
 
             OpticalRxRangeBar(rxPowerDbm: optical.rxPowerDbm, qualityColor: qualityColor)
         }
-        .liquidGlassCard()
+        .linkWaveGlassCard()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Optical receive power")
         .accessibilityValue(accessibilitySummary)
@@ -252,7 +252,7 @@ struct MetricTile: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 74, alignment: .topLeading)
-        .liquidGlassCard()
+        .linkWaveGlassCard()
         .accessibilityElement(children: .combine)
     }
 }
@@ -284,7 +284,7 @@ struct SystemLoadCard: View {
                 )
             }
         }
-        .liquidGlassCard()
+        .linkWaveGlassCard()
     }
 }
 
@@ -340,7 +340,7 @@ struct InternetCard: View {
                 Readout(label: "ISP DNS", value: wan.dnsServers.joined(separator: ", "))
             }
         }
-        .liquidGlassCard()
+        .linkWaveGlassCard()
     }
 
     static func uptime(_ seconds: Int) -> String {

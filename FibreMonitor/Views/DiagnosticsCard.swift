@@ -83,6 +83,6 @@ struct DiagnosticsCard: View {
                 }
             }
         }
-        .liquidGlassCard()
+        .linkWaveGlassCard()
     }
 }

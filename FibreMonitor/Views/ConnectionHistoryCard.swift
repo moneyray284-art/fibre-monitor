@@ -28,7 +28,7 @@ struct ConnectionHistoryCard: View {
                     .foregroundColor(.secondary)
             }
         }
-        .liquidGlassCard()
+        .linkWaveGlassCard()
         .accessibilityElement(children: .contain)
     }
 

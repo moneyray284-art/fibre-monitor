@@ -71,7 +71,7 @@ public struct UsageTabView: View {
                 .liquidGlassActionButton()
         }
         .frame(maxWidth: .infinity)
-        .liquidGlassCard()
+        .linkWaveGlassCard()
     }
 }
 
@@ -119,7 +119,7 @@ private struct SyncStatusCard: View {
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassCard()
+        .linkWaveGlassCard()
         .accessibilityElement(children: .combine)
     }
 
@@ -181,7 +181,7 @@ private struct UsageTotalsCard: View {
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .liquidGlassCard()
+        .linkWaveGlassCard()
         .accessibilityElement(children: .combine)
     }
 
@@ -273,7 +273,7 @@ private struct DailyUsageHistoryCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassCard()
+        .linkWaveGlassCard()
         .onAppear {
             onLocalDayRollover()
             selectedDate = Calendar.current.startOfDay(for: Date())

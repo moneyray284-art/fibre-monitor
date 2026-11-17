@@ -10,22 +10,21 @@ import SwiftUI
 // background (cards, banners, buttons). Chips *inside* a card use a plain system
 // fill instead, because glass on top of glass can't sample what's behind it.
 
-/// A floating glass surface with padding, e.g. a dashboard card.
-public struct LiquidGlassCardModifier: ViewModifier {
-    var cornerRadius: CGFloat = 22
-    var tint: Color? = nil
+/// Shared card surface for LinkWave's primary screens and supporting cards.
+public struct LinkWaveGlassCard: ViewModifier {
     var padding: CGFloat = 16
+
+    public init(padding: CGFloat = 16) {
+        self.padding = padding
+    }
 
     @ViewBuilder
     public func body(content: Content) -> some View {
         let padded = content.padding(padding)
         if #available(iOS 26.0, *) {
-            padded.glassEffect(
-                tint.map { Glass.regular.tint($0.opacity(0.18)) } ?? .regular,
-                in: .rect(cornerRadius: cornerRadius, style: .continuous)
-            )
+            padded.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         } else {
-            padded.modifier(LegacyGlassModifier(cornerRadius: cornerRadius, tint: tint))
+            padded.modifier(LegacyGlassModifier())
         }
     }
 }
@@ -47,33 +46,14 @@ public struct LiquidGlassPillModifier: ViewModifier {
     }
 }
 
-/// Pre-iOS 26 approximation: regular blur material with a hairline edge and soft shadow.
+/// Pre-iOS 26 approximation using regular material and a soft shadow.
 private struct LegacyGlassModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
-    let cornerRadius: CGFloat
-    let tint: Color?
 
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
         content
-            .background {
-                ZStack {
-                    if let tint { shape.fill(tint.opacity(colorScheme == .dark ? 0.08 : 0.04)) }
-                    shape.fill(.regularMaterial)
-                }
-            }
-            .overlay(
-                shape.stroke(
-                    LinearGradient(
-                        colors: colorScheme == .dark
-                            ? [.white.opacity(0.30), .white.opacity(0.08), .white.opacity(0.12)]
-                            : [.white.opacity(0.85), .white.opacity(0.35), .white.opacity(0.55)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
-            )
+            .background(.regularMaterial, in: shape)
             .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.06), radius: 14, y: 6)
     }
 }
@@ -141,14 +121,8 @@ public struct LiquidGlassBackground: View {
 }
 
 public extension View {
-    /// Floating glass card with 16pt padding.
-    func liquidGlassCard(tint: Color? = nil) -> some View {
-        modifier(LiquidGlassCardModifier(tint: tint))
-    }
-
-    /// Floating glass surface with custom padding and corner radius (banners, chips on the background).
-    func liquidGlassPanel(cornerRadius: CGFloat = 16, padding: CGFloat = 0) -> some View {
-        modifier(LiquidGlassCardModifier(cornerRadius: cornerRadius, padding: padding))
+    func linkWaveGlassCard(padding: CGFloat = 16) -> some View {
+        modifier(LinkWaveGlassCard(padding: padding))
     }
 
     /// Inset chip inside a glass card.
@@ -162,6 +136,10 @@ public extension View {
 
     func liquidGlassSmallButton() -> some View {
         modifier(LiquidGlassSmallButtonModifier())
+    }
+
+    func linkWaveInteractiveGlassCapsule() -> some View {
+        modifier(LinkWaveInteractiveGlassCapsuleModifier())
     }
 
     /// Feather scrolling content beneath navigation and tab bars on iOS 26.
@@ -222,11 +200,22 @@ struct LiquidGlassToolbarCircleModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.glassEffect(.regular, in: Circle())
+            content.glassEffect(.regular.interactive(), in: Circle())
         } else {
             content
                 .background(.regularMaterial, in: Circle())
                 .overlay(Circle().stroke(Color.primary.opacity(0.1), lineWidth: 0.8))
+        }
+    }
+}
+
+private struct LinkWaveInteractiveGlassCapsuleModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            content.background(.regularMaterial, in: Capsule())
         }
     }
 }
@@ -248,7 +237,7 @@ private struct LiquidGlassCapsuleModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.glassEffect(.regular, in: .capsule)
+            content.glassEffect(.regular.interactive(), in: .capsule)
         } else {
             content
                 .background(.regularMaterial, in: Capsule())

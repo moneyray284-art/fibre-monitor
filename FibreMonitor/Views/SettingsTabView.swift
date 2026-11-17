@@ -329,7 +329,7 @@ private struct LanScreen: View {
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity)
                         .multilineTextAlignment(.center)
-                        .liquidGlassCard()
+                        .linkWaveGlassCard()
                 } else {
                     LanCard(lan: viewModel.lan)
                     if viewModel.lan.routerIp.isEmpty {
@@ -340,7 +340,7 @@ private struct LanScreen: View {
                             .foregroundColor(.secondary)
                             .frame(maxWidth: .infinity)
                             .multilineTextAlignment(.center)
-                            .liquidGlassCard()
+                            .linkWaveGlassCard()
                     }
                 }
             }

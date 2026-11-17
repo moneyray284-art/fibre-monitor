@@ -67,24 +67,39 @@ public struct DashboardView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 10) {
-                        homeToolbarButton(symbol: "gearshape", label: "Settings") {
-                            showSettings = true
-                        }
-                        homeToolbarButton(
-                            symbol: "arrow.clockwise",
-                            label: "Refresh router data",
-                            isDisabled: viewModel.isRefreshing || !settings.isConfigured,
-                            isRefreshing: viewModel.isRefreshing
-                        ) {
-                            Task { await viewModel.refreshAll() }
-                        }
-                    }
+                    homeToolbarControls
                 }
             }
             .navigationDestination(isPresented: $showSettings) {
                 SettingsTabView(viewModel: viewModel)
                     .toolbar(.hidden, for: .tabBar)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var homeToolbarControls: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 10) {
+                homeToolbarButtons
+            }
+        } else {
+            homeToolbarButtons
+        }
+    }
+
+    private var homeToolbarButtons: some View {
+        HStack(spacing: 10) {
+            homeToolbarButton(symbol: "gearshape", label: "Settings") {
+                showSettings = true
+            }
+            homeToolbarButton(
+                symbol: "arrow.clockwise",
+                label: "Refresh router data",
+                isDisabled: viewModel.isRefreshing || !settings.isConfigured,
+                isRefreshing: viewModel.isRefreshing
+            ) {
+                Task { await viewModel.refreshAll() }
             }
         }
     }
@@ -178,7 +193,7 @@ private struct RouterHeaderCard: View {
                 }
             }
         }
-        .liquidGlassCard()
+        .linkWaveGlassCard()
         .accessibilityElement(children: .combine)
     }
 
@@ -353,7 +368,7 @@ private struct CompactSpeedCard: View {
             )
         }
         .padding(.vertical, 2)
-        .liquidGlassCard()
+        .linkWaveGlassCard()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Live speed")
         .accessibilityValue(
@@ -408,7 +423,7 @@ private struct SpeedTestCard: View {
                     .foregroundStyle(.cyan)
                 Text("Speed Test")
                     .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Spacer()
                 if isRunning {
                     Text(progress.phase.rawValue.uppercased())
@@ -420,23 +435,23 @@ private struct SpeedTestCard: View {
 
             if let result {
                 HStack(spacing: 0) {
-                    resultMetric("Ping", value: String(format: "%.0f ms", result.pingMs), tint: .white)
-                    resultMetric("Jitter", value: String(format: "%.0f ms", result.jitterMs), tint: .white)
+                    resultMetric("Ping", value: String(format: "%.0f ms", result.pingMs), tint: .primary)
+                    resultMetric("Jitter", value: String(format: "%.0f ms", result.jitterMs), tint: .primary)
                     resultMetric("Download", value: Self.speed(result.downloadMbps), tint: .cyan)
                     resultMetric("Upload", value: Self.speed(result.uploadMbps), tint: .mint)
                 }
             } else {
                 HStack(spacing: 0) {
-                    resultMetric("Ping", value: "-- ms", tint: .white)
-                    resultMetric("Jitter", value: "-- ms", tint: .white)
+                    resultMetric("Ping", value: "-- ms", tint: .primary)
+                    resultMetric("Jitter", value: "-- ms", tint: .primary)
                     if isRunning {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(progress.phase == .ping ? "Latency" : (progress.phase == .download ? "Download" : "Upload"))
                                 .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.58))
+                                .foregroundStyle(.secondary)
                             Text(progress.detail)
                                 .font(.system(.caption, design: .rounded).weight(.semibold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(.primary)
                                 .lineLimit(1)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -460,43 +475,26 @@ private struct SpeedTestCard: View {
                     ProgressView().tint(.cyan)
                     Text(progress.phase.rawValue)
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.72))
+                        .foregroundStyle(.secondary)
                     Spacer()
                     Text("\(Int(progress.fraction * 100))%")
                         .font(.caption.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.72))
+                        .foregroundStyle(.secondary)
                 }
             } else {
                 Button(action: startTest) {
                     Label(result == nil ? "Start Test" : "Test Again", systemImage: result == nil ? "play.fill" : "arrow.clockwise")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.cyan)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
                 }
                 .buttonStyle(.plain)
+                .linkWaveInteractiveGlassCapsule()
                 .disabled(!viewModel.settings.isConfigured)
             }
         }
-        .padding(16)
-        .background {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(LinearGradient(
-                            colors: [
-                                Color(red: 0.035, green: 0.055, blue: 0.085).opacity(0.88),
-                                Color(red: 0.055, green: 0.105, blue: 0.15).opacity(0.78)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ))
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.white.opacity(0.14), lineWidth: 1)
-                }
-        }
-        .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
+        .linkWaveGlassCard()
         .accessibilityElement(children: .contain)
     }
 
@@ -504,7 +502,7 @@ private struct SpeedTestCard: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.58))
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
             Text(value)
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
@@ -582,7 +580,7 @@ private struct HomeSummaryRow: View {
                     .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, minHeight: 108, maxHeight: .infinity, alignment: .topLeading)
-                .liquidGlassCard()
+                .linkWaveGlassCard()
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Today's usage, \(Self.format(todayTotalBytes)). Open Usage tab.")
@@ -614,7 +612,7 @@ private struct HomeSummaryRow: View {
                         .foregroundStyle(Color.accentColor)
                 }
                 .frame(maxWidth: .infinity, minHeight: 108, maxHeight: .infinity, alignment: .topLeading)
-                .liquidGlassCard()
+                .linkWaveGlassCard()
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Connected devices, \(onlineCount) online and \(offlineCount) offline. Open Clients tab.")
@@ -719,7 +717,7 @@ private struct WanExtrasCard: View {
                 Readout(label: "ISP DNS", value: wan.dnsServers.joined(separator: ", "))
             }
         }
-        .liquidGlassCard()
+        .linkWaveGlassCard()
     }
 }
 
@@ -758,7 +756,7 @@ private struct NoRouterCard: View {
                 .liquidGlassActionButton()
         }
         .frame(maxWidth: .infinity)
-        .liquidGlassCard()
+        .linkWaveGlassCard()
     }
 }
 
@@ -785,6 +783,6 @@ private struct ErrorBanner: View {
                     .liquidGlassSmallButton()
             }
         }
-        .liquidGlassPanel(padding: 12)
+        .linkWaveGlassCard(padding: 12)
     }
 }

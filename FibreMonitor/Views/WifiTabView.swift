@@ -43,7 +43,7 @@ public struct WifiTabView: View {
                                     )
                                 }
                             }
-                            .liquidGlassCard()
+                            .linkWaveGlassCard()
                         }
                     }
                 }
@@ -131,7 +131,7 @@ public struct WifiTabView: View {
                 .liquidGlassPill()
             }
         }
-        .liquidGlassCard()
+        .linkWaveGlassCard()
     }
 
     private var groupedNetworks: [(title: String, networks: [WifiNetwork])] {
@@ -240,7 +240,7 @@ private struct WifiQrSheet: View {
                             .liquidGlassActionButton()
                         }
                         .frame(maxWidth: .infinity)
-                        .liquidGlassCard()
+                        .linkWaveGlassCard()
                     } else if let config {
                         content(for: config)
                     }
@@ -290,7 +290,7 @@ private struct WifiQrSheet: View {
                     }
                 }
             }
-            .liquidGlassCard()
+            .linkWaveGlassCard()
 
             if let payload = cfg.qrPayload, let uiImage = QrImageGenerator.generate(from: payload) {
                 VStack(spacing: 12) {
@@ -318,7 +318,7 @@ private struct WifiQrSheet: View {
                     }
                     .liquidGlassActionButton()
                 }
-                .liquidGlassCard()
+                .linkWaveGlassCard()
             } else {
                 VStack(spacing: 8) {
                     Image(systemName: "qrcode")
@@ -330,7 +330,7 @@ private struct WifiQrSheet: View {
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
-                .liquidGlassCard()
+                .linkWaveGlassCard()
             }
 
             if cfg.authMode != .open && !cfg.psk.isEmpty && !cfg.isPasswordMasked {
@@ -368,7 +368,7 @@ private struct WifiQrSheet: View {
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
-                .liquidGlassCard()
+                .linkWaveGlassCard()
             }
         }
     }
@@ -462,7 +462,7 @@ private struct WifiEditSheet: View {
                             .liquidGlassActionButton()
                         }
                         .frame(maxWidth: .infinity)
-                        .liquidGlassCard()
+                        .linkWaveGlassCard()
                         .padding()
                     }
                     .background { LiquidGlassBackground() }
@@ -594,7 +594,7 @@ private struct WifiEditSheet: View {
                     .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity)
-            .liquidGlassCard()
+            .linkWaveGlassCard()
             .padding()
         }
         .background { LiquidGlassBackground() }
@@ -760,6 +760,6 @@ private struct WifiEmptyCard: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .liquidGlassCard()
+        .linkWaveGlassCard()
     }
 }
