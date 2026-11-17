@@ -61,22 +61,12 @@ public struct DashboardView: View {
             .liquidGlassScrollEdges()
             .alwaysScrollBounce()
             .refreshable { await viewModel.refreshAll(forceReauthIfNeeded: true) }
-            .navigationTitle("Home")
+            .navigationTitle("LinkWave")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     ProfileAvatarPickerButton(size: 38)
                         .frame(width: 38, height: 38)
-                }
-                ToolbarItem(placement: .principal) {
-                    VStack(spacing: 0) {
-                        Text("LinkWave")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
-                        Text("Home")
-                            .font(.headline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                    }
                 }
                 StandaloneTopBarTrailingItem(
                     content: AnyView(homeToolbarButton(symbol: "gearshape", label: "Settings") {

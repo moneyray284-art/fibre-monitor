@@ -31,6 +31,7 @@ public final class MonitorViewModel: ObservableObject {
     @Published public private(set) var wifi = WifiState()
     @Published public private(set) var lan = LanInfo()
     @Published public private(set) var isWifiSaving = false
+    @Published public private(set) var wifiMutationStatus: String?
 
     public enum DiagnosticMode: String, CaseIterable { case ping = "Ping", traceroute = "Traceroute" }
     @Published public var diagnosticMode: DiagnosticMode = .ping
@@ -80,6 +81,8 @@ public final class MonitorViewModel: ObservableObject {
     private var isRetryingTransientRouterError = false
     private var lastRouterSyncError: Error?
     private var settingsCancellables = Set<AnyCancellable>()
+    private var wifiMutationStatusTask: Task<Void, Never>?
+    private var wifiMutationRefreshTask: Task<Void, Never>?
     private var lastObservedRouterConfiguration: RouterConfigurationFingerprint
     private var routerConfigurationGeneration = 0
     private var didAttemptAutomaticRouterRecovery = false
@@ -1019,6 +1022,112 @@ public final class MonitorViewModel: ObservableObject {
             throw OntError.badResponse("Wi-Fi network configuration")
         }
         return match
+    }
+
+    public func refreshWifiManagementState() async {
+        guard isConnected, !isWifiSaving else { return }
+        await awaitFullRefreshCompletion()
+        guard isConnected, !isWifiSaving else { return }
+        do {
+            wifi = try await client.fetchManagedWifiState()
+        } catch {
+            // The regular router sync continues to provide the basic radio/network state.
+        }
+    }
+
+    public func addWifiNetwork(
+        band: WifiFrequencyBand,
+        ssid: String,
+        password: String,
+        isVisible: Bool
+    ) async throws {
+        guard !isWifiSaving else { throw OntError.badResponse("Wi-Fi update already in progress") }
+        isWifiSaving = true
+        beginWifiMutationStatus()
+        defer { isWifiSaving = false }
+        do {
+            let result = try await client.addWifiNetwork(band: band, ssid: ssid, password: password, isVisible: isVisible)
+            await completeWifiMutation(result)
+            Haptics.notify(.success)
+        } catch {
+            wifiMutationStatus = Self.describe(error, host: settings.host)
+            scheduleWifiMutationStatusClear()
+            Haptics.notify(.error)
+            throw error
+        }
+    }
+
+    public func setWifiNetwork(_ network: WifiNetwork, enabled: Bool) async {
+        guard !isWifiSaving, Self.isSecondaryWifiNetwork(network.ssidIndex) else { return }
+        isWifiSaving = true
+        beginWifiMutationStatus()
+        defer { isWifiSaving = false }
+        do {
+            let result = try await client.setWifiNetworkEnabled(ssidIndex: network.ssidIndex, enabled: enabled)
+            await completeWifiMutation(result)
+            Haptics.notify(.success)
+        } catch {
+            wifiMutationStatus = Self.describe(error, host: settings.host)
+            scheduleWifiMutationStatusClear()
+            actionMessage = wifiMutationStatus
+            Haptics.notify(.error)
+        }
+    }
+
+    public func deleteWifiNetwork(_ network: WifiNetwork) async {
+        guard !isWifiSaving, Self.isSecondaryWifiNetwork(network.ssidIndex) else { return }
+        isWifiSaving = true
+        beginWifiMutationStatus()
+        defer { isWifiSaving = false }
+        do {
+            let result = try await client.deleteWifiNetwork(ssidIndex: network.ssidIndex)
+            await completeWifiMutation(result)
+            Haptics.notify(.success)
+        } catch {
+            wifiMutationStatus = Self.describe(error, host: settings.host)
+            scheduleWifiMutationStatusClear()
+            actionMessage = wifiMutationStatus
+            Haptics.notify(.error)
+        }
+    }
+
+    private func beginWifiMutationStatus() {
+        wifiMutationStatusTask?.cancel()
+        wifiMutationRefreshTask?.cancel()
+        wifiMutationStatusTask = nil
+        wifiMutationRefreshTask = nil
+        wifiMutationStatus = "Applying Wi-Fi settings — router radio restarting…"
+    }
+
+    private func completeWifiMutation(_ result: WifiUpdateResult) async {
+        if let updatedWifi = result.wifi { wifi = updatedWifi }
+        lastPageSync = .distantPast
+        if result.connectionDropped {
+            wifiMutationStatus = "Applying Wi-Fi settings — router radio restarting…"
+            wifiMutationRefreshTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                guard let self, !Task.isCancelled, self.routerRequestsAllowed else { return }
+                await self.refreshAll(forceReauthIfNeeded: true)
+            }
+        } else {
+            wifiMutationStatus = "Wi-Fi settings applied."
+            await refreshAfterMutation()
+        }
+        scheduleWifiMutationStatusClear()
+    }
+
+    private func scheduleWifiMutationStatusClear() {
+        wifiMutationStatusTask?.cancel()
+        wifiMutationStatusTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 12_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.wifiMutationStatus = nil
+            self.wifiMutationStatusTask = nil
+        }
+    }
+
+    private static func isSecondaryWifiNetwork(_ index: Int) -> Bool {
+        WifiFrequencyBand.allCases.contains { $0.secondaryIndices.contains(index) }
     }
 
     public func setRadio(_ radio: WifiRadio, enabled: Bool) async {

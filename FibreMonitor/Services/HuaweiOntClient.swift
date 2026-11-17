@@ -642,6 +642,30 @@ public actor HuaweiOntClient {
         return state
     }
 
+    /// Combines the router's Wi-Fi list with configured WLAN slots, including disabled SSIDs.
+    /// Passphrases from WlanBasic.asp are discarded before returning to the UI.
+    public func fetchManagedWifiState() async throws -> WifiState {
+        var state = try await fetchWifi()
+        let configs = try await fetchWlanBasic()
+        for config in configs where (1...8).contains(config.ssidIndex) && !config.ssid.isEmpty {
+            let band = config.ssidIndex <= 4 ? WifiFrequencyBand.twoPointFour.rawValue : WifiFrequencyBand.five.rawValue
+            let network = WifiNetwork(
+                ssidIndex: config.ssidIndex,
+                name: config.ssid,
+                band: band,
+                enabled: config.isEnabled
+            )
+            if let index = state.networks.firstIndex(where: { $0.ssidIndex == config.ssidIndex }) {
+                state.networks[index] = network
+            } else {
+                state.networks.append(network)
+            }
+        }
+        state.networks.sort { $0.ssidIndex < $1.ssidIndex }
+        ssidBands = Dictionary(state.networks.map { ($0.ssidIndex, $0.band) }, uniquingKeysWith: { a, _ in a })
+        return state
+    }
+
     static func parseWifi(_ text: String) -> WifiState {
         var state = WifiState()
         var seen = Set<Int>()
@@ -665,7 +689,7 @@ public actor HuaweiOntClient {
     /// Fetches ephemeral SSID security & Wi-Fi configuration from `WlanBasic.asp`.
     /// Callers must discard returned passphrases when dismissed or backgrounded.
     public func fetchWlanBasic(bandHint: String? = nil, ssidIndex: Int? = nil) async throws -> [WifiSsidConfig] {
-        let text = try await fetch(.init(.get, "/html/amp/wlanbasic/WlanBasic.asp", ajax: false), expect: "stWlan")
+        let text = try await fetchWlanBasicPage()
         var configs = Self.parseWlanBasic(text)
         if let ssidIndex, !configs.contains(where: { $0.ssidIndex == ssidIndex }) {
             let suffix = (bandHint?.hasPrefix("5") == true) ? "?5G" : "?2G"
@@ -673,6 +697,243 @@ public actor HuaweiOntClient {
             configs = Self.parseWlanBasic(alt)
         }
         return configs
+    }
+
+    private func fetchWlanBasicPage() async throws -> String {
+        try await fetch(.init(.get, "/html/amp/wlanbasic/WlanBasic.asp", ajax: false), expect: "stWlan")
+    }
+
+    /// Huawei's WLAN form carries the page-scoped token in its hidden `hwonttoken` input.
+    private static func wlanPageToken(in page: String) throws -> String {
+        let inputRegex = try NSRegularExpression(pattern: "(?is)<input\\b[^>]*>")
+        let fullRange = NSRange(page.startIndex..<page.endIndex, in: page)
+        let tokenNames: Set<String> = ["hwonttoken", "onttoken", "x.x_hw_token", "x_hw_token"]
+
+        func attribute(_ name: String, in tag: String) -> String? {
+            let escapedName = NSRegularExpression.escapedPattern(for: name)
+            guard let regex = try? NSRegularExpression(
+                pattern: "(?is)\\b\(escapedName)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')"
+            ), let match = regex.firstMatch(in: tag, range: NSRange(tag.startIndex..<tag.endIndex, in: tag)) else {
+                return nil
+            }
+            for group in 1...2 {
+                if let range = Range(match.range(at: group), in: tag) { return String(tag[range]) }
+            }
+            return nil
+        }
+
+        for match in inputRegex.matches(in: page, range: fullRange) {
+            guard let range = Range(match.range, in: page) else { continue }
+            let tag = String(page[range])
+            let names = [attribute("id", in: tag), attribute("name", in: tag)]
+                .compactMap { $0?.lowercased() }
+            guard names.contains(where: tokenNames.contains),
+                  let value = attribute("value", in: tag), !value.isEmpty else { continue }
+            return HuaweiJs.clean(value)
+        }
+
+        if let regex = try? NSRegularExpression(
+            pattern: "(?is)(?:onttoken|x\\.x_hw_token|x_hw_token)\\s*[:=]\\s*['\"]([^'\"]+)['\"]"
+        ), let match = regex.firstMatch(in: page, range: fullRange),
+           let range = Range(match.range(at: 1), in: page) {
+            return HuaweiJs.clean(String(page[range]))
+        }
+        throw OntError.badResponse("WLAN page token")
+    }
+
+    private static let wlanConfigurationRoot = "InternetGatewayDevice.LANDevice.1.WLANConfiguration"
+    private static let wlanBasicRequestFile = "html/amp/wlanbasic/WlanBasic.asp"
+
+    private func checkedWifiWrite(_ request: OntRequest, token: String) async throws -> String {
+        var authorizedRequest = request
+        if !authorizedRequest.form.contains(where: { $0.0 == "x.X_HW_Token" }) {
+            authorizedRequest.form.append(("x.X_HW_Token", token))
+        }
+        let response = try await transport.send(authorizedRequest, host: credentials.host)
+        try Self.ensureWifiWriteAllowed(response)
+        return response
+    }
+
+    private static func ensureWifiWriteAllowed(_ response: String) throws {
+        let lower = response.lowercased()
+        if lower.contains("err_no_right") || lower.contains("no right")
+            || lower.contains("txt_username") || lower.contains("login.cgi") || lower.contains("login.html") {
+            throw OntError.wifiModificationNotAllowed
+        }
+    }
+
+    private static func indicatesWifiWriteRejection(_ response: String) -> Bool {
+        let lower = response.lowercased()
+        return lower.contains("err_") || lower.contains("success\":false")
+            || lower.contains("not support") || lower.contains("unsupported")
+            || lower.contains("failed") || lower.contains("failure")
+    }
+
+    private static func isTransientWifiWriteError(_ error: Error) -> Bool {
+        guard let url = error as? URLError else { return false }
+        return [.networkConnectionLost, .timedOut, .cannotConnectToHost, .notConnectedToInternet].contains(url.code)
+    }
+
+    private func waitForManagedWifiState(
+        matching matches: @Sendable (WifiState) -> Bool
+    ) async throws -> WifiUpdateResult {
+        var sawConnectionLoss = false
+        for _ in 0..<6 {
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            do {
+                let state = try await fetchManagedWifiState()
+                if matches(state) { return WifiUpdateResult(wifi: state, connectionDropped: false) }
+            } catch {
+                if Self.isTransientWifiWriteError(error) {
+                    sawConnectionLoss = true
+                    continue
+                }
+                throw error
+            }
+        }
+        if sawConnectionLoss { return WifiUpdateResult(wifi: nil, connectionDropped: true) }
+        throw OntError.notConfirmed
+    }
+
+    private static func isSecondaryIndex(_ index: Int) -> Bool {
+        WifiFrequencyBand.allCases.contains { $0.secondaryIndices.contains(index) }
+    }
+
+    private static func band(for index: Int) -> WifiFrequencyBand? {
+        guard (1...8).contains(index) else { return nil }
+        return index <= 4 ? .twoPointFour : .five
+    }
+
+    private static func makeProvisioningConfig(
+        index: Int,
+        band: WifiFrequencyBand,
+        configs: [WifiSsidConfig]
+    ) -> WifiSsidConfig {
+        let source = configs.first { Self.band(for: $0.ssidIndex) == band && !$0.ssid.isEmpty }
+        var config = source ?? WifiSsidConfig(
+            ssidIndex: index,
+            domain: "\(Self.wlanConfigurationRoot).\(index)",
+            enable: "1",
+            wlHide: "1",
+            deviceNum: "32",
+            wmmEnable: "1",
+            beaconType: "11i",
+            basicAuthenticationMode: "None",
+            basicEncryptionModes: "None",
+            keyIndex: "1",
+            encryptionLevel: "104-bit",
+            wpaEncryptionModes: "TKIPandAESEncryption",
+            wpaAuthenticationMode: "PSKAuthentication",
+            ieee11iEncryptionModes: "AESEncryption",
+            ieee11iAuthenticationMode: "PSKAuthentication",
+            mixEncryptionModes: "TKIPandAESEncryption",
+            mixAuthenticationMode: "PSKAuthentication",
+            wpaRekey: "3600",
+            serviceEnable: "1",
+            standard: band == .twoPointFour ? "11ax" : "11ac",
+            wpsEnable: "0",
+            hasWlanWifiRecord: true,
+            hasPskRecord: true
+        )
+
+        config.ssidIndex = index
+        config.domain = "\(Self.wlanConfigurationRoot).\(index)"
+        config.enable = "1"
+        config.ssid = ""
+        config.wlHide = "1"
+        config.serviceEnable = "1"
+        config.psk = ""
+        config.isPasswordMasked = false
+        config.hasWlanWifiRecord = true
+        config.hasPskRecord = true
+        if config.deviceNum.isEmpty { config.deviceNum = "32" }
+        if config.wmmEnable.isEmpty { config.wmmEnable = "1" }
+        if config.beaconType.isEmpty { config.beaconType = "11i" }
+        if config.basicAuthenticationMode.isEmpty { config.basicAuthenticationMode = "None" }
+        if config.basicEncryptionModes.isEmpty { config.basicEncryptionModes = "None" }
+        if config.keyIndex.isEmpty { config.keyIndex = "1" }
+        if config.encryptionLevel.isEmpty { config.encryptionLevel = "104-bit" }
+        if config.wpaEncryptionModes.isEmpty { config.wpaEncryptionModes = "TKIPandAESEncryption" }
+        if config.wpaAuthenticationMode.isEmpty { config.wpaAuthenticationMode = "PSKAuthentication" }
+        if config.ieee11iEncryptionModes.isEmpty { config.ieee11iEncryptionModes = "AESEncryption" }
+        if config.ieee11iAuthenticationMode.isEmpty { config.ieee11iAuthenticationMode = "PSKAuthentication" }
+        if config.mixEncryptionMode.isEmpty { config.mixEncryptionMode = "TKIPandAESEncryption" }
+        if config.mixAuthenticationMode.isEmpty { config.mixAuthenticationMode = "PSKAuthentication" }
+        if config.wpaRekey.isEmpty { config.wpaRekey = "3600" }
+        if config.standard.isEmpty { config.standard = band == .twoPointFour ? "11ax" : "11ac" }
+        if config.wpsEnable.isEmpty { config.wpsEnable = "0" }
+        return config
+    }
+
+    private static func wifiProvisionRequest(
+        config: WifiSsidConfig,
+        ssid: String,
+        password: String,
+        isVisible: Bool,
+        token: String
+    ) -> OntRequest {
+        let domain = "\(wlanConfigurationRoot).\(config.ssidIndex)"
+        let instance = String(config.ssidIndex)
+        let path = "/html/amp/wlanbasic/set.cgi"
+            + "?c1=InternetGatewayDevice.X_HW_DEBUG.WLANConfigAction"
+            + "&w=InternetGatewayDevice.X_HW_DEBUG.AMP.WifiCoverSetWlanBasic"
+            + "&y=\(domain)&z=\(domain).WPS&k=\(domain).PreSharedKey.1"
+            + "&c2=InternetGatewayDevice.X_HW_DEBUG.WLANConfigAction"
+            + "&RequestFile=\(wlanBasicRequestFile)"
+        let advertisement = isVisible ? "1" : "0"
+        let ieeeAuth = "PSKAuthentication"
+        let ieeeEncryption = "AESEncryption"
+        let fields: [(String, String)] = [
+            ("y.Enable", "1"), ("y.SSIDAdvertisementEnabled", advertisement), ("y.SSID", ssid),
+            ("y.X_HW_AssociateNum", config.deviceNum), ("y.BeaconType", "11i"),
+            ("y.IEEE11iAuthenticationMode", ieeeAuth), ("y.IEEE11iEncryptionModes", ieeeEncryption),
+            ("k.PreSharedKey", password), ("y.X_HW_GroupRekey", config.wpaRekey),
+            ("z.Enable", config.wpsEnable), ("z.X_HW_ConfigMethod", config.wpsConfigMethod),
+            ("z.X_HW_PinGenerator", config.wpsPinGenerator), ("z.DevicePassword", config.wpsDevicePassword),
+            ("w.SsidInst", instance), ("w.SSID", ssid), ("w.Enable", "1"), ("w.Standard", config.standard),
+            ("w.BasicAuthenticationMode", "None"), ("w.BasicEncryptionModes", "None"),
+            ("w.WPAAuthenticationMode", config.wpaAuthenticationMode), ("w.WPAEncryptionModes", config.wpaEncryptionModes),
+            ("w.IEEE11iAuthenticationMode", ieeeAuth), ("w.IEEE11iEncryptionModes", ieeeEncryption),
+            ("w.MixAuthenticationMode", config.mixAuthenticationMode), ("w.MixEncryptionModes", config.mixEncryptionMode),
+            ("w.SSIDAdvertisementEnabled", advertisement), ("w.WMMEnable", config.wmmEnable),
+            ("w.MaxAssociateNum", config.deviceNum), ("w.BeaconType", "11i"),
+            ("w.WEPEncryptionLevel", config.encryptionLevel), ("w.WEPKeyIndex", config.keyIndex),
+            ("w.Key", password), ("c1.ActionType", "0"), ("c2.ActionType", "1"),
+            ("c2.SSIDList", instance), ("x.X_HW_Token", token)
+        ]
+        return OntRequest(.post, path, form: fields, ajax: false)
+    }
+
+    private static func setWifiNetworkEnabledRequest(index: Int, enabled: Bool, token: String) -> OntRequest {
+        let domain = "\(wlanConfigurationRoot).\(index)"
+        return OntRequest(
+            .post,
+            "/html/amp/wlanbasic/set.cgi?x=\(domain)&RequestFile=\(wlanBasicRequestFile)",
+            form: [("x.Enable", enabled ? "1" : "0"), ("x.X_HW_Token", token)],
+            ajax: false
+        )
+    }
+
+    private static func deleteWifiNetworkRequest(index: Int, token: String) -> OntRequest {
+        return OntRequest(
+            .post,
+            "/html/amp/wlanbasic/del.cgi?x=\(wlanConfigurationRoot)&RequestFile=\(wlanBasicRequestFile)",
+            form: [("\(wlanConfigurationRoot).\(index)", ""), ("x.X_HW_Token", token)],
+            ajax: false
+        )
+    }
+
+    private static func clearWifiNetworkRequest(index: Int, token: String) -> OntRequest {
+        let domain = "\(wlanConfigurationRoot).\(index)"
+        return OntRequest(
+            .post,
+            "/html/amp/wlanbasic/set.cgi?x=\(domain)&RequestFile=\(wlanBasicRequestFile)",
+            form: [
+                ("x.Enable", "0"), ("x.SSID", ""), ("x.SSIDAdvertisementEnabled", "0"),
+                ("x.X_HW_Token", token)
+            ],
+            ajax: false
+        )
     }
 
     static func parseWlanBasic(_ text: String) -> [WifiSsidConfig] {
@@ -770,6 +1031,166 @@ public actor HuaweiOntClient {
         }
         result.sort { $0.ssidIndex < $1.ssidIndex }
         return result
+    }
+
+    public func addWifiNetwork(
+        band: WifiFrequencyBand,
+        ssid: String,
+        password: String,
+        isVisible: Bool
+    ) async throws -> WifiUpdateResult {
+        try Self.validateWifiCredentials(ssid: ssid, password: password)
+        let page = try await fetchWlanBasicPage()
+        let configs = Self.parseWlanBasic(page)
+        let occupied = Set(configs.filter {
+            band.wlanIndices.contains($0.ssidIndex) && !$0.ssid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.map(\.ssidIndex))
+        guard occupied.count < 4,
+              let targetIndex = band.secondaryIndices.first(where: { !occupied.contains($0) }) else {
+            throw OntError.wifiSlotLimitReached
+        }
+        guard !configs.contains(where: {
+            Self.band(for: $0.ssidIndex) == band && $0.ssid.caseInsensitiveCompare(ssid) == .orderedSame
+        }) else {
+            throw OntError.badResponse("Wi-Fi network name already exists on this band")
+        }
+
+        let hasProvisionedSlot = configs.contains(where: { $0.ssidIndex == targetIndex && $0.ssid.isEmpty })
+        if !hasProvisionedSlot {
+            let token = try Self.wlanPageToken(in: page)
+            let request = OntRequest(
+                .post,
+                "/html/amp/wlanbasic/add.cgi?x=\(Self.wlanConfigurationRoot)&RequestFile=\(Self.wlanBasicRequestFile)",
+                form: [
+                    ("x.RFBand", band.rawValue), ("x.X_HW_RFBand", band.rawValue),
+                    ("x.SSID", ssid), ("x.Enable", "1"),
+                    ("x.SSIDAdvertisementEnabled", isVisible ? "1" : "0"),
+                    ("x.BeaconType", "11i"), ("x.BasicAuthenticationMode", "None"),
+                    ("x.BasicEncryptionModes", "None"), ("x.IEEE11iAuthenticationMode", "PSKAuthentication"),
+                    ("x.IEEE11iEncryptionModes", "AESEncryption"),
+                    ("x.PreSharedKey.1.PreSharedKey", password), ("x.X_HW_Token", token)
+                ],
+                ajax: false
+            )
+
+            do {
+                let response = try await transport.send(request, host: credentials.host)
+                try Self.ensureWifiWriteAllowed(response)
+                if !Self.indicatesWifiWriteRejection(response) {
+                    do {
+                        return try await waitForManagedWifiState { state in
+                            state.networks.contains { $0.name == ssid && Self.band(for: $0.ssidIndex) == band }
+                        }
+                    } catch OntError.notConfirmed {
+                        // The ONT did not add a dynamic instance; configure the preallocated slot below.
+                    }
+                }
+            } catch let error as URLError where Self.isTransientWifiWriteError(error) {
+                return WifiUpdateResult(wifi: nil, connectionDropped: true)
+            } catch OntError.wifiModificationNotAllowed {
+                throw OntError.wifiModificationNotAllowed
+            } catch {
+                // The ONT may disable add.cgi for fixed-slot builds. Use the first unused instance below.
+            }
+        }
+
+        // Fetch again immediately before the fallback write: Huawei tokens are page-scoped.
+        let latestPage: String
+        do {
+            latestPage = try await fetchWlanBasicPage()
+        } catch let error as URLError where Self.isTransientWifiWriteError(error) {
+            return WifiUpdateResult(wifi: nil, connectionDropped: true)
+        }
+        let latestConfigs = Self.parseWlanBasic(latestPage)
+        if latestConfigs.contains(where: { band.secondaryIndices.contains($0.ssidIndex) && $0.ssid == ssid }) {
+            return WifiUpdateResult(wifi: try await fetchManagedWifiState(), connectionDropped: false)
+        }
+        let fallbackConfig = Self.makeProvisioningConfig(index: targetIndex, band: band, configs: latestConfigs)
+        let fallbackToken = try Self.wlanPageToken(in: latestPage)
+        let fallbackRequest = Self.wifiProvisionRequest(
+            config: fallbackConfig,
+            ssid: ssid,
+            password: password,
+            isVisible: isVisible,
+            token: fallbackToken
+        )
+        do {
+            _ = try await checkedWifiWrite(fallbackRequest, token: fallbackToken)
+        } catch let error as URLError where Self.isTransientWifiWriteError(error) {
+            return WifiUpdateResult(wifi: nil, connectionDropped: true)
+        }
+        return try await waitForManagedWifiState { state in
+            state.networks.contains { $0.ssidIndex == targetIndex && $0.name == ssid && $0.enabled }
+        }
+    }
+
+    public func setWifiNetworkEnabled(ssidIndex: Int, enabled: Bool) async throws -> WifiUpdateResult {
+        guard Self.isSecondaryIndex(ssidIndex) else { throw OntError.badResponse("primary Wi-Fi network is protected") }
+        let page = try await fetchWlanBasicPage()
+        let configs = Self.parseWlanBasic(page)
+        guard let config = configs.first(where: { $0.ssidIndex == ssidIndex }), !config.ssid.isEmpty else {
+            throw OntError.badResponse("Wi-Fi network")
+        }
+        let token = try Self.wlanPageToken(in: page)
+        do {
+            _ = try await checkedWifiWrite(
+                Self.setWifiNetworkEnabledRequest(index: ssidIndex, enabled: enabled, token: token),
+                token: token
+            )
+        } catch let error as URLError where Self.isTransientWifiWriteError(error) {
+            return WifiUpdateResult(wifi: nil, connectionDropped: true)
+        }
+        return try await waitForManagedWifiState { state in
+            state.networks.first(where: { $0.ssidIndex == ssidIndex })?.enabled == enabled
+        }
+    }
+
+    public func deleteWifiNetwork(ssidIndex: Int) async throws -> WifiUpdateResult {
+        guard Self.isSecondaryIndex(ssidIndex) else { throw OntError.badResponse("primary Wi-Fi network is protected") }
+        let page = try await fetchWlanBasicPage()
+        let configs = Self.parseWlanBasic(page)
+        guard configs.contains(where: { $0.ssidIndex == ssidIndex && !$0.ssid.isEmpty }) else {
+            throw OntError.badResponse("Wi-Fi network")
+        }
+        let token = try Self.wlanPageToken(in: page)
+        var useClearFallback = false
+        do {
+            let response = try await checkedWifiWrite(Self.deleteWifiNetworkRequest(index: ssidIndex, token: token), token: token)
+            if Self.indicatesWifiWriteRejection(response) {
+                useClearFallback = true
+            } else {
+                do {
+                    return try await waitForManagedWifiState { state in
+                        !state.networks.contains { $0.ssidIndex == ssidIndex && !$0.name.isEmpty }
+                    }
+                } catch OntError.notConfirmed {
+                    useClearFallback = true
+                }
+            }
+        } catch OntError.wifiModificationNotAllowed {
+            throw OntError.wifiModificationNotAllowed
+        } catch let error as URLError where Self.isTransientWifiWriteError(error) {
+            return WifiUpdateResult(wifi: nil, connectionDropped: true)
+        } catch let error as URLError where error.code == .badServerResponse {
+            useClearFallback = true
+        }
+
+        guard useClearFallback else { throw OntError.notConfirmed }
+        // Firmware with fixed SSID instances can reject del.cgi; disable and clear only a secondary slot.
+        let freshPage = try await fetchWlanBasicPage()
+        let freshConfigs = Self.parseWlanBasic(freshPage)
+        guard freshConfigs.contains(where: { $0.ssidIndex == ssidIndex && !$0.ssid.isEmpty }) else {
+            return WifiUpdateResult(wifi: try await fetchManagedWifiState(), connectionDropped: false)
+        }
+        let freshToken = try Self.wlanPageToken(in: freshPage)
+        do {
+            _ = try await checkedWifiWrite(Self.clearWifiNetworkRequest(index: ssidIndex, token: freshToken), token: freshToken)
+        } catch let error as URLError where Self.isTransientWifiWriteError(error) {
+            return WifiUpdateResult(wifi: nil, connectionDropped: true)
+        }
+        return try await waitForManagedWifiState { state in
+            !state.networks.contains { $0.ssidIndex == ssidIndex && !$0.name.isEmpty }
+        }
     }
 
     /// Turns a whole radio (2.4 GHz = 1, 5 GHz = 2) on or off, like the Wi-Fi page's switch.

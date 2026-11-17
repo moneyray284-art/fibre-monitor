@@ -18,9 +18,13 @@ public protocol RouterProvider: Sendable {
     func fetchDevices() async throws -> [OntDevice]
     func fetchHealth() async throws -> RouterHealth
     func fetchWifi() async throws -> WifiState
+    func fetchManagedWifiState() async throws -> WifiState
     func fetchWlanBasic(bandHint: String?, ssidIndex: Int?) async throws -> [WifiSsidConfig]
     func setRadio(_ index: Int, enabled: Bool) async throws -> WifiState
     func updateWifiCredentials(config: WifiSsidConfig, newSsid: String, newPassword: String) async throws -> WifiUpdateResult
+    func addWifiNetwork(band: WifiFrequencyBand, ssid: String, password: String, isVisible: Bool) async throws -> WifiUpdateResult
+    func setWifiNetworkEnabled(ssidIndex: Int, enabled: Bool) async throws -> WifiUpdateResult
+    func deleteWifiNetwork(ssidIndex: Int) async throws -> WifiUpdateResult
     func fetchLan() async throws -> LanInfo
     func startPing(host: String, count: Int) async throws
     func pingOutput() async throws -> DiagnosticOutput
@@ -43,6 +47,16 @@ public extension HuaweiOntClient {
 
 public extension RouterProvider {
     func suspendForNetworkLoss() async {}
+    func fetchManagedWifiState() async throws -> WifiState { try await fetchWifi() }
+    func addWifiNetwork(band: WifiFrequencyBand, ssid: String, password: String, isVisible: Bool) async throws -> WifiUpdateResult {
+        throw OntError.badResponse("extra Wi-Fi networks are unsupported")
+    }
+    func setWifiNetworkEnabled(ssidIndex: Int, enabled: Bool) async throws -> WifiUpdateResult {
+        throw OntError.badResponse("extra Wi-Fi networks are unsupported")
+    }
+    func deleteWifiNetwork(ssidIndex: Int) async throws -> WifiUpdateResult {
+        throw OntError.badResponse("extra Wi-Fi networks are unsupported")
+    }
 }
 
 extension HuaweiOntClient: RouterProvider {}
@@ -72,9 +86,13 @@ public struct GenericRouterProvider: RouterProvider {
     public func fetchDevices() async throws -> [OntDevice] { try unsupported() }
     public func fetchHealth() async throws -> RouterHealth { try unsupported() }
     public func fetchWifi() async throws -> WifiState { try unsupported() }
+    public func fetchManagedWifiState() async throws -> WifiState { try unsupported() }
     public func fetchWlanBasic(bandHint: String?, ssidIndex: Int?) async throws -> [WifiSsidConfig] { try unsupported() }
     public func setRadio(_ index: Int, enabled: Bool) async throws -> WifiState { try unsupported() }
     public func updateWifiCredentials(config: WifiSsidConfig, newSsid: String, newPassword: String) async throws -> WifiUpdateResult { try unsupported() }
+    public func addWifiNetwork(band: WifiFrequencyBand, ssid: String, password: String, isVisible: Bool) async throws -> WifiUpdateResult { try unsupported() }
+    public func setWifiNetworkEnabled(ssidIndex: Int, enabled: Bool) async throws -> WifiUpdateResult { try unsupported() }
+    public func deleteWifiNetwork(ssidIndex: Int) async throws -> WifiUpdateResult { try unsupported() }
     public func fetchLan() async throws -> LanInfo { try unsupported() }
     public func startPing(host: String, count: Int) async throws { throw GenericRouterProviderError() }
     public func pingOutput() async throws -> DiagnosticOutput { try unsupported() }

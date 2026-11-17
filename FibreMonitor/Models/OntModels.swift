@@ -333,6 +333,8 @@ public enum OntError: LocalizedError, Equatable, Sendable {
     case invalidDeviceAlias
     case invalidWifiSsid
     case invalidWifiPassword
+    case wifiModificationNotAllowed
+    case wifiSlotLimitReached
     case unsupportedWifiSecurity(String)
     case incompleteWifiConfig([String])
     case macFilterPolicyConflict
@@ -361,6 +363,10 @@ public enum OntError: LocalizedError, Equatable, Sendable {
             return "Network name (SSID) must be 1 to 32 bytes without control characters."
         case .invalidWifiPassword:
             return "Wi-Fi password must be 8 to 63 printable ASCII characters."
+        case .wifiModificationNotAllowed:
+            return "Your router account doesn't allow modifying extra Wi-Fi networks on this firmware."
+        case .wifiSlotLimitReached:
+            return "All four Wi-Fi network slots for this band are already in use."
         case .unsupportedWifiSecurity(let mode):
             return "This network uses \(mode). Change it in the router's web page."
         case .incompleteWifiConfig(let fields):
@@ -392,6 +398,16 @@ public struct WifiRadio: Equatable, Sendable, Identifiable {
     public var index: Int          // 1 = 2.4 GHz, 2 = 5 GHz on this router
     public var band: String        // "2.4GHz" / "5GHz"
     public var enabled: Bool
+}
+
+public enum WifiFrequencyBand: String, CaseIterable, Equatable, Identifiable, Sendable {
+    case twoPointFour = "2.4GHz"
+    case five = "5GHz"
+
+    public var id: String { rawValue }
+    public var title: String { self == .twoPointFour ? "2.4 GHz" : "5 GHz" }
+    public var wlanIndices: [Int] { self == .twoPointFour ? [1, 2, 3, 4] : [5, 6, 7, 8] }
+    public var secondaryIndices: [Int] { Array(wlanIndices.dropFirst()) }
 }
 
 public struct WifiNetwork: Equatable, Sendable, Identifiable {
