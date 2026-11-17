@@ -313,9 +313,15 @@ public struct WlanMacBlacklistState: Equatable, Sendable {
     }
 }
 
-public enum OntError: LocalizedError, Equatable {
+public enum RouterAuthFailure: Equatable, Sendable {
+    case invalidCredentials
+    case temporarilyLocked(retryAt: Date)
+}
+
+public enum OntError: LocalizedError, Equatable, Sendable {
     case notConfigured
     case loginRejected
+    case loginTemporarilyLocked
     case sessionExpired
     case badResponse(String)
     case lastRadio
@@ -335,6 +341,8 @@ public enum OntError: LocalizedError, Equatable {
             return "Enter the router password in Settings."
         case .loginRejected:
             return "The router rejected the login. Check the username and password in Settings. After several wrong attempts the router locks logins for a few minutes."
+        case .loginTemporarilyLocked:
+            return "Router login temporarily locked — retrying in 60s"
         case .sessionExpired:
             return "The router ended the session."
         case .badResponse(let what):

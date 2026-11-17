@@ -5,6 +5,7 @@ import Foundation
 public protocol RouterProvider: Sendable {
     var routerType: RouterType { get }
     func loginIsBlocked() async -> Bool
+    func routerAuthFailure() async -> RouterAuthFailure?
     func routerIdentity() async -> HuaweiOntClient.RouterIdentity?
 
     func switchCredentials(_ credentials: HuaweiOntClient.Credentials) async
@@ -34,7 +35,8 @@ public protocol RouterProvider: Sendable {
 
 public extension HuaweiOntClient {
     nonisolated var routerType: RouterType { .huaweiONT }
-    func loginIsBlocked() async -> Bool { isLoginBlocked }
+    func loginIsBlocked() async -> Bool { await loginFailure() != nil }
+    func routerAuthFailure() async -> RouterAuthFailure? { await loginFailure() }
     func routerIdentity() async -> RouterIdentity? { detectedIdentity }
 }
 
@@ -54,6 +56,7 @@ public struct GenericRouterProvider: RouterProvider {
     }
 
     public func loginIsBlocked() async -> Bool { false }
+    public func routerAuthFailure() async -> RouterAuthFailure? { nil }
     public func routerIdentity() async -> HuaweiOntClient.RouterIdentity? { nil }
     public func switchCredentials(_ credentials: HuaweiOntClient.Credentials) async {}
     public func login() async throws { throw GenericRouterProviderError() }

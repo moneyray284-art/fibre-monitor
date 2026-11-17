@@ -50,7 +50,7 @@ public final class URLSessionOntTransport: OntTransport, @unchecked Sendable {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
         config.timeoutIntervalForResource = 20
-        config.waitsForConnectivity = false
+        config.waitsForConnectivity = true
         config.httpCookieAcceptPolicy = .always
         config.httpShouldSetCookies = true
         self.cookies = config.httpCookieStorage ?? HTTPCookieStorage.shared

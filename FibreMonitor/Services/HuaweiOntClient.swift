@@ -2,11 +2,8 @@ import Foundation
 
 /// Talks to a Huawei OptiXstar ONT (tested against the HG8145X6-10 web UI).
 ///
-/// Login mirrors the web page: fetch a token from `/asp/GetRandCount.asp`, then post
-/// the base64 password to `/login.cgi`. The session lives in a cookie. When it
-/// expires the router serves its login page instead of data; the client then logs in
-/// again once. A rejected login is never retried automatically, because the router
-/// locks logins after a few wrong passwords.
+/// Huawei ONT adapter. Authentication and its cookie-backed session are coordinated by
+/// `RouterAuthCoordinator` so overlapping router requests share one login attempt.
 public actor HuaweiOntClient {
     public struct Credentials: Equatable, Sendable {
         public var host: String
@@ -28,10 +25,9 @@ public actor HuaweiOntClient {
     }
 
     private let transport: OntTransport
+    private let authCoordinator: RouterAuthCoordinator
     private var credentials: Credentials
     private var loggedIn = false
-    /// Set after a rejected login; cleared only when the credentials change.
-    private var loginBlocked = false
     public private(set) var detectedIdentity: RouterIdentity?
 
     private var lastCounters: (rx: UInt64, tx: UInt64, time: Date)?
@@ -41,13 +37,15 @@ public actor HuaweiOntClient {
     public init(credentials: Credentials, transport: OntTransport = URLSessionOntTransport()) {
         self.credentials = credentials
         self.transport = transport
+        self.authCoordinator = RouterAuthCoordinator(credentials: credentials, transport: transport)
     }
 
-    public func update(credentials new: Credentials) {
+    public func update(credentials new: Credentials) async {
         guard new != credentials else { return }
         credentials = new
         loggedIn = false
-        loginBlocked = false
+        await authCoordinator.updateCredentials(new)
+        await transport.resetSession(host: new.host)
         lastCounters = nil
         traffic = TrafficState()
         wanDomain = nil
@@ -60,7 +58,7 @@ public actor HuaweiOntClient {
         await logout()
         credentials = new
         loggedIn = false
-        loginBlocked = false
+        await authCoordinator.updateCredentials(new)
         lastCounters = nil
         traffic = TrafficState()
         wanDomain = nil
@@ -69,7 +67,9 @@ public actor HuaweiOntClient {
         await transport.resetSession(host: new.host)
     }
 
-    public var isLoginBlocked: Bool { loginBlocked }
+    public func loginFailure() async -> RouterAuthFailure? {
+        await authCoordinator.currentFailure()
+    }
 
     // MARK: Session
 
@@ -78,41 +78,19 @@ public actor HuaweiOntClient {
             throw OntError.notConfigured
         }
         guard Self.isValidHost(credentials.host) else { throw OntError.invalidHost }
-        guard !loginBlocked else { throw OntError.loginRejected }
-        await transport.resetSession(host: credentials.host)
-        let token = HuaweiJs.clean(try await transport.send(.init(.post, "/asp/GetRandCount.asp"), host: credentials.host))
-        guard !token.isEmpty, !token.contains("<") else { throw OntError.badResponse("login token") }
-
-        let reply = try await transport.send(.init(.post, "/login.cgi", form: [
-            ("UserName", credentials.username),
-            ("PassWord", Data(credentials.password.utf8).base64EncodedString()),
-            ("Language", "english"),
-            ("x.X_HW_Token", token),
-        ], ajax: false), host: credentials.host)
-
-        // Success is a tiny page that redirects to index.asp; failure re-serves the login page.
-        guard reply.contains("index.asp") else {
+        do {
+            detectedIdentity = try await authCoordinator.authenticate()
+            loggedIn = true
+        } catch {
             loggedIn = false
-            loginBlocked = true
-            throw OntError.loginRejected
-        }
-        loggedIn = true
-        // Load the main page once like a browser would, so the session is fully set up and identity can be read.
-        if let indexText = try? await transport.send(.init(.get, "/index.asp", ajax: false), host: credentials.host) {
-            let model = HuaweiJs.stringVar("ProductName", in: indexText)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let cfg = HuaweiJs.stringVar("CfgMode", in: indexText)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if (model?.isEmpty == false) || (cfg?.isEmpty == false) {
-                detectedIdentity = RouterIdentity(
-                    model: model?.isEmpty == false ? model : nil,
-                    cfgMode: cfg?.isEmpty == false ? cfg : nil
-                )
-            }
+            throw error
         }
     }
 
     public func logout() async {
         let wasLoggedIn = loggedIn
         let currentHost = credentials.host
+        await authCoordinator.beginSessionClose()
         loggedIn = false
         lastCounters = nil
         wanDomain = nil
@@ -124,6 +102,7 @@ public actor HuaweiOntClient {
                                           host: currentHost)
         }
         await transport.resetSession(host: currentHost)
+        await authCoordinator.finishSessionClose()
     }
 
     /// Sends a data request, logging in first if needed and once more if the session expired.
@@ -134,10 +113,11 @@ public actor HuaweiOntClient {
             if let expect { return text.contains(expect) }
             return HuaweiJs.looksLikeData(text)
         }
-        if !loggedIn { try await login() }
+        try await login()
+        let requestGeneration = await authCoordinator.currentGeneration()
         let first = try await transport.send(request, host: credentials.host)
         if valid(first) { return first }
-        loggedIn = false
+        await invalidateSession(ifGeneration: requestGeneration)
         try await login()
         let second = try await transport.send(request, host: credentials.host)
         guard valid(second) else { throw OntError.sessionExpired }
@@ -613,14 +593,15 @@ public actor HuaweiOntClient {
     }
 
     public func fetchHealth() async throws -> RouterHealth {
-        if !loggedIn { try await login() }
+        try await login()
         let req = OntRequest(.get, "/html/ssmp/deviceinfo/deviceinfo.asp", ajax: false)
+        let requestGeneration = await authCoordinator.currentGeneration()
         let first = try await transport.send(req, host: credentials.host)
         if first.contains("cpuUsed") || first.contains("stDeviceInfo") {
             return Self.parseHealth(first)
         }
         guard Self.looksLikeLoginPage(first) else { throw OntError.badResponse("deviceinfo") }
-        loggedIn = false
+        await invalidateSession(ifGeneration: requestGeneration)
         try await login()
         let second = try await transport.send(req, host: credentials.host)
         guard second.contains("cpuUsed") || second.contains("stDeviceInfo") else {
@@ -1092,18 +1073,30 @@ public actor HuaweiOntClient {
         _ = try await transport.send(.init(.post,
             "/CustomApp/set.cgi?x=InternetGatewayDevice.X_HW_DEBUG.SMP.DM.ResetBoard&RequestFile=../CustomApp/mainpage.asp",
             form: [("x.X_HW_Token", token)], ajax: false), host: credentials.host)
-        loggedIn = false
+        await invalidateSession()
         lastCounters = nil
     }
 
     private func freshTokenLoggingIn() async throws -> String {
-        if !loggedIn { try await login() }
+        try await login()
+        let requestGeneration = await authCoordinator.currentGeneration()
         do {
             return try await freshToken()
         } catch {
-            loggedIn = false
+            await invalidateSession(ifGeneration: requestGeneration)
             try await login()
             return try await freshToken()
+        }
+    }
+
+    private func invalidateSession() async {
+        loggedIn = false
+        await authCoordinator.invalidateSession()
+    }
+
+    private func invalidateSession(ifGeneration generation: UInt64) async {
+        if await authCoordinator.invalidateSession(ifGeneration: generation) {
+            loggedIn = false
         }
     }
 }
