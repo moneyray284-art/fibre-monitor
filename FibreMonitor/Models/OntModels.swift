@@ -149,12 +149,16 @@ public enum ConnectionPort: Equatable, Sendable {
         let compact = upper.replacingOccurrences(of: " ", with: "")
         if compact.hasPrefix("SSID"), let n = Int(compact.dropFirst(4).prefix(while: \.isNumber)) {
             let explicitBand = candidates.map { $0.uppercased().replacingOccurrences(of: " ", with: "") }
-            if explicitBand.contains(where: { $0.contains("5GHZ") || $0.contains("5G") }) {
+            if (1...4).contains(n) {
+                self = .wifi24(ssidIndex: n)
+            } else if (5...8).contains(n) {
+                self = .wifi5(ssidIndex: n)
+            } else if let band = ssidBands[n] {
+                self = band.hasPrefix("5") ? .wifi5(ssidIndex: n) : .wifi24(ssidIndex: n)
+            } else if explicitBand.contains(where: { $0.contains("5GHZ") || $0.contains("5G") }) {
                 self = .wifi5(ssidIndex: n)
             } else if explicitBand.contains(where: { $0.contains("2.4GHZ") || $0.contains("2.4G") }) {
                 self = .wifi24(ssidIndex: n)
-            } else if let band = ssidBands[n] {
-                self = band.hasPrefix("5") ? .wifi5(ssidIndex: n) : .wifi24(ssidIndex: n)
             } else {
                 self = n >= 5 ? .wifi5(ssidIndex: n) : .wifi24(ssidIndex: n)
             }
@@ -334,6 +338,7 @@ public enum OntError: LocalizedError, Equatable, Sendable {
     case invalidWifiSsid
     case invalidWifiPassword
     case wifiModificationNotAllowed
+    case wifiWriteRejected(String)
     case wifiSlotLimitReached
     case unsupportedWifiSecurity(String)
     case incompleteWifiConfig([String])
@@ -365,6 +370,8 @@ public enum OntError: LocalizedError, Equatable, Sendable {
             return "Wi-Fi password must be 8 to 63 printable ASCII characters."
         case .wifiModificationNotAllowed:
             return "Your router account doesn't allow modifying extra Wi-Fi networks on this firmware."
+        case .wifiWriteRejected(let message):
+            return message
         case .wifiSlotLimitReached:
             return "All four Wi-Fi network slots for this band are already in use."
         case .unsupportedWifiSecurity(let mode):
@@ -408,6 +415,17 @@ public enum WifiFrequencyBand: String, CaseIterable, Equatable, Identifiable, Se
     public var title: String { self == .twoPointFour ? "2.4 GHz" : "5 GHz" }
     public var wlanIndices: [Int] { self == .twoPointFour ? [1, 2, 3, 4] : [5, 6, 7, 8] }
     public var secondaryIndices: [Int] { Array(wlanIndices.dropFirst()) }
+
+    public static func label(for index: Int, fallback: String) -> String {
+        if (1...4).contains(index) { return WifiFrequencyBand.twoPointFour.rawValue }
+        if (5...8).contains(index) { return WifiFrequencyBand.five.rawValue }
+        let normalized = fallback.lowercased().replacingOccurrences(of: " ", with: "")
+        if normalized.contains("5ghz") || normalized.contains("5g") { return WifiFrequencyBand.five.rawValue }
+        if normalized.contains("2.4ghz") || normalized.contains("2.4g") || normalized.contains("2g") {
+            return WifiFrequencyBand.twoPointFour.rawValue
+        }
+        return fallback
+    }
 }
 
 public struct WifiNetwork: Equatable, Sendable, Identifiable {

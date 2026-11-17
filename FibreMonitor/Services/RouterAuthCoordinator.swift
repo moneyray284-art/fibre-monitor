@@ -11,6 +11,8 @@ public actor RouterAuthCoordinator {
     private var detectedIdentity: HuaweiOntClient.RouterIdentity?
     private var isUpdatingCredentials = false
     private var sessionGeneration: UInt64 = 0
+    private var sessionResetID: UUID?
+    private var sessionResetTask: Task<Void, Never>?
 
     public init(credentials: HuaweiOntClient.Credentials, transport: OntTransport) {
         self.credentials = credentials
@@ -18,6 +20,7 @@ public actor RouterAuthCoordinator {
     }
 
     public func authenticate() async throws -> HuaweiOntClient.RouterIdentity? {
+        await waitForSessionReset()
         guard !isUpdatingCredentials else { throw CancellationError() }
         try await transport.validateRouterNetwork()
 
@@ -73,10 +76,38 @@ public actor RouterAuthCoordinator {
 
     public func currentGeneration() -> UInt64 { sessionGeneration }
 
-    public func invalidateSession() {
+    public func invalidateSession() async {
+        markSessionInvalid()
+        await resetRouterCookies()
+    }
+
+    private func markSessionInvalid() {
         isAuthenticated = false
         detectedIdentity = nil
+        authFailure = nil
         sessionGeneration &+= 1
+    }
+
+    private func resetRouterCookies() async {
+        let resetID = UUID()
+        let host = credentials.host
+        let resetTask = Task { await transport.resetSession(host: host) }
+        sessionResetID = resetID
+        sessionResetTask = resetTask
+        await resetTask.value
+        if sessionResetID == resetID {
+            sessionResetID = nil
+            sessionResetTask = nil
+        }
+    }
+
+    private func waitForSessionReset() async {
+        guard let resetID = sessionResetID, let resetTask = sessionResetTask else { return }
+        await resetTask.value
+        if sessionResetID == resetID {
+            sessionResetID = nil
+            sessionResetTask = nil
+        }
     }
 
     public func beginSessionClose() async {
@@ -86,7 +117,7 @@ public actor RouterAuthCoordinator {
             _ = try? await loginTask.value
         }
         loginTask = nil
-        invalidateSession()
+        markSessionInvalid()
     }
 
     /// Cancels a pending login and forgets the live session when the phone leaves Wi-Fi.
@@ -107,9 +138,10 @@ public actor RouterAuthCoordinator {
     }
 
     @discardableResult
-    public func invalidateSession(ifGeneration generation: UInt64) -> Bool {
+    public func invalidateSession(ifGeneration generation: UInt64) async -> Bool {
         guard sessionGeneration == generation else { return false }
-        invalidateSession()
+        markSessionInvalid()
+        await resetRouterCookies()
         return true
     }
 

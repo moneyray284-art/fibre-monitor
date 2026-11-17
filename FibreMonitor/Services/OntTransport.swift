@@ -10,16 +10,25 @@ public struct OntRequest: Equatable, Sendable {
     public var form: [(String, String)]
     /// Adds `X-Requested-With: XMLHttpRequest` like the web UI's AJAX calls.
     public var ajax: Bool
+    /// Optional per-request override, used for router writes that restart the WLAN radio.
+    public var timeoutInterval: TimeInterval?
 
-    public init(_ method: Method, _ path: String, form: [(String, String)] = [], ajax: Bool = true) {
+    public init(
+        _ method: Method,
+        _ path: String,
+        form: [(String, String)] = [],
+        ajax: Bool = true,
+        timeoutInterval: TimeInterval? = nil
+    ) {
         self.method = method
         self.path = path
         self.form = form
         self.ajax = ajax
+        self.timeoutInterval = timeoutInterval
     }
 
     public static func == (a: OntRequest, b: OntRequest) -> Bool {
-        a.method == b.method && a.path == b.path && a.ajax == b.ajax
+        a.method == b.method && a.path == b.path && a.ajax == b.ajax && a.timeoutInterval == b.timeoutInterval
             && a.form.map { $0.0 } == b.form.map { $0.0 } && a.form.map { $0.1 } == b.form.map { $0.1 }
     }
 
@@ -90,6 +99,7 @@ public final class URLSessionOntTransport: OntTransport, @unchecked Sendable {
         guard let url = URL(string: "http://\(host)\(request.path)") else { throw URLError(.badURL) }
         var r = URLRequest(url: url)
         r.httpMethod = request.method.rawValue
+        if let timeoutInterval = request.timeoutInterval { r.timeoutInterval = timeoutInterval }
         r.cachePolicy = .reloadIgnoringLocalCacheData
         r.setValue("http://\(host)", forHTTPHeaderField: "Origin")
         r.setValue("http://\(host)/", forHTTPHeaderField: "Referer")

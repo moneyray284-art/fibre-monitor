@@ -1024,14 +1024,14 @@ public final class MonitorViewModel: ObservableObject {
         return match
     }
 
-    public func refreshWifiManagementState() async {
-        guard isConnected, !isWifiSaving else { return }
-        await awaitFullRefreshCompletion()
-        guard isConnected, !isWifiSaving else { return }
+    @discardableResult
+    public func refreshWifiManagementState() async -> Bool {
+        guard isConnected, routerRequestsAllowed, !isWifiSaving else { return false }
         do {
             wifi = try await client.fetchManagedWifiState()
+            return true
         } catch {
-            // The regular router sync continues to provide the basic radio/network state.
+            return false
         }
     }
 
@@ -1105,9 +1105,12 @@ public final class MonitorViewModel: ObservableObject {
         if result.connectionDropped {
             wifiMutationStatus = "Applying Wi-Fi settings — router radio restarting…"
             wifiMutationRefreshTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
-                guard let self, !Task.isCancelled, self.routerRequestsAllowed else { return }
-                await self.refreshAll(forceReauthIfNeeded: true)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                guard let self, !Task.isCancelled else { return }
+                if await self.refreshWifiManagementState() { return }
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                guard !Task.isCancelled else { return }
+                _ = await self.refreshWifiManagementState()
             }
         } else {
             wifiMutationStatus = "Wi-Fi settings applied."

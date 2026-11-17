@@ -81,7 +81,7 @@ final class GnmtnCompatibilityTests: XCTestCase {
         XCTAssertEqual(phone.leaseSecondsRemaining, 59531)
 
         let laptop = devices.first { $0.mac == "02:00:5e:00:00:03" }!
-        XCTAssertEqual(laptop.port, .wifi5(ssidIndex: 2))
+        XCTAssertEqual(laptop.port, .wifi24(ssidIndex: 2))
         XCTAssertEqual(laptop.routerAlias, "Laptop Alias")
         XCTAssertEqual(laptop.userSpecifiedDeviceType, "3")
         XCTAssertNil(laptop.trafficSendRate)
@@ -131,8 +131,8 @@ final class GnmtnCompatibilityTests: XCTestCase {
             WifiRadio(index: 2, band: "5GHz", enabled: true),
         ])
         XCTAssertEqual(w.networks.map(\.ssidIndex), [1, 2, 5])
-        XCTAssertEqual(w.networks(on: w.radios[0]).map(\.name), ["TestNet-2G"])
-        XCTAssertEqual(w.networks(on: w.radios[1]).map(\.name), ["TestNet-5G", "TestNet-Extra"])
+        XCTAssertEqual(w.networks(on: w.radios[0]).map(\.name), ["TestNet-2G", "TestNet-5G"])
+        XCTAssertEqual(w.networks(on: w.radios[1]).map(\.name), ["TestNet-Extra"])
     }
 
     func testGnmtnDhcp2PrimaryAndSecondaryInterfaces() {
