@@ -21,7 +21,8 @@ public struct UsageTabView: View {
                             points: settings.dataUsageSummary.dailyHistory,
                             todayDownloadBytes: settings.dataUsageSummary.todayDownloadBytes,
                             todayUploadBytes: settings.dataUsageSummary.todayUploadBytes,
-                            missingDayCount: settings.dataUsageSummary.missingHistoryDayCount
+                            missingDayCount: settings.dataUsageSummary.missingHistoryDayCount,
+                            onLocalDayRollover: { settings.refreshUsageSummaryForCurrentLocalDay() }
                         )
                     } else {
                         noRouterCard
@@ -210,7 +211,8 @@ private struct DailyUsageHistoryCard: View {
     let todayDownloadBytes: UInt64
     let todayUploadBytes: UInt64
     let missingDayCount: Int
-    @State private var selectedDate = Date()
+    let onLocalDayRollover: () -> Void
+    @State private var selectedDate = Calendar.current.startOfDay(for: Date())
 
     private var selectedPoint: DailyUsagePoint? {
         points.first { Calendar.current.isDate($0.date, inSameDayAs: selectedDate) }
@@ -229,13 +231,8 @@ private struct DailyUsageHistoryCard: View {
         return overflow ? UInt64.max : total
     }
 
-    private var hasPartialTodayUsage: Bool {
-        todayTotalBytes > 0
-            && points.contains { Calendar.current.isDateInToday($0.date) && $0.totalBytes == nil }
-    }
-
     private func barBytes(for point: DailyUsagePoint) -> UInt64? {
-        if let total = point.totalBytes { return total }
+        if let total = point.totalBytes, total > 0 { return total }
         if Calendar.current.isDateInToday(point.date), todayTotalBytes > 0 { return todayTotalBytes }
         return nil
     }
@@ -243,7 +240,7 @@ private struct DailyUsageHistoryCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             CardHeader(icon: "chart.bar.fill", title: "Daily Usage") {
-                Text("Last 7 days")
+                Text("7-day window")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -268,24 +265,50 @@ private struct DailyUsageHistoryCard: View {
                 selectedUsageDetails
             }
 
-            if hasPartialTodayUsage {
-                Text("Today’s bar shows recorded usage so far. Blank bars are days without a complete reading.")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            } else if missingDayCount > 0 {
-                Text("Blank days have no complete reading. If the app missed a long interval, the router can provide the overall counter change, but it cannot split that amount accurately by day.")
+            if missingDayCount > 0 {
+                Text("Dashed bars mark future dates or dates with no recorded usage.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .liquidGlassCard()
+        .onAppear {
+            onLocalDayRollover()
+            selectedDate = Calendar.current.startOfDay(for: Date())
+        }
+        .task {
+            while !Task.isCancelled {
+                let calendar = Calendar.current
+                let now = Date()
+                let startOfToday = calendar.startOfDay(for: now)
+                guard let nextDay = calendar.date(byAdding: .day, value: 1, to: startOfToday) else { return }
+                let delay = max(1, nextDay.timeIntervalSince(now) + 0.5)
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                } catch {
+                    return
+                }
+                onLocalDayRollover()
+                selectedDate = Calendar.current.startOfDay(for: Date())
+            }
+        }
     }
 
     private var selectedUsageDetails: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text(selectedDate.formatted(date: .long, time: .omitted))
-                .font(.subheadline.weight(.semibold))
+            HStack(spacing: 7) {
+                Text(selectedDate.formatted(date: .long, time: .omitted))
+                    .font(.subheadline.weight(.semibold))
+                if selectedPoint?.isPartial == true {
+                    Text("Partial")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                }
+            }
 
             HStack(spacing: 8) {
                 usageValue("Download", bytes: isSelectedToday ? todayDownloadBytes : selectedPoint?.downloadBytes)
@@ -302,7 +325,7 @@ private struct DailyUsageHistoryCard: View {
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            Text(bytes.map(Self.format) ?? "Incomplete")
+            Text(bytes.map(Self.format) ?? "—")
                 .font(.caption.weight(.semibold).monospacedDigit())
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -349,14 +372,13 @@ private struct DailyUsageHistoryCard: View {
                 .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
     }
 
     private func accessibilityValue(for point: DailyUsagePoint, displayedBytes: UInt64?) -> String {
-        guard let displayedBytes else { return "No complete reading" }
+        guard let displayedBytes else { return "No recorded usage" }
         let value = Self.format(displayedBytes)
-        return Calendar.current.isDateInToday(point.date) && point.totalBytes == nil
-            ? "\(value) so far, partial today"
-            : value
+        return point.isPartial ? "\(value), partial day" : value
     }
 
     private static func format(_ bytes: UInt64) -> String {

@@ -127,6 +127,7 @@ public final class SettingsStore: ObservableObject {
         static let appIconChoice = "app_icon_choice"
         static let autoMatchAppIcon = "auto_match_app_icon"
         static let dataUsage = "data_usage_v1"
+        static let sharedDailyUsage = "linkwave.daily_usage.history.v1"
         static let migrated = "v2_profiles_migrated"
 
         // Legacy 1.x keys
@@ -137,6 +138,7 @@ public final class SettingsStore: ObservableObject {
     }
 
     private let defaults: UserDefaults
+    private let sharedDefaults: UserDefaults
     private let passwordStore: PasswordStore
     private var usageByProfile: [String: ProfileUsage] = [:]
 
@@ -183,6 +185,7 @@ public final class SettingsStore: ObservableObject {
         var totalDownloadBytes: UInt64 = 0
         var totalUploadBytes: UInt64 = 0
         var days: [String: Day] = [:]
+        var chartStartDayKey: String?
         // Optional so data saved by earlier versions still decodes.
         var lastCounterSampleAt: Date?
         var lastSuccessfulSyncAt: Date?
@@ -192,8 +195,33 @@ public final class SettingsStore: ObservableObject {
         var connectionInterruptions: [ConnectionInterruption]?
     }
 
-    public init(defaults: UserDefaults = .standard, passwordStore: PasswordStore = SystemKeychainStore()) {
+    private struct SharedDailyUsageHistory: Codable {
+        struct Day: Codable {
+            var downloadBytes: UInt64
+            var uploadBytes: UInt64
+        }
+
+        struct Profile: Codable {
+            var chartStartDayKey: String?
+            var days: [String: Day]
+        }
+
+        var profiles: [String: Profile]
+    }
+
+    public init(
+        defaults: UserDefaults = .standard,
+        passwordStore: PasswordStore = SystemKeychainStore(),
+        sharedDefaults: UserDefaults? = nil
+    ) {
         self.defaults = defaults
+        if let sharedDefaults {
+            self.sharedDefaults = sharedDefaults
+        } else if defaults === UserDefaults.standard {
+            self.sharedDefaults = UserDefaults(suiteName: WidgetSnapshotStore.appGroupID) ?? defaults
+        } else {
+            self.sharedDefaults = defaults
+        }
         self.passwordStore = passwordStore
 
         self.theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .system
@@ -207,6 +235,7 @@ public final class SettingsStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([String: ProfileUsage].self, from: data) {
             self.usageByProfile = decoded
         }
+        mergeSharedDailyUsageHistory()
 
         if defaults.bool(forKey: Keys.migrated) || defaults.data(forKey: Keys.profiles) != nil {
             if let data = defaults.data(forKey: Keys.profiles),
@@ -351,6 +380,9 @@ public final class SettingsStore: ObservableObject {
         }
 
         let dayKey = Self.dayKey(for: date)
+        if usage.chartStartDayKey == nil {
+            usage.chartStartDayKey = usage.days.keys.min() ?? observedDays.min() ?? dayKey
+        }
         observedDays.insert(dayKey)
         usage.lastCounterSampleAt = date
 
@@ -360,7 +392,6 @@ public final class SettingsStore: ObservableObject {
             usage.lastUploadCounter = upload
             // The initial counter read is only a baseline; it does not reveal earlier traffic today.
             incompleteDays.insert(dayKey)
-            Self.trimDayKeys(&observedDays, &incompleteDays, relativeTo: date)
             usage.observedDayKeys = observedDays.sorted()
             usage.incompleteDayKeys = incompleteDays.sorted()
             usageByProfile[key] = usage
@@ -381,10 +412,6 @@ public final class SettingsStore: ObservableObject {
         day.uploadBytes += uploadDelta
         usage.days[dayKey] = day
 
-        // Keep one year of daily detail while retaining all-time totals.
-        let cutoff = Self.dayKey(for: Calendar.current.date(byAdding: .day, value: -366, to: date) ?? date)
-        usage.days = usage.days.filter { $0.key >= cutoff }
-        Self.trimDayKeys(&observedDays, &incompleteDays, relativeTo: date)
         usage.observedDayKeys = observedDays.sorted()
         usage.incompleteDayKeys = incompleteDays.sorted()
 
@@ -438,29 +465,62 @@ public final class SettingsStore: ObservableObject {
     }
 
     private func refreshDataUsageSummary() {
-        guard let profileId = activeProfile?.id,
-              let usage = usageByProfile[profileId.uuidString] else {
+        guard let profileId = activeProfile?.id else {
             dataUsageSummary = DataUsageSummary()
             return
         }
 
+        let profileKey = profileId.uuidString
+        var usage = usageByProfile[profileKey] ?? ProfileUsage()
         let todayKey = Self.dayKey(for: Date())
         let monthPrefix = String(todayKey.prefix(7))
         let monthDays = usage.days.filter { $0.key.hasPrefix(monthPrefix) }.values
-        let observedDays = Set(usage.observedDayKeys ?? Array(usage.days.keys))
         let incompleteDays = Set(usage.incompleteDayKeys ?? [])
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
+        var anchorChanged = false
+        if usage.chartStartDayKey == nil {
+            usage.chartStartDayKey = usage.days.keys.min()
+                ?? usage.observedDayKeys?.min()
+                ?? todayKey
+            anchorChanged = true
+        }
+
+        var chartStart: Date
+        if let storedChartStart = usage.chartStartDayKey.flatMap(Self.date(fromDayKey:)) {
+            chartStart = storedChartStart
+        } else {
+            chartStart = today
+            if usage.chartStartDayKey != todayKey {
+                usage.chartStartDayKey = todayKey
+                anchorChanged = true
+            }
+        }
+        let elapsedDays = calendar.dateComponents([.day], from: chartStart, to: today).day ?? 0
+        if elapsedDays >= 7 {
+            let elapsedWindows = elapsedDays / 7
+            chartStart = calendar.date(byAdding: .day, value: elapsedWindows * 7, to: chartStart) ?? today
+            usage.chartStartDayKey = Self.dayKey(for: chartStart)
+            anchorChanged = true
+        }
+
+        if anchorChanged {
+            usageByProfile[profileKey] = usage
+            saveUsage()
+        }
+
         let history = (0..<7).compactMap { offset -> DailyUsagePoint? in
-            guard let date = calendar.date(byAdding: .day, value: offset - 6, to: today) else { return nil }
+            guard let date = calendar.date(byAdding: .day, value: offset, to: chartStart) else { return nil }
             let key = Self.dayKey(for: date)
-            let isComplete = observedDays.contains(key) && !incompleteDays.contains(key)
             let day = usage.days[key] ?? ProfileUsage.Day()
+            let hasRecordedBytes = day.downloadBytes > 0 || day.uploadBytes > 0
+            let hasUsableReading = date <= today && hasRecordedBytes
             return DailyUsagePoint(
                 date: date,
                 label: date.formatted(.dateTime.month(.abbreviated).day()),
-                downloadBytes: isComplete ? day.downloadBytes : nil,
-                uploadBytes: isComplete ? day.uploadBytes : nil
+                downloadBytes: hasUsableReading ? day.downloadBytes : nil,
+                uploadBytes: hasUsableReading ? day.uploadBytes : nil,
+                isPartial: hasUsableReading && incompleteDays.contains(key)
             )
         }
         dataUsageSummary = DataUsageSummary(
@@ -471,21 +531,54 @@ public final class SettingsStore: ObservableObject {
             totalDownloadBytes: usage.totalDownloadBytes,
             totalUploadBytes: usage.totalUploadBytes,
             lastSuccessfulSyncAt: usage.lastSuccessfulSyncAt,
-            missingHistoryDayCount: history.filter { $0.totalBytes == nil }.count,
+            missingHistoryDayCount: history.filter { $0.date <= today && $0.totalBytes == nil }.count,
             dailyHistory: history
         )
     }
 
-    private static func trimDayKeys(_ observedDays: inout Set<String>, _ incompleteDays: inout Set<String>, relativeTo date: Date) {
-        let cutoffDate = Calendar.current.date(byAdding: .day, value: -366, to: date) ?? date
-        let cutoff = dayKey(for: cutoffDate)
-        observedDays = observedDays.filter { $0 >= cutoff }
-        incompleteDays = incompleteDays.filter { $0 >= cutoff }
+    public func refreshUsageSummaryForCurrentLocalDay() {
+        refreshDataUsageSummary()
     }
 
     private func saveUsage() {
         if let data = try? JSONEncoder().encode(usageByProfile) {
             defaults.set(data, forKey: Keys.dataUsage)
+        }
+
+        let sharedProfiles = usageByProfile.mapValues { usage in
+            SharedDailyUsageHistory.Profile(
+                chartStartDayKey: usage.chartStartDayKey,
+                days: usage.days.mapValues {
+                    SharedDailyUsageHistory.Day(
+                        downloadBytes: $0.downloadBytes,
+                        uploadBytes: $0.uploadBytes
+                    )
+                }
+            )
+        }
+        if let data = try? JSONEncoder().encode(SharedDailyUsageHistory(profiles: sharedProfiles)) {
+            sharedDefaults.set(data, forKey: Keys.sharedDailyUsage)
+        }
+    }
+
+    private func mergeSharedDailyUsageHistory() {
+        guard let data = sharedDefaults.data(forKey: Keys.sharedDailyUsage),
+              let sharedHistory = try? JSONDecoder().decode(SharedDailyUsageHistory.self, from: data) else {
+            return
+        }
+
+        for (profileKey, sharedProfile) in sharedHistory.profiles {
+            var usage = usageByProfile[profileKey] ?? ProfileUsage()
+            for (dayKey, sharedDay) in sharedProfile.days {
+                var day = usage.days[dayKey] ?? ProfileUsage.Day()
+                day.downloadBytes = max(day.downloadBytes, sharedDay.downloadBytes)
+                day.uploadBytes = max(day.uploadBytes, sharedDay.uploadBytes)
+                usage.days[dayKey] = day
+            }
+            if usage.chartStartDayKey == nil {
+                usage.chartStartDayKey = sharedProfile.chartStartDayKey
+            }
+            usageByProfile[profileKey] = usage
         }
     }
 
@@ -501,6 +594,16 @@ public final class SettingsStore: ObservableObject {
     private static func dayKey(for date: Date) -> String {
         let parts = Calendar.current.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    private static func date(fromDayKey key: String) -> Date? {
+        let parts = key.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        var components = DateComponents()
+        components.year = parts[0]
+        components.month = parts[1]
+        components.day = parts[2]
+        return Calendar.current.date(from: components)
     }
 
     public func recordDetection(for profileId: UUID, model: String?, cfgMode: String?) {

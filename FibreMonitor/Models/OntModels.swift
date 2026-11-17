@@ -33,9 +33,11 @@ public struct DailyUsagePoint: Equatable, Sendable, Identifiable {
     public var id: Date { date }
     public var date: Date
     public var label: String
-    /// Nil when the app did not sample the full day or a long gap made the daily split uncertain.
+    /// Nil when no traffic bytes were recorded for the day.
     public var downloadBytes: UInt64?
     public var uploadBytes: UInt64?
+    /// True when traffic was recorded, but the app did not observe the whole day.
+    public var isPartial: Bool = false
 
     public var totalBytes: UInt64? {
         guard let downloadBytes, let uploadBytes else { return nil }
