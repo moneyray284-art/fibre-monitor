@@ -523,6 +523,19 @@ public final class SettingsStore: ObservableObject {
                 isPartial: hasUsableReading && incompleteDays.contains(key)
             )
         }
+        let historicalDayKeys = Set(usage.days.keys).union(usage.observedDayKeys ?? [])
+        let historicalHistory = historicalDayKeys.sorted().compactMap { key -> DailyUsagePoint? in
+            guard let date = Self.date(fromDayKey: key), date <= today else { return nil }
+            let hasSavedCounters = usage.days[key] != nil
+            let day = usage.days[key] ?? ProfileUsage.Day()
+            return DailyUsagePoint(
+                date: date,
+                label: date.formatted(.dateTime.day()),
+                downloadBytes: hasSavedCounters ? day.downloadBytes : nil,
+                uploadBytes: hasSavedCounters ? day.uploadBytes : nil,
+                isPartial: hasSavedCounters && incompleteDays.contains(key)
+            )
+        }
         dataUsageSummary = DataUsageSummary(
             todayDownloadBytes: usage.days[todayKey]?.downloadBytes ?? 0,
             todayUploadBytes: usage.days[todayKey]?.uploadBytes ?? 0,
@@ -532,7 +545,8 @@ public final class SettingsStore: ObservableObject {
             totalUploadBytes: usage.totalUploadBytes,
             lastSuccessfulSyncAt: usage.lastSuccessfulSyncAt,
             missingHistoryDayCount: history.filter { $0.date <= today && $0.totalBytes == nil }.count,
-            dailyHistory: history
+            dailyHistory: history,
+            historicalDailyHistory: historicalHistory
         )
     }
 

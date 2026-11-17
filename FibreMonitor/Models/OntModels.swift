@@ -27,6 +27,8 @@ public struct DataUsageSummary: Equatable, Sendable {
     public var lastSuccessfulSyncAt: Date? = nil
     public var missingHistoryDayCount: Int = 0
     public var dailyHistory: [DailyUsagePoint] = []
+    /// All persisted daily records for the active profile, used by the month chart.
+    public var historicalDailyHistory: [DailyUsagePoint] = []
 }
 
 public struct DailyUsagePoint: Equatable, Sendable, Identifiable {

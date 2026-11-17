@@ -18,10 +18,9 @@ public struct UsageTabView: View {
                         SyncStatusCard(summary: settings.dataUsageSummary)
                         UsageTotalsCard(summary: settings.dataUsageSummary)
                         DailyUsageHistoryCard(
-                            points: settings.dataUsageSummary.dailyHistory,
+                            history: settings.dataUsageSummary.historicalDailyHistory,
                             todayDownloadBytes: settings.dataUsageSummary.todayDownloadBytes,
                             todayUploadBytes: settings.dataUsageSummary.todayUploadBytes,
-                            missingDayCount: settings.dataUsageSummary.missingHistoryDayCount,
                             onLocalDayRollover: { settings.refreshUsageSummaryForCurrentLocalDay() }
                         )
                     } else {
@@ -208,79 +207,91 @@ private struct UsageTotalsCard: View {
 }
 
 private struct DailyUsageHistoryCard: View {
-    let points: [DailyUsagePoint]
+    let history: [DailyUsagePoint]
     let todayDownloadBytes: UInt64
     let todayUploadBytes: UInt64
-    let missingDayCount: Int
     let onLocalDayRollover: () -> Void
     @State private var selectedDate = Calendar.current.startOfDay(for: Date())
+    @State private var selectedMonth = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Calendar.current.startOfDay(for: Date())
+
+    private var calendar: Calendar { Calendar.current }
+
+    private var currentMonth: Date {
+        calendar.dateInterval(of: .month, for: Date())?.start ?? calendar.startOfDay(for: Date())
+    }
+
+    private var selectedMonthStart: Date {
+        calendar.dateInterval(of: .month, for: selectedMonth)?.start ?? currentMonth
+    }
+
+    private var monthOptions: [Date] {
+        let recordedMonths = history.compactMap { calendar.dateInterval(of: .month, for: $0.date)?.start }
+        return Array(Set(recordedMonths + [currentMonth])).sorted(by: >)
+    }
+
+    private var monthPoints: [DailyUsagePoint] {
+        points(in: selectedMonthStart)
+    }
+
+    private func points(in month: Date) -> [DailyUsagePoint] {
+        guard let range = calendar.range(of: .day, in: .month, for: month) else { return [] }
+        let historyByDate = Dictionary(uniqueKeysWithValues: history.map {
+            (calendar.startOfDay(for: $0.date), $0)
+        })
+        return range.compactMap { dayNumber in
+            guard let date = calendar.date(byAdding: .day, value: dayNumber - 1, to: month) else { return nil }
+            let saved = historyByDate[date]
+            let isToday = calendar.isDateInToday(date)
+            let hasTodayUsage = todayDownloadBytes > 0 || todayUploadBytes > 0
+            return DailyUsagePoint(
+                date: date,
+                label: String(dayNumber),
+                downloadBytes: isToday && hasTodayUsage ? todayDownloadBytes : saved?.downloadBytes,
+                uploadBytes: isToday && hasTodayUsage ? todayUploadBytes : saved?.uploadBytes,
+                isPartial: saved?.isPartial ?? (isToday && hasTodayUsage)
+            )
+        }
+    }
 
     private var selectedPoint: DailyUsagePoint? {
-        points.first { Calendar.current.isDate($0.date, inSameDayAs: selectedDate) }
+        monthPoints.first { calendar.isDate($0.date, inSameDayAs: selectedDate) }
     }
 
-    private var isSelectedToday: Bool {
-        Calendar.current.isDateInToday(selectedDate)
+    private var chartTopGB: Double {
+        let maximumGB = Double(monthPoints.compactMap(\.totalBytes).max() ?? 0) / 1_000_000_000
+        return max(50, ceil(maximumGB / 50) * 50)
     }
 
-    private var maximumBytes: Double {
-        max(1, Double(points.compactMap { barBytes(for: $0) }.max() ?? 0))
-    }
+    private var chartTopBytes: Double { chartTopGB * 1_000_000_000 }
 
-    private var todayTotalBytes: UInt64 {
-        let (total, overflow) = todayDownloadBytes.addingReportingOverflow(todayUploadBytes)
-        return overflow ? UInt64.max : total
-    }
-
-    private func barBytes(for point: DailyUsagePoint) -> UInt64? {
-        if let total = point.totalBytes, total > 0 { return total }
-        if Calendar.current.isDateInToday(point.date), todayTotalBytes > 0 { return todayTotalBytes }
-        return nil
+    private var axisLabels: (String, String, String) {
+        let month = selectedMonthStart.formatted(.dateTime.month(.abbreviated))
+        let lastDay = monthPoints.count
+        return ("1 \(month)", "15 \(month)", "\(lastDay) \(month)")
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             CardHeader(icon: "chart.bar.fill", title: "Daily Usage") {
-                Text("7-day window")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                monthMenu
             }
 
-            if points.isEmpty {
-                Text("Daily history will appear after the router has been checked.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            } else {
-                HStack(alignment: .bottom, spacing: 7) {
-                    ForEach(points) { point in
-                        Button {
-                            selectedDate = point.date
-                        } label: {
-                            dayBar(point, isSelected: Calendar.current.isDate(point.date, inSameDayAs: selectedDate))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .frame(height: 138)
-
-                selectedUsageDetails
-            }
-
-            if missingDayCount > 0 {
-                Text("Dashed bars mark future dates or dates with no recorded usage.")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
+            monthlyChart
+            selectedUsageDetails
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .linkWaveGlassCard()
         .onAppear {
             onLocalDayRollover()
-            selectedDate = Calendar.current.startOfDay(for: Date())
+            selectedMonth = currentMonth
+            selectedDate = calendar.startOfDay(for: Date())
+        }
+        .onChange(of: currentMonth) { newMonth in
+            selectedMonth = newMonth
+            selectedDate = calendar.startOfDay(for: Date())
         }
         .task {
             while !Task.isCancelled {
-                let calendar = Calendar.current
                 let now = Date()
                 let startOfToday = calendar.startOfDay(for: now)
                 guard let nextDay = calendar.date(byAdding: .day, value: 1, to: startOfToday) else { return }
@@ -291,9 +302,163 @@ private struct DailyUsageHistoryCard: View {
                     return
                 }
                 onLocalDayRollover()
-                selectedDate = Calendar.current.startOfDay(for: Date())
+                selectedMonth = currentMonth
+                selectedDate = calendar.startOfDay(for: Date())
             }
         }
+    }
+
+    private var monthMenu: some View {
+        Menu {
+            ForEach(monthOptions, id: \.self) { month in
+                Button {
+                    selectMonth(month)
+                } label: {
+                    HStack {
+                        Text(month.formatted(.dateTime.month(.wide).year()))
+                        if calendar.isDate(month, equalTo: selectedMonthStart, toGranularity: .month) {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(selectedMonthStart.formatted(.dateTime.month(.wide).year()))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .liquidGlassCapsule()
+        }
+        .accessibilityLabel("Select usage month")
+    }
+
+    private func selectMonth(_ month: Date) {
+        let monthStart = calendar.dateInterval(of: .month, for: month)?.start ?? currentMonth
+        selectedMonth = monthStart
+        if calendar.isDate(monthStart, equalTo: currentMonth, toGranularity: .month) {
+            selectedDate = calendar.startOfDay(for: Date())
+        } else if let mostRecentUsage = points(in: monthStart).last(where: { ($0.totalBytes ?? 0) > 0 }) {
+            selectedDate = mostRecentUsage.date
+        } else {
+            selectedDate = points(in: monthStart).last?.date ?? monthStart
+        }
+    }
+
+    private var monthlyChart: some View {
+        GeometryReader { geometry in
+            let labelWidth: CGFloat = 38
+            let plotWidth = max(1, geometry.size.width - labelWidth - 5)
+            let plotHeight = geometry.size.height
+            let dayCount = max(1, monthPoints.count)
+            let barWidth = min(9, max(2, (plotWidth - CGFloat(dayCount - 1) * 2) / CGFloat(dayCount)))
+            let barSpacing = dayCount > 1 ? max(2, (plotWidth - barWidth * CGFloat(dayCount)) / CGFloat(dayCount - 1)) : 0
+
+            HStack(spacing: 5) {
+                ZStack(alignment: .bottomLeading) {
+                    HStack(alignment: .bottom, spacing: barSpacing) {
+                        ForEach(monthPoints) { point in
+                            monthBar(point, width: barWidth, height: plotHeight)
+                        }
+                    }
+
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: 1))
+                        path.addLine(to: CGPoint(x: plotWidth, y: 1))
+                        path.move(to: CGPoint(x: 0, y: plotHeight / 2))
+                        path.addLine(to: CGPoint(x: plotWidth, y: plotHeight / 2))
+                    }
+                    .stroke(Color.secondary.opacity(0.34), style: StrokeStyle(lineWidth: 0.8, dash: [2, 3]))
+                    .allowsHitTesting(false)
+                }
+                .frame(width: plotWidth, height: plotHeight, alignment: .bottomLeading)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in selectDay(at: value.location.x, plotWidth: plotWidth) }
+                )
+                .accessibilityElement(children: .contain)
+
+                VStack(spacing: 0) {
+                    Text("\(Int(chartTopGB)) GB")
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    Spacer(minLength: 0)
+                    Text("\(Int(chartTopGB / 2)) GB")
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: 9, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: labelWidth, height: plotHeight)
+            }
+        }
+        .frame(height: 132)
+        .overlay(alignment: .bottom) {
+            monthAxisLabels
+                .offset(y: 17)
+        }
+        .padding(.bottom, 16)
+    }
+
+    private var monthAxisLabels: some View {
+        HStack(spacing: 5) {
+            HStack {
+                Text(axisLabels.0).frame(maxWidth: .infinity, alignment: .leading)
+                Text(axisLabels.1).frame(maxWidth: .infinity, alignment: .center)
+                Text(axisLabels.2).frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .frame(maxWidth: .infinity)
+            Color.clear.frame(width: 38)
+        }
+        .font(.system(size: 9, weight: .medium))
+        .monospacedDigit()
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+    }
+
+    private func monthBar(_ point: DailyUsagePoint, width: CGFloat, height: CGFloat) -> some View {
+        let isSelected = calendar.isDate(point.date, inSameDayAs: selectedDate)
+        let total = Double(point.totalBytes ?? 0)
+        let usageHeight = total > 0 ? max(2, height * CGFloat(min(1, total / chartTopBytes))) : 0
+
+        return Button {
+            selectedDate = point.date
+        } label: {
+            Capsule(style: .continuous)
+                .fill(Color.accentColor.opacity(isSelected ? 0.16 : 0.10))
+                .overlay(alignment: .bottom) {
+                    if total > 0 {
+                        Capsule(style: .continuous)
+                            .fill(Color.accentColor.opacity(isSelected ? 1 : 0.58))
+                            .frame(height: usageHeight)
+                    }
+                }
+                .overlay {
+                    if isSelected {
+                        Capsule(style: .continuous)
+                            .stroke(Color.accentColor.opacity(0.9), lineWidth: 1)
+                    }
+                }
+                .frame(width: width, height: height)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(point.date.formatted(date: .complete, time: .omitted))
+        .accessibilityValue(accessibilityValue(for: point))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func selectDay(at x: CGFloat, plotWidth: CGFloat) {
+        guard !monthPoints.isEmpty else { return }
+        let index = min(monthPoints.count - 1, max(0, Int((x / plotWidth) * CGFloat(monthPoints.count))))
+        selectedDate = monthPoints[index].date
     }
 
     private var selectedUsageDetails: some View {
@@ -301,7 +466,7 @@ private struct DailyUsageHistoryCard: View {
             HStack(spacing: 7) {
                 Text(selectedDate.formatted(date: .long, time: .omitted))
                     .font(.subheadline.weight(.semibold))
-                if selectedPoint?.isPartial == true {
+                if selectedPoint?.isPartial == true && selectedPoint?.totalBytes != nil {
                     Text("Partial")
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
@@ -312,9 +477,9 @@ private struct DailyUsageHistoryCard: View {
             }
 
             HStack(spacing: 8) {
-                usageValue("Download", bytes: isSelectedToday ? todayDownloadBytes : selectedPoint?.downloadBytes)
-                usageValue("Upload", bytes: isSelectedToday ? todayUploadBytes : selectedPoint?.uploadBytes)
-                usageValue("Total", bytes: isSelectedToday ? todayTotalBytes : selectedPoint?.totalBytes)
+                usageValue("Download", bytes: selectedPoint?.downloadBytes)
+                usageValue("Upload", bytes: selectedPoint?.uploadBytes)
+                usageValue("Total", bytes: selectedPoint?.totalBytes)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -334,51 +499,9 @@ private struct DailyUsageHistoryCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func dayBar(_ point: DailyUsagePoint, isSelected: Bool) -> some View {
-        let displayedBytes = barBytes(for: point)
-        return VStack(spacing: 6) {
-            GeometryReader { geometry in
-                ZStack(alignment: .bottom) {
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(Color.secondary.opacity(0.1))
-
-                    if let total = displayedBytes {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(Color.accentColor)
-                            .frame(height: total == 0 ? 3 : max(3, geometry.size.height * CGFloat(Double(total) / maximumBytes)))
-                    } else {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .stroke(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                            .overlay {
-                                Text("–")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                    }
-
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .stroke(Color.primary.opacity(0.68), lineWidth: 1.5)
-                    }
-                }
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(point.date.formatted(date: .complete, time: .omitted))
-            .accessibilityValue(accessibilityValue(for: point, displayedBytes: displayedBytes))
-
-            Text(point.label)
-                .font(.system(size: 10))
-                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
-    }
-
-    private func accessibilityValue(for point: DailyUsagePoint, displayedBytes: UInt64?) -> String {
-        guard let displayedBytes else { return "No recorded usage" }
-        let value = Self.format(displayedBytes)
+    private func accessibilityValue(for point: DailyUsagePoint) -> String {
+        guard let total = point.totalBytes else { return "No recorded usage" }
+        let value = Self.format(total)
         return point.isPartial ? "\(value), partial day" : value
     }
 
