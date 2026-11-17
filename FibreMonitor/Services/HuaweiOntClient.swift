@@ -105,6 +105,16 @@ public actor HuaweiOntClient {
         await authCoordinator.finishSessionClose()
     }
 
+    /// Stops login work and cancels transport requests without sending a logout over cellular.
+    public func suspendForNetworkLoss() async {
+        loggedIn = false
+        lastCounters = nil
+        traffic.downloadMbps = 0
+        traffic.uploadMbps = 0
+        await authCoordinator.suspendForNetworkLoss()
+        await transport.cancelPendingRequests()
+    }
+
     /// Sends a data request, logging in first if needed and once more if the session expired.
     /// Full HTML pages are checked for `expect` (text the real page always contains), because
     /// an expired session answers with the login page instead.

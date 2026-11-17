@@ -21,7 +21,19 @@ public struct DashboardView: View {
                     } else {
                         RouterHeaderCard(viewModel: viewModel, settings: settings)
 
-                        if let err = viewModel.errorMessage, !viewModel.isLoggedOut {
+                        if !viewModel.isConnectedToWiFi {
+                            NetworkStatusBanner(
+                                message: "Not connected to Wi-Fi — turn on Wi-Fi to connect to your router",
+                                symbol: "wifi.slash"
+                            )
+                        } else if !viewModel.hasInternetPath {
+                            NetworkStatusBanner(
+                                message: "Wi-Fi is connected, but no internet path is available",
+                                symbol: "network"
+                            )
+                        }
+
+                        if let err = viewModel.errorMessage, !viewModel.isLoggedOut, viewModel.isConnectedToWiFi {
                             ErrorBanner(
                                 message: err,
                                 suggestFallback: viewModel.shouldSuggestFallbackHost,
@@ -186,6 +198,8 @@ private struct RouterHeaderCard: View {
     }
 
     private var statusColor: Color {
+        if !viewModel.isConnectedToWiFi { return .red }
+        if !viewModel.hasInternetPath { return .orange }
         if viewModel.isLoggedOut { return .secondary }
         switch viewModel.connectionState {
         case .connected: return .green
@@ -195,6 +209,8 @@ private struct RouterHeaderCard: View {
     }
 
     private var statusText: String {
+        if !viewModel.isConnectedToWiFi { return "NO WI-FI" }
+        if !viewModel.hasInternetPath { return "NO INTERNET" }
         if viewModel.isLoggedOut { return "LOGGED OUT" }
         switch viewModel.connectionState {
         case .connected:
@@ -213,6 +229,23 @@ private struct RouterHeaderCard: View {
     private var wifiOnline: Bool {
         let reportedStates = viewModel.wifi.radios.map(\.enabled) + viewModel.wifi.networks.map(\.enabled)
         return reportedStates.isEmpty ? viewModel.isConnected : reportedStates.contains(true)
+    }
+}
+
+private struct NetworkStatusBanner: View {
+    let message: String
+    let symbol: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: symbol)
+                .foregroundStyle(.orange)
+            Text(message)
+                .font(.caption)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .linkWaveGlassCard(padding: 12)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -414,6 +447,7 @@ private struct SpeedTestCard: View {
     @State private var progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
     @State private var errorMessage: String?
     @State private var isRunning = false
+    @State private var testTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
@@ -483,19 +517,37 @@ private struct SpeedTestCard: View {
                 }
             } else {
                 Button(action: startTest) {
-                    Label(result == nil ? "Start Test" : "Test Again", systemImage: result == nil ? "play.fill" : "arrow.clockwise")
+                    Label(startButtonTitle, systemImage: startButtonSymbol)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.cyan)
+                        .foregroundStyle(viewModel.canRunSpeedTest ? Color.cyan : Color.secondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                 }
                 .buttonStyle(.plain)
                 .linkWaveInteractiveGlassCapsule()
-                .disabled(!viewModel.settings.isConfigured)
+                .disabled(!viewModel.settings.isConfigured || !viewModel.canRunSpeedTest)
             }
         }
         .linkWaveGlassCard()
         .accessibilityElement(children: .contain)
+        .onChange(of: viewModel.canRunSpeedTest) { isAvailable in
+            guard !isAvailable, isRunning else { return }
+            testTask?.cancel()
+            errorMessage = viewModel.isConnectedToWiFi
+                ? "Speed test stopped because the internet path was lost."
+                : "Speed test stopped because Wi-Fi disconnected."
+        }
+        .onDisappear { testTask?.cancel() }
+    }
+
+    private var startButtonTitle: String {
+        if !viewModel.isConnectedToWiFi { return "Connect to Wi-Fi to run Speed Test" }
+        if !viewModel.hasInternetPath { return "No Internet for Speed Test" }
+        return result == nil ? "Start Test" : "Test Again"
+    }
+
+    private var startButtonSymbol: String {
+        viewModel.canRunSpeedTest ? (result == nil ? "play.fill" : "arrow.clockwise") : "wifi.slash"
     }
 
     private func resultMetric(_ title: String, value: String, tint: Color) -> some View {
@@ -515,22 +567,27 @@ private struct SpeedTestCard: View {
     }
 
     private func startTest() {
-        guard !isRunning else { return }
+        guard !isRunning, viewModel.canRunSpeedTest else { return }
         isRunning = true
         result = nil
         errorMessage = nil
         progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
         viewModel.setSpeedTestRunning(true)
 
-        Task { @MainActor in
+        testTask = Task { @MainActor in
             defer {
                 isRunning = false
                 viewModel.setSpeedTestRunning(false)
+                testTask = nil
             }
             do {
                 result = try await SpeedTestService.run { update in
                     progress = update
                 }
+            } catch is CancellationError {
+                if errorMessage == nil { errorMessage = "Speed test stopped." }
+            } catch let error as URLError where error.code == .cancelled {
+                if errorMessage == nil { errorMessage = "Speed test stopped." }
             } catch {
                 errorMessage = error.localizedDescription
             }

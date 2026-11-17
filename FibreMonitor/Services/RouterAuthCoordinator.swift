@@ -19,6 +19,7 @@ public actor RouterAuthCoordinator {
 
     public func authenticate() async throws -> HuaweiOntClient.RouterIdentity? {
         guard !isUpdatingCredentials else { throw CancellationError() }
+        try await transport.validateRouterNetwork()
 
         if case .invalidCredentials? = authFailure {
             throw OntError.loginRejected
@@ -88,6 +89,19 @@ public actor RouterAuthCoordinator {
         invalidateSession()
     }
 
+    /// Cancels a pending login and forgets the live session when the phone leaves Wi-Fi.
+    /// Credential and lockout state are preserved so a real authentication problem is not hidden.
+    public func suspendForNetworkLoss() async {
+        if let loginTask {
+            loginTask.cancel()
+            _ = try? await loginTask.value
+        }
+        loginTask = nil
+        isAuthenticated = false
+        detectedIdentity = nil
+        sessionGeneration &+= 1
+    }
+
     public func finishSessionClose() {
         isUpdatingCredentials = false
     }
@@ -116,6 +130,7 @@ public actor RouterAuthCoordinator {
     }
 
     private func performLogin(using credentials: HuaweiOntClient.Credentials) async throws {
+        try await transport.validateRouterNetwork()
         await transport.resetSession(host: credentials.host)
 
         // Token and login requests are deliberately sequential and use this transport's

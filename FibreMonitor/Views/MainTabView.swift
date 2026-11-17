@@ -96,7 +96,11 @@ public struct MainTabView: View {
             Task { await viewModel.refreshIfStale(maxAge: 10) }
         }
         .onChange(of: viewModel.isForegroundSessionReady) { isReady in
-            if isReady { startLiveTrafficFeed() }
+            if isReady {
+                startLiveTrafficFeed()
+            } else {
+                liveTrafficTask?.cancel()
+            }
         }
         .onChange(of: settings.appIconChoice) { choice in
             AppIconManager.apply(choice)

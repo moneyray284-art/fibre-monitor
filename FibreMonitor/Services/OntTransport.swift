@@ -37,12 +37,25 @@ public struct OntRequest: Equatable, Sendable {
 
 /// Seam between the client and the network so tests can script router replies.
 public protocol OntTransport: Sendable {
+    var requiresWiFiForRouterRequests: Bool { get }
     func send(_ request: OntRequest, host: String) async throws -> String
     /// Drops cookies and sets the pre-login cookie the web UI's login page sets.
     func resetSession(host: String) async
+    /// Rejects router requests when the device is not connected through Wi-Fi.
+    func validateRouterNetwork() async throws
+    /// Cancels pending requests when Wi-Fi is lost.
+    func cancelPendingRequests() async
+}
+
+public extension OntTransport {
+    var requiresWiFiForRouterRequests: Bool { false }
+    func validateRouterNetwork() async throws {}
+    func cancelPendingRequests() async {}
 }
 
 public final class URLSessionOntTransport: OntTransport, @unchecked Sendable {
+    public var requiresWiFiForRouterRequests: Bool { true }
+
     private let session: URLSession
     private let cookies: HTTPCookieStorage
 
@@ -51,6 +64,7 @@ public final class URLSessionOntTransport: OntTransport, @unchecked Sendable {
         config.timeoutIntervalForRequest = 8
         config.timeoutIntervalForResource = 20
         config.waitsForConnectivity = true
+        config.allowsCellularAccess = false
         config.httpCookieAcceptPolicy = .always
         config.httpShouldSetCookies = true
         self.cookies = config.httpCookieStorage ?? HTTPCookieStorage.shared
@@ -72,6 +86,7 @@ public final class URLSessionOntTransport: OntTransport, @unchecked Sendable {
     }
 
     public func send(_ request: OntRequest, host: String) async throws -> String {
+        try await validateRouterNetwork()
         guard let url = URL(string: "http://\(host)\(request.path)") else { throw URLError(.badURL) }
         var r = URLRequest(url: url)
         r.httpMethod = request.method.rawValue
@@ -88,5 +103,20 @@ public final class URLSessionOntTransport: OntTransport, @unchecked Sendable {
             throw URLError(.badServerResponse)
         }
         return String(decoding: data, as: UTF8.self)
+    }
+
+    public func validateRouterNetwork() async throws {
+        guard NetworkMonitor.shared.routerRequestsAllowed else {
+            throw URLError(.notConnectedToInternet)
+        }
+    }
+
+    public func cancelPendingRequests() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            session.getAllTasks { tasks in
+                tasks.forEach { $0.cancel() }
+                continuation.resume()
+            }
+        }
     }
 }

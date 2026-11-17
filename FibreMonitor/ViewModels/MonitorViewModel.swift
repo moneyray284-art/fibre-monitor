@@ -1,6 +1,5 @@
 import Foundation
 import Combine
-import Network
 import SwiftUI
 import UIKit
 
@@ -54,18 +53,24 @@ public final class MonitorViewModel: ObservableObject {
     @Published public private(set) var isConnectionFailure = false
     @Published public var actionMessage: String?
     @Published public var awaitingRouterSelection: Bool
-    @Published public private(set) var isPhoneOnWifi = true
+    @Published public private(set) var isConnectedToWiFi = false
+    @Published public private(set) var hasInternetPath = false
+
+    public var isPhoneOnWifi: Bool { isConnectedToWiFi }
+    public var canRunSpeedTest: Bool { isConnectedToWiFi && hasInternetPath }
 
     public let settings: SettingsStore
     private var client: any RouterProvider
     private let transport: OntTransport
-    private let pathMonitor = NWPathMonitor()
+    private let networkMonitor: NetworkMonitor
+    private let requiresWiFiPath: Bool
     private var reachabilityFailureCount = 0
     private var reachabilityFailureStartedAt: Date?
     private var refreshRequestedAfterCurrent = false
     private var routerRecoveryTask: Task<Void, Never>?
     private var settingsChangeTask: Task<Void, Never>?
     private var settingsReconnectTask: Task<Void, Never>?
+    private var networkReconnectTask: Task<Void, Never>?
     private var fullRefreshTask: Task<Void, Never>?
     private var fullRefreshID: UUID?
     private var routerConfigurationReadyForSync = true
@@ -78,6 +83,7 @@ public final class MonitorViewModel: ObservableObject {
     private var lastObservedRouterConfiguration: RouterConfigurationFingerprint
     private var routerConfigurationGeneration = 0
     private var didAttemptAutomaticRouterRecovery = false
+    private var isWiFiRecoveryPending = false
     private let reachabilityFailureThreshold = 3
     private var lastCoreSync: Date = .distantPast
     private var lastTrafficSampleAt: Date = .distantPast
@@ -88,16 +94,39 @@ public final class MonitorViewModel: ObservableObject {
     private var lastLanSync: Date = .distantPast
     private let lanSyncInterval: TimeInterval = 300
 
+    private var routerRequestsAllowed: Bool {
+        !requiresWiFiPath || networkMonitor.routerRequestsAllowed
+    }
+
     private struct RouterConfigurationFingerprint: Equatable {
         let profileID: UUID?
         let credentials: HuaweiOntClient.Credentials
         let credentialsRevision: UInt64
     }
 
+    private enum TransientRouterRetryPolicy: Equatable {
+        case none
+        case coldLaunch
+        case wifiReconnect
+
+        var delays: [UInt64] {
+            switch self {
+            case .none: []
+            case .coldLaunch: [600_000_000, 1_500_000_000]
+            case .wifiReconnect: [1_200_000_000]
+            }
+        }
+    }
+
     public init(settings: SettingsStore = .shared, transport: OntTransport = URLSessionOntTransport()) {
+        let networkMonitor = NetworkMonitor.shared
+        self.networkMonitor = networkMonitor
         self.settings = settings
         self.transport = transport
+        self.requiresWiFiPath = transport.requiresWiFiForRouterRequests
         self.client = RouterProviderFactory.make(profile: settings.activeProfile, credentials: settings.credentials, transport: transport)
+        self.isConnectedToWiFi = !transport.requiresWiFiForRouterRequests || networkMonitor.isConnectedToWiFi
+        self.hasInternetPath = !transport.requiresWiFiForRouterRequests || networkMonitor.hasInternetPath
         self.awaitingRouterSelection = settings.profiles.count >= 2
         self.lastObservedRouterConfiguration = RouterConfigurationFingerprint(
             profileID: settings.activeProfile?.id,
@@ -119,17 +148,76 @@ public final class MonitorViewModel: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.scheduleSettingsConfigurationCheck() }
             .store(in: &settingsCancellables)
-        pathMonitor.pathUpdateHandler = { [weak self] path in
-            let onWifi = path.usesInterfaceType(.wifi)
-            Task { @MainActor [weak self] in
-                self?.isPhoneOnWifi = onWifi
-            }
+        if transport.requiresWiFiForRouterRequests {
+            networkMonitor.$pathState
+                .removeDuplicates()
+                .sink { [weak self] state in
+                    Task { @MainActor [weak self] in self?.handleNetworkPathChange(state) }
+                }
+                .store(in: &settingsCancellables)
         }
-        pathMonitor.start(queue: DispatchQueue(label: "dev.mattdev0.fibremonitor.netpath", qos: .utility))
     }
 
-    deinit {
-        pathMonitor.cancel()
+    private func handleNetworkPathChange(_ state: NetworkPathState) {
+        let wasConnectedToWiFi = isConnectedToWiFi
+        let internetPathChanged = hasInternetPath != state.hasInternetPath
+        guard wasConnectedToWiFi != state.isConnectedToWiFi || internetPathChanged else { return }
+
+        isConnectedToWiFi = state.isConnectedToWiFi
+        hasInternetPath = state.hasInternetPath
+
+        guard wasConnectedToWiFi != state.isConnectedToWiFi else { return }
+        if !state.isConnectedToWiFi {
+            networkReconnectTask?.cancel()
+            networkReconnectTask = nil
+            isWiFiRecoveryPending = false
+            isForegroundSessionReady = false
+            isConnected = false
+            isAuthenticated = false
+            connectionState = .offline
+            isConnectionFailure = false
+            traffic.downloadMbps = 0
+            traffic.uploadMbps = 0
+            lastTrafficSampleAt = .distantPast
+            resetReachabilityFailures()
+            cancelRouterRecovery()
+            fullRefreshTask?.cancel()
+            let provider = client
+            Task { await provider.suspendForNetworkLoss() }
+            return
+        }
+
+        guard settings.isConfigured, !isLoggedOut else { return }
+        isWiFiRecoveryPending = true
+        isConnected = false
+        isAuthenticated = false
+        isConnectionFailure = false
+        connectionState = .connecting
+        errorMessage = nil
+        if fullRefreshTask != nil { refreshRequestedAfterCurrent = true }
+        if UIApplication.shared.applicationState == .active {
+            scheduleNetworkReconnect()
+        }
+    }
+
+    private func scheduleNetworkReconnect() {
+        networkReconnectTask?.cancel()
+        networkReconnectTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 600_000_000)
+            } catch {
+                return
+            }
+            guard let self,
+                  !Task.isCancelled else { return }
+            self.networkReconnectTask = nil
+            guard
+                  self.routerRequestsAllowed,
+                  self.settings.isConfigured,
+                  !self.isLoggedOut,
+                  UIApplication.shared.applicationState == .active else { return }
+            await self.refreshAll(forceReauthIfNeeded: true)
+        }
     }
 
     public var onlineDevices: [OntDevice] { devices.filter(\.isOnline) }
@@ -227,8 +315,10 @@ public final class MonitorViewModel: ObservableObject {
     public func prepareForegroundSession() async {
         isForegroundSessionReady = false
         guard settings.isConfigured, !isLoggedOut else { return }
+        guard routerRequestsAllowed else { return }
+        let settleDelay: UInt64 = isWiFiRecoveryPending ? 600_000_000 : 350_000_000
         do {
-            try await Task.sleep(nanoseconds: 350_000_000)
+            try await Task.sleep(nanoseconds: settleDelay)
         } catch {
             return
         }
@@ -262,7 +352,10 @@ public final class MonitorViewModel: ObservableObject {
     /// Samples only the WAN counters while the app is active. This deliberately does
     /// not touch `isRefreshing`, so the manual refresh control stays idle during live ticks.
     public func runLiveTrafficFeed() async {
-        guard !isLiveTrafficActive, isForegroundSessionReady, !isRouterLoginPaused else { return }
+        guard !isLiveTrafficActive,
+              isForegroundSessionReady,
+              !isRouterLoginPaused,
+              routerRequestsAllowed else { return }
         isLiveTrafficActive = true
         defer { isLiveTrafficActive = false }
 
@@ -288,6 +381,7 @@ public final class MonitorViewModel: ObservableObject {
         guard !awaitingRouterSelection,
               settings.isConfigured,
               !isLoggedOut,
+              routerRequestsAllowed,
               isForegroundSessionReady,
               !isRouterLoginPaused,
               !isRefreshing,
@@ -303,7 +397,8 @@ public final class MonitorViewModel: ObservableObject {
         let sampledAt = Date()
         do {
             let sample = try await provider.pollTraffic(now: sampledAt)
-            guard settings.activeProfile?.id == profileId,
+            guard routerRequestsAllowed,
+                  settings.activeProfile?.id == profileId,
                   routerConfigurationGeneration == generation else { return }
             acceptTraffic(sample, sampledAt: sampledAt, profileId: profileId)
             isConnected = true
@@ -313,6 +408,7 @@ public final class MonitorViewModel: ObservableObject {
             guard !Self.isCancellationError(error),
                   settings.activeProfile?.id == profileId,
                   routerConfigurationGeneration == generation else { return }
+            guard routerRequestsAllowed else { return }
             if let failure = await provider.routerAuthFailure() {
                 handleRouterAuthFailure(failure)
             }
@@ -499,6 +595,18 @@ public final class MonitorViewModel: ObservableObject {
     }
 
     public func refreshAll(forceReauthIfNeeded: Bool = true) async {
+        guard routerRequestsAllowed else {
+            isConnected = false
+            isAuthenticated = false
+            isForegroundSessionReady = false
+            connectionState = .offline
+            isConnectionFailure = false
+            traffic.downloadMbps = 0
+            traffic.uploadMbps = 0
+            lastTrafficSampleAt = .distantPast
+            return
+        }
+
         if let fullRefreshTask {
             await fullRefreshTask.value
             if refreshRequestedAfterCurrent {
@@ -511,12 +619,16 @@ public final class MonitorViewModel: ObservableObject {
         let runID = UUID()
         fullRefreshID = runID
         let shouldRetryColdLaunch = forceReauthIfNeeded && settings.isConfigured && !didAttemptInitialRouterSync
+        let retryPolicy: TransientRouterRetryPolicy = forceReauthIfNeeded && isWiFiRecoveryPending
+            ? .wifiReconnect
+            : (shouldRetryColdLaunch ? .coldLaunch : .none)
+        if retryPolicy == .wifiReconnect { isWiFiRecoveryPending = false }
         if settings.isConfigured { didAttemptInitialRouterSync = true }
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.performFullRefresh(
                 forceReauthIfNeeded: forceReauthIfNeeded,
-                retryTransientSocketErrors: shouldRetryColdLaunch,
+                retryPolicy: retryPolicy,
                 runID: runID
             )
         }
@@ -533,10 +645,11 @@ public final class MonitorViewModel: ObservableObject {
 
     private func performFullRefresh(
         forceReauthIfNeeded: Bool,
-        retryTransientSocketErrors: Bool,
+        retryPolicy: TransientRouterRetryPolicy,
         runID: UUID
     ) async {
         guard fullRefreshID == runID else { return }
+        guard routerRequestsAllowed else { return }
         isLoggedOut = false
         lastCoreSync = .distantPast
         lastTrafficSampleAt = .distantPast
@@ -554,7 +667,7 @@ public final class MonitorViewModel: ObservableObject {
 
         isLiveTrafficPausedForRefresh = true
         isRefreshing = true
-        isRetryingTransientRouterError = retryTransientSocketErrors
+        isRetryingTransientRouterError = retryPolicy != .none
         defer {
             isRetryingTransientRouterError = false
             if fullRefreshID == runID {
@@ -581,16 +694,24 @@ public final class MonitorViewModel: ObservableObject {
         }
         guard !Task.isCancelled, fullRefreshID == runID else { return }
 
-        let retryDelays: [UInt64] = [600_000_000, 1_500_000_000]
+        let retryDelays = retryPolicy.delays
         var retryIndex = 0
         while true {
             lastRouterSyncError = nil
             await syncRouterCore(allowDuringSettingsReconnect: settingsReconnectTask != nil)
             guard fullRefreshID == runID else { return }
             guard let syncError = lastRouterSyncError else { break }
-            guard retryTransientSocketErrors,
-                  Self.isColdLaunchRetryableSocketError(syncError),
-                  retryIndex < retryDelays.count else {
+            guard routerRequestsAllowed else { return }
+            let isRetryable: Bool
+            switch retryPolicy {
+            case .none:
+                isRetryable = false
+            case .coldLaunch:
+                isRetryable = Self.isColdLaunchRetryableSocketError(syncError)
+            case .wifiReconnect:
+                isRetryable = Self.isWiFiRecoveryRetryableSocketError(syncError)
+            }
+            guard isRetryable, retryIndex < retryDelays.count else {
                 if Self.isColdLaunchRetryableSocketError(syncError) {
                     isConnected = false
                     isAuthenticated = false
@@ -671,6 +792,7 @@ public final class MonitorViewModel: ObservableObject {
     }
 
     private func syncRouterCore(allowDuringSettingsReconnect: Bool) async {
+        guard routerRequestsAllowed else { return }
         guard allowDuringSettingsReconnect || settingsReconnectTask == nil else { return }
         let syncGeneration = routerConfigurationGeneration
         let provider = client
@@ -702,7 +824,8 @@ public final class MonitorViewModel: ObservableObject {
             let requestStartedAt = ProcessInfo.processInfo.systemUptime
             let sampledAt = Date()
             let trafficSample = try await provider.pollTraffic(now: sampledAt)
-            guard syncGeneration == routerConfigurationGeneration else { return }
+            guard routerRequestsAllowed,
+                  syncGeneration == routerConfigurationGeneration else { return }
             acceptTraffic(trafficSample, sampledAt: sampledAt, profileId: profileID)
             routerResponseTimeMs = max(0, Int((ProcessInfo.processInfo.systemUptime - requestStartedAt) * 1_000))
             // A valid WAN response proves the serialized coordinator established a session.
@@ -759,7 +882,8 @@ public final class MonitorViewModel: ObservableObject {
                     }
                 }
             }
-            guard syncGeneration == routerConfigurationGeneration else { return }
+            guard routerRequestsAllowed,
+                  syncGeneration == routerConfigurationGeneration else { return }
             if let authFailure = await provider.routerAuthFailure() {
                 guard syncGeneration == routerConfigurationGeneration else { return }
                 handleRouterAuthFailure(authFailure)
@@ -795,6 +919,7 @@ public final class MonitorViewModel: ObservableObject {
         } catch {
             guard syncGeneration == routerConfigurationGeneration else { return }
             if error is CancellationError || Self.isCancellationError(error) { return }
+            guard routerRequestsAllowed else { return }
             if let authFailure = await provider.routerAuthFailure() {
                 guard syncGeneration == routerConfigurationGeneration else { return }
                 handleRouterAuthFailure(authFailure)
@@ -1100,6 +1225,18 @@ public final class MonitorViewModel: ObservableObject {
             NSURLErrorCannotConnectToHost,
             NSURLErrorTimedOut,
         ]
+        var candidate: NSError? = error as NSError
+        while let current = candidate {
+            if current.domain == NSURLErrorDomain, retryableCodes.contains(current.code) {
+                return true
+            }
+            candidate = current.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
+    }
+
+    private static func isWiFiRecoveryRetryableSocketError(_ error: Error) -> Bool {
+        let retryableCodes: Set<Int> = [NSURLErrorNotConnectedToInternet, NSURLErrorCannotConnectToHost]
         var candidate: NSError? = error as NSError
         while let current = candidate {
             if current.domain == NSURLErrorDomain, retryableCodes.contains(current.code) {

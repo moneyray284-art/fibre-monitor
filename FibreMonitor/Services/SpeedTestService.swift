@@ -31,6 +31,14 @@ enum SpeedTestService {
     private static let transferWindow: TimeInterval = 8
     private static let fastRangeBytes = 512 * 1_024
     private static let uploadBytes = 512 * 1_024
+    private static let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.allowsCellularAccess = false
+        configuration.waitsForConnectivity = false
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 24
+        return URLSession(configuration: configuration)
+    }()
 
     private struct AppleEndpoints: Decodable, Equatable {
         let smallDownload: URL
@@ -47,10 +55,13 @@ enum SpeedTestService {
     static func run(
         onProgress: @escaping @MainActor (SpeedTestProgress) -> Void
     ) async throws -> SpeedTestResult {
+        try Task.checkCancellation()
+        try requireSpeedTestNetwork()
         async let fastTargetsResult = try? fetchFastTargets()
         async let appleResult = try? fetchAppleEndpoints()
         let fastTargets = (await fastTargetsResult) ?? []
         let apple = await appleResult
+        try Task.checkCancellation()
 
         guard !fastTargets.isEmpty || apple != nil else {
             throw SpeedTestError.noServers
@@ -61,6 +72,7 @@ enum SpeedTestService {
             appleFallback: apple?.smallDownload,
             onProgress: onProgress
         )
+        try Task.checkCancellation()
 
         let fastDownloadURLs = fastTargets.compactMap { rangeURL(for: $0, byteCount: fastRangeBytes) }
         var downloadMbps = 0.0
@@ -80,6 +92,7 @@ enum SpeedTestService {
                 onProgress: onProgress
             )
         }
+        try Task.checkCancellation()
         guard downloadMbps > 0 else { throw SpeedTestError.downloadFailed }
 
         let payload = randomPayload(count: uploadBytes)
@@ -100,6 +113,7 @@ enum SpeedTestService {
                 onProgress: onProgress
             )
         }
+        try Task.checkCancellation()
         guard uploadMbps > 0 else { throw SpeedTestError.uploadFailed }
 
         return SpeedTestResult(
@@ -111,10 +125,11 @@ enum SpeedTestService {
     }
 
     private static func fetchFastTargets() async throws -> [URL] {
+        try requireSpeedTestNetwork()
         var request = URLRequest(url: fastEndpoint)
         request.timeoutInterval = 10
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let targets = object["targets"] as? [[String: Any]] else {
@@ -127,10 +142,11 @@ enum SpeedTestService {
     }
 
     private static func fetchAppleEndpoints() async throws -> AppleEndpoints {
+        try requireSpeedTestNetwork()
         var request = URLRequest(url: appleConfigURL)
         request.timeoutInterval = 10
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw SpeedTestError.noServers
         }
@@ -146,6 +162,7 @@ enum SpeedTestService {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpMaximumConnectionsPerHost = 4
         configuration.waitsForConnectivity = true
+        configuration.allowsCellularAccess = false
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         configuration.timeoutIntervalForRequest = 5
@@ -269,6 +286,7 @@ enum SpeedTestService {
                     var bytes: Int64 = 0
                     while Date() < deadline && !Task.isCancelled {
                         var request = URLRequest(url: url)
+                        guard NetworkMonitor.shared.speedTestAllowed else { break }
                         request.timeoutInterval = transferWindow + 4
                         request.cachePolicy = .reloadIgnoringLocalCacheData
                         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
@@ -279,11 +297,11 @@ enum SpeedTestService {
                             switch mode {
                             case .download:
                                 request.httpMethod = "GET"
-                                (data, response) = try await URLSession.shared.data(for: request)
+                                (data, response) = try await session.data(for: request)
                             case .upload(let body):
                                 request.httpMethod = "POST"
                                 request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-                                (data, response) = try await URLSession.shared.upload(for: request, from: body)
+                                (data, response) = try await session.upload(for: request, from: body)
                             }
                             guard let http = response as? HTTPURLResponse,
                                   (200..<300).contains(http.statusCode) else { break }
@@ -325,11 +343,18 @@ enum SpeedTestService {
         return Data((0..<count).map { _ in UInt8.random(in: UInt8.min...UInt8.max, using: &generator) })
     }
 
+    private static func requireSpeedTestNetwork() throws {
+        guard NetworkMonitor.shared.speedTestAllowed else {
+            throw SpeedTestError.networkUnavailable
+        }
+    }
+
     private enum SpeedTestError: LocalizedError {
         case noServers
         case latencyFailed
         case downloadFailed
         case uploadFailed
+        case networkUnavailable
 
         var errorDescription: String? {
             switch self {
@@ -337,6 +362,7 @@ enum SpeedTestService {
             case .latencyFailed: "Could not measure latency. Check your internet connection and try again."
             case .downloadFailed: "The download test did not complete. Try again in a moment."
             case .uploadFailed: "The upload test did not complete. Try again in a moment."
+            case .networkUnavailable: "Connect to Wi-Fi and an internet path to run a speed test."
             }
         }
     }
@@ -360,6 +386,7 @@ private final class RTTMetricsDelegate: NSObject, URLSessionTaskDelegate, @unche
     private var probes: [Int: Probe] = [:]
 
     func measureRTT(to url: URL, in session: URLSession) async -> RTTMeasurement? {
+        guard NetworkMonitor.shared.speedTestAllowed else { return nil }
         await withCheckedContinuation { (continuation: CheckedContinuation<RTTMeasurement?, Never>) in
             var request = URLRequest(url: url)
             request.httpMethod = "HEAD"

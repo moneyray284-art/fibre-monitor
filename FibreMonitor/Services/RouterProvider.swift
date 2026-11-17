@@ -11,6 +11,7 @@ public protocol RouterProvider: Sendable {
     func switchCredentials(_ credentials: HuaweiOntClient.Credentials) async
     func login() async throws
     func logout() async
+    func suspendForNetworkLoss() async
     func pollTraffic(now: Date) async throws -> TrafficState
     func fetchWan() async throws -> WanInfo
     func fetchOptical() async throws -> OpticalInfo
@@ -38,6 +39,10 @@ public extension HuaweiOntClient {
     func loginIsBlocked() async -> Bool { await loginFailure() != nil }
     func routerAuthFailure() async -> RouterAuthFailure? { await loginFailure() }
     func routerIdentity() async -> RouterIdentity? { detectedIdentity }
+}
+
+public extension RouterProvider {
+    func suspendForNetworkLoss() async {}
 }
 
 extension HuaweiOntClient: RouterProvider {}
