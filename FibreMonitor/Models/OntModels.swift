@@ -149,18 +149,14 @@ public enum ConnectionPort: Equatable, Sendable {
         let compact = upper.replacingOccurrences(of: " ", with: "")
         if compact.hasPrefix("SSID"), let n = Int(compact.dropFirst(4).prefix(while: \.isNumber)) {
             let explicitBand = candidates.map { $0.uppercased().replacingOccurrences(of: " ", with: "") }
-            if (1...4).contains(n) {
-                self = .wifi24(ssidIndex: n)
-            } else if (5...8).contains(n) {
+            let reportedBand = ssidBands[n]
+                ?? explicitBand.first(where: { $0.contains("5GHZ") || $0.contains("5G") || $0.contains("2.4GHZ") || $0.contains("2.4G") })
+                ?? ""
+            let resolvedBand = WifiFrequencyBand.label(for: n, fallback: reportedBand)
+            if resolvedBand == WifiFrequencyBand.five.rawValue {
                 self = .wifi5(ssidIndex: n)
-            } else if let band = ssidBands[n] {
-                self = band.hasPrefix("5") ? .wifi5(ssidIndex: n) : .wifi24(ssidIndex: n)
-            } else if explicitBand.contains(where: { $0.contains("5GHZ") || $0.contains("5G") }) {
-                self = .wifi5(ssidIndex: n)
-            } else if explicitBand.contains(where: { $0.contains("2.4GHZ") || $0.contains("2.4G") }) {
-                self = .wifi24(ssidIndex: n)
             } else {
-                self = n >= 5 ? .wifi5(ssidIndex: n) : .wifi24(ssidIndex: n)
+                self = .wifi24(ssidIndex: n)
             }
         } else {
             let normalized = candidates.map { $0.uppercased().replacingOccurrences(of: " ", with: "") }
@@ -417,13 +413,15 @@ public enum WifiFrequencyBand: String, CaseIterable, Equatable, Identifiable, Se
     public var secondaryIndices: [Int] { Array(wlanIndices.dropFirst()) }
 
     public static func label(for index: Int, fallback: String) -> String {
-        if (1...4).contains(index) { return WifiFrequencyBand.twoPointFour.rawValue }
-        if (5...8).contains(index) { return WifiFrequencyBand.five.rawValue }
         let normalized = fallback.lowercased().replacingOccurrences(of: " ", with: "")
         if normalized.contains("5ghz") || normalized.contains("5g") { return WifiFrequencyBand.five.rawValue }
         if normalized.contains("2.4ghz") || normalized.contains("2.4g") || normalized.contains("2g") {
             return WifiFrequencyBand.twoPointFour.rawValue
         }
+        if normalized.contains("radio.2") || normalized.contains("radio2") { return WifiFrequencyBand.five.rawValue }
+        if normalized.contains("radio.1") || normalized.contains("radio1") { return WifiFrequencyBand.twoPointFour.rawValue }
+        if (1...4).contains(index) { return WifiFrequencyBand.twoPointFour.rawValue }
+        if (5...8).contains(index) { return WifiFrequencyBand.five.rawValue }
         return fallback
     }
 }

@@ -695,7 +695,14 @@ public actor HuaweiOntClient {
         var state = try await fetchWifi()
         let configs = try await fetchWlanBasic()
         for config in configs where (1...8).contains(config.ssidIndex) && !config.ssid.isEmpty {
-            let band = WifiFrequencyBand.label(for: config.ssidIndex, fallback: "")
+            let listReportedBand = state.networks.first(where: { $0.ssidIndex == config.ssidIndex })?.band ?? ""
+            let reportedBand = [config.lowerLayers, listReportedBand]
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .joined(separator: " ")
+            let band = WifiFrequencyBand.label(
+                for: config.ssidIndex,
+                fallback: reportedBand
+            )
             let network = WifiNetwork(
                 ssidIndex: config.ssidIndex,
                 name: config.ssid,
@@ -726,7 +733,9 @@ public actor HuaweiOntClient {
             // Skip the page's own template record ('domain', 'SSID'+tid, ...).
             guard let index = Int((r["domain"] ?? "").split(separator: ".").last ?? ""), index > 0 else { continue }
             let enabled = r["enable"] == "1" && r["X_HW_ServiceEnable"] != "0"
-            let fallbackBand = r["X_HW_RFBand"] ?? r["RFBand"] ?? ""
+            let fallbackBand = [r["X_HW_RFBand"], r["RFBand"]]
+                .compactMap { $0 }
+                .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) ?? ""
             let candidate = WifiNetwork(
                 ssidIndex: index,
                 name: r["ssid"] ?? "",

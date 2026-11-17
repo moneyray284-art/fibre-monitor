@@ -514,7 +514,7 @@ private struct WifiAddNetworkSheet: View {
 
     private var configuredSlotCount: Int {
         Set(viewModel.wifi.networks.filter {
-            band.wlanIndices.contains($0.ssidIndex) && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            $0.band == band.rawValue && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }.map(\.ssidIndex)).count
     }
 
@@ -643,7 +643,7 @@ private struct WifiAddNetworkSheet: View {
 
     private func slotCount(for option: WifiFrequencyBand) -> Int {
         Set(viewModel.wifi.networks.filter {
-            option.wlanIndices.contains($0.ssidIndex) && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            $0.band == option.rawValue && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }.map(\.ssidIndex)).count
     }
 
