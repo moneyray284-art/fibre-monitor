@@ -387,7 +387,7 @@ private final class RTTMetricsDelegate: NSObject, URLSessionTaskDelegate, @unche
 
     func measureRTT(to url: URL, in session: URLSession) async -> RTTMeasurement? {
         guard NetworkMonitor.shared.speedTestAllowed else { return nil }
-        await withCheckedContinuation { (continuation: CheckedContinuation<RTTMeasurement?, Never>) in
+        return await withCheckedContinuation { (continuation: CheckedContinuation<RTTMeasurement?, Never>) in
             var request = URLRequest(url: url)
             request.httpMethod = "HEAD"
             request.timeoutInterval = 5
