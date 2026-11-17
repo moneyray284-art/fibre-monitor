@@ -44,13 +44,9 @@ public enum LocalWiFiAddress {
         return result == nil ? nil : String(cString: buffer)
     }
 
-    /// Reads the active IPv4 default route for Wi-Fi. If iOS does not expose the route
-    /// table in the current environment, falls back to the common .1 address in the
-    /// iPhone's local /24 subnet.
+    /// Infers the common .1 gateway address from the active Wi-Fi IPv4 /24 subnet.
+    /// iOS does not expose a supported public API for reading the default gateway.
     public static func defaultGatewayIPv4(interface targetInterface: String = "en0") -> String? {
-        if let gateway = routeTableDefaultGateway(interface: targetInterface) {
-            return gateway
-        }
         guard let address = currentIPv4Address(interface: targetInterface) else { return nil }
         let octets = address.split(separator: ".")
         guard octets.count == 4,
@@ -61,66 +57,6 @@ public enum LocalWiFiAddress {
             guard let second = Int(octets[1]), (16...31).contains(second) else { return nil }
         }
         return "\(octets[0]).\(octets[1]).\(third).1"
-    }
-
-    private static func routeTableDefaultGateway(interface targetInterface: String) -> String? {
-        let interfaceIndex = if_nametoindex(targetInterface)
-        guard interfaceIndex != 0 else { return nil }
-
-        var mib = [CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_DUMP, 0]
-        var byteCount = 0
-        guard sysctl(&mib, u_int(mib.count), nil, &byteCount, nil, 0) == 0,
-              byteCount >= MemoryLayout<rt_msghdr>.size else { return nil }
-
-        let table = UnsafeMutableRawPointer.allocate(byteCount: byteCount, alignment: MemoryLayout<rt_msghdr>.alignment)
-        defer { table.deallocate() }
-        guard sysctl(&mib, u_int(mib.count), table, &byteCount, nil, 0) == 0 else { return nil }
-
-        let routeAlignment = MemoryLayout<Int>.size
-        var offset = 0
-        while offset + MemoryLayout<rt_msghdr>.size <= byteCount {
-            let header = table.advanced(by: offset).assumingMemoryBound(to: rt_msghdr.self).pointee
-            let messageLength = Int(header.rtm_msglen)
-            guard messageLength >= MemoryLayout<rt_msghdr>.size,
-                  offset + messageLength <= byteCount else { break }
-            let routeOffset = offset
-            offset += messageLength
-
-            let flags = header.rtm_flags
-            guard UInt32(header.rtm_index) == interfaceIndex,
-                  flags & (RTF_UP | RTF_GATEWAY) == (RTF_UP | RTF_GATEWAY) else { continue }
-
-            var cursor = routeOffset + MemoryLayout<rt_msghdr>.size
-            let end = routeOffset + messageLength
-            var isDefaultRoute = false
-            var gatewayAddress: String?
-            let addressMask = Int(header.rtm_addrs)
-            for addressBit in 0..<8 where addressMask & (1 << addressBit) != 0 {
-                guard cursor + MemoryLayout<sockaddr>.size <= end else { break }
-                let address = table.advanced(by: cursor).assumingMemoryBound(to: sockaddr.self)
-                let addressLength = max(Int(address.pointee.sa_len), MemoryLayout<sockaddr>.size)
-                guard cursor + addressLength <= end else { break }
-
-                if addressBit == 0, address.pointee.sa_family == UInt8(AF_INET) {
-                    let destination = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
-                    isDefaultRoute = destination.s_addr == 0
-                } else if addressBit == 1, address.pointee.sa_family == UInt8(AF_INET) {
-                    var gateway = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
-                    var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-                    let converted = buffer.withUnsafeMutableBufferPointer { bytes in
-                        inet_ntop(AF_INET, &gateway, bytes.baseAddress, socklen_t(INET_ADDRSTRLEN))
-                    }
-                    if converted != nil { gatewayAddress = String(cString: buffer) }
-                }
-
-                cursor += ((addressLength + routeAlignment - 1) / routeAlignment) * routeAlignment
-            }
-
-            if isDefaultRoute, let gatewayAddress, normalizedIPv4(gatewayAddress) != nil {
-                return gatewayAddress
-            }
-        }
-        return nil
     }
 }
 
