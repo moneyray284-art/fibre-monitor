@@ -846,44 +846,40 @@ public final class MonitorViewModel: ObservableObject {
             }
             if Date().timeIntervalSince(lastCoreSync) >= coreSyncInterval {
                 lastCoreSync = Date()
-                if let w = try? await provider.fetchWan() {
-                    guard syncGeneration == routerConfigurationGeneration else { return }
-                    wan = w
-                }
-                if let o = try? await provider.fetchOptical() {
-                    guard syncGeneration == routerConfigurationGeneration else { return }
-                    optical = o
-                }
-                if Date().timeIntervalSince(lastPageSync) >= pageSyncInterval {
-                    lastPageSync = Date()
-                    // Wi-Fi first: it tells the device list which SSID is on which band.
-                    if let w = try? await provider.fetchWifi() {
-                        guard syncGeneration == routerConfigurationGeneration else { return }
-                        wifi = w
-                    }
-                    if let h = try? await provider.fetchHealth() {
-                        guard syncGeneration == routerConfigurationGeneration else { return }
-                        health = h
-                    }
-                }
-                if let d = try? await provider.fetchDevices() {
-                    guard syncGeneration == routerConfigurationGeneration else { return }
-                    devices = d
+                let shouldSyncPages = Date().timeIntervalSince(lastPageSync) >= pageSyncInterval
+                if shouldSyncPages { lastPageSync = Date() }
+                let shouldSyncLan = Date().timeIntervalSince(lastLanSync) >= lanSyncInterval
+                if shouldSyncLan { lastLanSync = Date() }
+
+                // These router reads do not depend on each other. Run them together so
+                // one slow diagnostics or device page does not hold up every tab.
+                async let wanRead: WanInfo? = try? await provider.fetchWan()
+                async let opticalRead: OpticalInfo? = try? await provider.fetchOptical()
+                async let wifiRead: WifiState? = shouldSyncPages ? try? await provider.fetchWifi() : nil
+                async let healthRead: RouterHealth? = shouldSyncPages ? try? await provider.fetchHealth() : nil
+                let (freshWifi, freshHealth) = await (wifiRead, healthRead)
+                guard syncGeneration == routerConfigurationGeneration else { return }
+                if let freshWifi { wifi = freshWifi }
+                if let freshHealth { health = freshHealth }
+
+                // Fetch Wi-Fi before clients so the router client can map each device
+                // to its correct SSID band. The remaining reads are independent.
+                async let devicesRead: [OntDevice]? = try? await provider.fetchDevices()
+                async let blockedRead: WlanMacBlacklistState? = try? await provider.fetchWlanMacBlacklist()
+                async let lanRead: LanInfo? = shouldSyncLan ? try? await provider.fetchLan() : nil
+                let (freshWan, freshOptical, freshDevices, freshBlocked, freshLan) =
+                    await (wanRead, opticalRead, devicesRead, blockedRead, lanRead)
+                guard syncGeneration == routerConfigurationGeneration else { return }
+                if let freshWan { wan = freshWan }
+                if let freshOptical { optical = freshOptical }
+                if let freshDevices {
+                    devices = freshDevices
                     hasLoadedDeviceList = true
-                    cachedOnlineDeviceCount = d.filter(\.isOnline).count
-                    cachedOfflineDeviceCount = max(0, d.count - cachedOnlineDeviceCount)
+                    cachedOnlineDeviceCount = freshDevices.filter(\.isOnline).count
+                    cachedOfflineDeviceCount = max(0, freshDevices.count - cachedOnlineDeviceCount)
                 }
-                if let blocked = try? await provider.fetchWlanMacBlacklist() {
-                    guard syncGeneration == routerConfigurationGeneration else { return }
-                    blockedDevices = blocked.activeBlockedDevices
-                }
-                if Date().timeIntervalSince(lastLanSync) >= lanSyncInterval {
-                    lastLanSync = Date()
-                    if let l = try? await provider.fetchLan() {
-                        guard syncGeneration == routerConfigurationGeneration else { return }
-                        lan = l
-                    }
-                }
+                if let freshBlocked { blockedDevices = freshBlocked.activeBlockedDevices }
+                if let freshLan { lan = freshLan }
             }
             guard routerRequestsAllowed,
                   syncGeneration == routerConfigurationGeneration else { return }
@@ -1026,34 +1022,15 @@ public final class MonitorViewModel: ObservableObject {
 
     @discardableResult
     public func refreshWifiManagementState() async -> Bool {
+        // If a tab switch also started the app-wide refresh, let its main sync finish
+        // before doing the optional disabled-SSID enrichment reads.
+        await awaitFullRefreshCompletion()
         guard isConnected, routerRequestsAllowed, !isWifiSaving else { return false }
         do {
             wifi = try await client.fetchManagedWifiState()
             return true
         } catch {
             return false
-        }
-    }
-
-    public func addWifiNetwork(
-        band: WifiFrequencyBand,
-        ssid: String,
-        password: String,
-        isVisible: Bool
-    ) async throws {
-        guard !isWifiSaving else { throw OntError.badResponse("Wi-Fi update already in progress") }
-        isWifiSaving = true
-        beginWifiMutationStatus()
-        defer { isWifiSaving = false }
-        do {
-            let result = try await client.addWifiNetwork(band: band, ssid: ssid, password: password, isVisible: isVisible)
-            await completeWifiMutation(result)
-            Haptics.notify(.success)
-        } catch {
-            wifiMutationStatus = Self.describe(error, host: settings.host)
-            scheduleWifiMutationStatusClear()
-            Haptics.notify(.error)
-            throw error
         }
     }
 

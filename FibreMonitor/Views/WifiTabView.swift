@@ -44,16 +44,6 @@ public struct WifiTabView: View {
                             .linkWaveGlassCard(padding: 12)
                         }
 
-                        Button {
-                            activeSheet = .add
-                        } label: {
-                            Label("Add Network", systemImage: "plus")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                        }
-                        .liquidGlassActionButton(tint: .accentColor)
-                        .disabled(!viewModel.isConnected || viewModel.isWifiSaving)
-
                         ForEach(groupedNetworks, id: \.title) { group in
                             VStack(alignment: .leading, spacing: 10) {
                                 CardHeader(icon: "dot.radiowaves.left.and.right", title: group.title) {
@@ -85,7 +75,6 @@ public struct WifiTabView: View {
             .alwaysScrollBounce()
             .refreshable {
                 await viewModel.refreshAll(forceReauthIfNeeded: true)
-                await viewModel.refreshWifiManagementState()
             }
             .navigationTitle("Wi-Fi")
             .navigationBarTitleDisplayMode(.large)
@@ -124,9 +113,6 @@ public struct WifiTabView: View {
                     .toolbar(.hidden, for: .tabBar)
             case .edit(let network):
                 WifiEditSheet(viewModel: viewModel, network: network)
-                    .toolbar(.hidden, for: .tabBar)
-            case .add:
-                WifiAddNetworkSheet(viewModel: viewModel)
                     .toolbar(.hidden, for: .tabBar)
             }
         }
@@ -208,13 +194,11 @@ public struct WifiTabView: View {
 private enum WifiSheetRoute: Identifiable {
     case qr(WifiNetwork)
     case edit(WifiNetwork)
-    case add
 
     var id: String {
         switch self {
         case .qr(let network): return "qr-\(network.id)"
         case .edit(let network): return "edit-\(network.id)"
-        case .add: return "add-network"
         }
     }
 }
@@ -497,176 +481,6 @@ private struct WifiQrSheet: View {
             errorText = MonitorViewModel.describe(error, host: viewModel.settings.host)
         }
         isLoading = false
-    }
-}
-
-private struct WifiAddNetworkSheet: View {
-    @ObservedObject var viewModel: MonitorViewModel
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var band: WifiFrequencyBand = .twoPointFour
-    @State private var ssidInput = ""
-    @State private var passwordInput = ""
-    @State private var isVisible = true
-    @State private var showPassword = false
-    @State private var isSaving = false
-    @State private var errorText: String?
-
-    private var configuredSlotCount: Int {
-        Set(viewModel.wifi.networks.filter {
-            $0.band == band.rawValue && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }.map(\.ssidIndex)).count
-    }
-
-    private var validationError: String? {
-        do {
-            try HuaweiOntClient.validateWifiCredentials(ssid: ssidInput, password: passwordInput)
-            return nil
-        } catch {
-            return (error as? LocalizedError)?.errorDescription ?? "Enter a valid network name and password."
-        }
-    }
-
-    private var canSave: Bool {
-        validationError == nil && configuredSlotCount < 4 && !isSaving && viewModel.isConnected
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Frequency Band") {
-                    Picker("Frequency Band", selection: $band) {
-                        ForEach(WifiFrequencyBand.allCases) { option in
-                            Text("\(option.title)\n\(slotCount(for: option))/4 slots")
-                                .tag(option)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .tint(.accentColor)
-                    Text("\(configuredSlotCount) of 4 SSID slots used on this band.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section {
-                    TextField("Network name (SSID)", text: $ssidInput)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .lineLimit(1)
-                } header: {
-                    Text("Network Name (SSID)")
-                } footer: {
-                    Text("\(ssidInput.utf8.count)/32 UTF-8 bytes")
-                        .foregroundStyle(ssidInput.utf8.count > 32 ? Color.red : Color.secondary)
-                }
-
-                Section {
-                    HStack(spacing: 8) {
-                        if showPassword {
-                            TextField("Wi-Fi password", text: $passwordInput)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                        } else {
-                            SecureField("Wi-Fi password", text: $passwordInput)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                        }
-                        Button {
-                            showPassword.toggle()
-                        } label: {
-                            Image(systemName: showPassword ? "eye.slash" : "eye")
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(showPassword ? "Hide password" : "Reveal password")
-                    }
-                    Toggle("Broadcast SSID", isOn: $isVisible)
-                    Text(isVisible ? "Visible to nearby devices" : "Hidden from the Wi-Fi list")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } header: {
-                    Text("Password & Visibility")
-                } footer: {
-                    Text("WPA2-PSK password: 8–63 printable ASCII characters.")
-                }
-
-                if let validationError {
-                    Section {
-                        Label(validationError, systemImage: "exclamationmark.circle.fill")
-                            .font(.subheadline)
-                            .foregroundStyle(.red)
-                    }
-                }
-
-                if configuredSlotCount >= 4 {
-                    Section {
-                        Label("All four slots on this band are already used.", systemImage: "wifi.exclamationmark")
-                            .font(.subheadline)
-                            .foregroundStyle(.orange)
-                    }
-                }
-
-                if let errorText {
-                    Section {
-                        Label(errorText, systemImage: "exclamationmark.triangle.fill")
-                            .font(.subheadline)
-                            .foregroundStyle(.red)
-                    }
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background { LiquidGlassBackground() }
-            .navigationTitle("Add Wi-Fi Network")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar(.hidden, for: .tabBar)
-            .interactiveDismissDisabled(isSaving)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(isSaving)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    if isSaving {
-                        ProgressView()
-                    } else {
-                        Button("Add") { save() }
-                            .disabled(!canSave)
-                    }
-                }
-            }
-        }
-        .onDisappear {
-            passwordInput = ""
-            showPassword = false
-        }
-    }
-
-    private func slotCount(for option: WifiFrequencyBand) -> Int {
-        Set(viewModel.wifi.networks.filter {
-            $0.band == option.rawValue && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }.map(\.ssidIndex)).count
-    }
-
-    private func save() {
-        guard canSave else { return }
-        isSaving = true
-        errorText = nil
-        Task { @MainActor in
-            do {
-                try await viewModel.addWifiNetwork(
-                    band: band,
-                    ssid: ssidInput,
-                    password: passwordInput,
-                    isVisible: isVisible
-                )
-                isSaving = false
-                passwordInput = ""
-                dismiss()
-            } catch {
-                errorText = MonitorViewModel.describe(error, host: viewModel.settings.host)
-                isSaving = false
-            }
-        }
     }
 }
 

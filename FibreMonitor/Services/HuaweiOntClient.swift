@@ -997,55 +997,6 @@ public actor HuaweiOntClient {
         return result
     }
 
-    public func addWifiNetwork(
-        band: WifiFrequencyBand,
-        ssid: String,
-        password: String,
-        isVisible: Bool
-    ) async throws -> WifiUpdateResult {
-        try Self.validateWifiCredentials(ssid: ssid, password: password)
-        // Read only the selected radio's page. `fetchWlanBasic()` reads the full page
-        // plus both band-specific pages, adding several serialized router requests
-        // before the write and making the Add sheet appear to hang on slower ONTs.
-        let pageSuffix = band == .twoPointFour ? "?2G" : "?5G"
-        let latestPage = try await fetchWlanBasicPage(suffix: pageSuffix)
-        let latestConfigs = Self.parseWlanBasic(latestPage)
-        guard !latestConfigs.contains(where: {
-            band.wlanIndices.contains($0.ssidIndex)
-                && $0.ssid.caseInsensitiveCompare(ssid) == .orderedSame
-        }) else {
-            throw OntError.badResponse("Wi-Fi network name already exists on this band")
-        }
-        let occupied = Set(latestConfigs.filter {
-            band.wlanIndices.contains($0.ssidIndex) && !$0.ssid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }.map(\.ssidIndex))
-        guard let targetIndex = band.secondaryIndices.first(where: { !occupied.contains($0) }) else {
-            throw OntError.wifiSlotLimitReached
-        }
-        let token = try Self.wlanPageToken(in: latestPage)
-        let write = Self.wifiSetRequest(index: targetIndex, fields: [
-            ("x.Enable", "1"),
-            ("x.SSID", ssid),
-            ("x.SSIDAdvertisementEnabled", isVisible ? "1" : "0"),
-            ("x.BeaconType", "11i"),
-            ("x.BasicAuthenticationMode", "None"),
-            ("x.BasicEncryptionModes", "None"),
-            ("x.WPAEncryptionModes", "AESEncryption"),
-            ("x.WPAAuthenticationMode", "PSKAuthentication"),
-            ("x.IEEE11iEncryptionModes", "AESEncryption"),
-            ("x.IEEE11iAuthenticationMode", "PSKAuthentication"),
-            ("x.X_HW_WPAand11iEncryptionModes", "AESEncryption"),
-            ("x.X_HW_WPAand11iAuthenticationMode", "PSKAuthentication"),
-            ("y.PreSharedKey", password)
-        ], token: token)
-        do {
-            _ = try await checkedWifiWrite(write, token: token)
-        } catch let error as URLError where Self.isTransientWifiWriteError(error) {
-            return WifiUpdateResult(wifi: nil, connectionDropped: true)
-        }
-        return WifiUpdateResult(wifi: nil, connectionDropped: true)
-    }
-
     public func setWifiNetworkEnabled(ssidIndex: Int, enabled: Bool) async throws -> WifiUpdateResult {
         guard Self.isSecondaryIndex(ssidIndex) else { throw OntError.badResponse("primary Wi-Fi network is protected") }
         let configs = try await fetchWlanBasic()

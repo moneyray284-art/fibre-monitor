@@ -335,7 +335,6 @@ public enum OntError: LocalizedError, Equatable, Sendable {
     case invalidWifiPassword
     case wifiModificationNotAllowed
     case wifiWriteRejected(String)
-    case wifiSlotLimitReached
     case unsupportedWifiSecurity(String)
     case incompleteWifiConfig([String])
     case macFilterPolicyConflict
@@ -368,8 +367,6 @@ public enum OntError: LocalizedError, Equatable, Sendable {
             return "Your router account doesn't allow modifying extra Wi-Fi networks on this firmware."
         case .wifiWriteRejected(let message):
             return message
-        case .wifiSlotLimitReached:
-            return "All four Wi-Fi network slots for this band are already in use."
         case .unsupportedWifiSecurity(let mode):
             return "This network uses \(mode). Change it in the router's web page."
         case .incompleteWifiConfig(let fields):
