@@ -98,6 +98,31 @@ jobs:
           echo "LINKWAVE_IPA_NAME=LinkWave-v$VERSION.ipa" >> "$GITHUB_ENV"
           echo "Version: $VERSION ($BUILD)"
 
+      - name: Preserve App Group entitlements for sideload signing
+        run: |
+          APP=build/Build/Products/Release-iphoneos/FibreMonitor.app
+          EXT="$APP/PlugIns/LinkWaveWidget.appex"
+          APP_GROUP="group.dev.mattdev0.fibremonitor"
+
+          # The IPA is installed by a sideload signer, so ad-hoc sign the nested
+          # widget first and the containing app second. This records each target's
+          # declared entitlements in its code signature for the installer to apply.
+          codesign --force --sign - --timestamp=none --generate-entitlement-der \
+            --entitlements LinkWaveWidget/LinkWaveWidget.entitlements "$EXT"
+          codesign --force --sign - --timestamp=none --generate-entitlement-der \
+            --entitlements FibreMonitor/Resources/FibreMonitor.entitlements "$APP"
+
+          codesign -d --entitlements :- "$APP" > /tmp/linkwave-app-entitlements.plist 2>/dev/null
+          codesign -d --entitlements :- "$EXT" > /tmp/linkwave-widget-entitlements.plist 2>/dev/null
+          for ENTITLEMENTS in /tmp/linkwave-app-entitlements.plist /tmp/linkwave-widget-entitlements.plist; do
+            ACTUAL_GROUP=$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "$ENTITLEMENTS")
+            [[ "$ACTUAL_GROUP" == "$APP_GROUP" ]] || {
+              echo "::error::Expected App Group $APP_GROUP in $ENTITLEMENTS, found $ACTUAL_GROUP"
+              exit 1
+            }
+          done
+          echo "Verified matching App Group entitlement on LinkWave and LinkWaveWidget."
+
       - name: Package IPA
         run: |
           mkdir -p build/Payload
