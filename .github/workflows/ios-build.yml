@@ -141,20 +141,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="v${LINKWAVE_VERSION}"
-          NOTES=$(cat <<'EOF'
-          LinkWave 2.3.0 brings a cleaner launch experience and updated setup guidance.
-
-          - Added a brief, silent branded launch animation using the LinkWave wave mark and wordmark.
-          - Removed the unreliable Home Screen widget and the estimated personal-usage card.
-          - Kept household usage based on the router's own counters and preserved the existing local usage history.
-          - Updated the README with setup, privacy, and direct IPA installation instructions.
-
-          This is an unsigned IPA for installation with SideStore, AltStore, or Sideloadly. No ZIP extraction is required.
-          EOF
-          )
           gh release create "$TAG" "$LINKWAVE_IPA_PATH" \
             --target "$GITHUB_SHA" \
             --title "LinkWave $TAG" \
-            --notes "$NOTES" \
+            --notes-file RELEASE_NOTES_v2.3.0.md \
             --draft=false \
             --prerelease=false
