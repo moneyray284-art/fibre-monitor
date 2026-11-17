@@ -66,12 +66,12 @@ public struct DashboardView: View {
                             .foregroundStyle(.primary)
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                StandaloneTopBarTrailingItem {
                     homeToolbarButton(symbol: "gearshape", label: "Settings") {
                         showSettings = true
-                    }.hideSharedToolbarBackground()
+                    }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                StandaloneTopBarTrailingItem {
                     homeToolbarButton(
                         symbol: "arrow.clockwise",
                         label: "Refresh router data",
@@ -79,7 +79,7 @@ public struct DashboardView: View {
                         isRefreshing: viewModel.isRefreshing
                     ) {
                         Task { await viewModel.refreshAll(forceReauthIfNeeded: true) }
-                    }.hideSharedToolbarBackground()
+                    }
                 }
             }
             .navigationDestination(isPresented: $showSettings) {

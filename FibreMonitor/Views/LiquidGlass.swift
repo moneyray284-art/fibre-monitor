@@ -160,9 +160,28 @@ public extension View {
     func liquidGlassToolbarCapsule() -> some View {
         modifier(LiquidGlassToolbarCapsuleModifier())
     }
+}
 
-    func hideSharedToolbarBackground() -> some View {
-        modifier(HideSharedToolbarBackgroundModifier())
+/// A standalone trailing control that does not share the system toolbar's glass background.
+struct StandaloneTopBarTrailingItem<Content: View>: ToolbarContent {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    @ToolbarContentBuilder
+    var body: some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            ToolbarItem(placement: .topBarTrailing) {
+                content
+            }
+            .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .topBarTrailing) {
+                content
+            }
+        }
     }
 }
 
@@ -223,17 +242,6 @@ private struct LiquidGlassToolbarCapsuleModifier: ViewModifier {
             content.glassEffect(.regular.interactive(), in: Capsule())
         } else {
             content.background(.regularMaterial, in: Capsule())
-        }
-    }
-}
-
-private struct HideSharedToolbarBackgroundModifier: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.sharedBackgroundVisibility(.hidden)
-        } else {
-            content
         }
     }
 }

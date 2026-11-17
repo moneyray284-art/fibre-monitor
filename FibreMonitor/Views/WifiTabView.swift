@@ -58,9 +58,8 @@ public struct WifiTabView: View {
             .navigationTitle("Wi-Fi")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                StandaloneTopBarTrailingItem {
                     RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured)
-                        .hideSharedToolbarBackground()
                 }
             }
         }

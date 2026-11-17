@@ -230,12 +230,11 @@ public struct ClientsTabView: View {
             .navigationTitle("Clients")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    filterMenu.hideSharedToolbarBackground()
+                StandaloneTopBarTrailingItem {
+                    filterMenu
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                StandaloneTopBarTrailingItem {
                     RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured)
-                        .hideSharedToolbarBackground()
                 }
             }
         }

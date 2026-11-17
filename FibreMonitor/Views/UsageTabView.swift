@@ -43,9 +43,8 @@ public struct UsageTabView: View {
                         showSettings = true
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                StandaloneTopBarTrailingItem {
                     RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: settings.isConfigured)
-                        .hideSharedToolbarBackground()
                 }
             }
             .navigationDestination(isPresented: $showSettings) {
