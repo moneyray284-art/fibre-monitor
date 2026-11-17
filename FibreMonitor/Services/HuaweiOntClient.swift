@@ -857,7 +857,7 @@ public actor HuaweiOntClient {
         if config.wpaAuthenticationMode.isEmpty { config.wpaAuthenticationMode = "PSKAuthentication" }
         if config.ieee11iEncryptionModes.isEmpty { config.ieee11iEncryptionModes = "AESEncryption" }
         if config.ieee11iAuthenticationMode.isEmpty { config.ieee11iAuthenticationMode = "PSKAuthentication" }
-        if config.mixEncryptionMode.isEmpty { config.mixEncryptionMode = "TKIPandAESEncryption" }
+        if config.mixEncryptionModes.isEmpty { config.mixEncryptionModes = "TKIPandAESEncryption" }
         if config.mixAuthenticationMode.isEmpty { config.mixAuthenticationMode = "PSKAuthentication" }
         if config.wpaRekey.isEmpty { config.wpaRekey = "3600" }
         if config.standard.isEmpty { config.standard = band == .twoPointFour ? "11ax" : "11ac" }
@@ -894,7 +894,7 @@ public actor HuaweiOntClient {
             ("w.BasicAuthenticationMode", "None"), ("w.BasicEncryptionModes", "None"),
             ("w.WPAAuthenticationMode", config.wpaAuthenticationMode), ("w.WPAEncryptionModes", config.wpaEncryptionModes),
             ("w.IEEE11iAuthenticationMode", ieeeAuth), ("w.IEEE11iEncryptionModes", ieeeEncryption),
-            ("w.MixAuthenticationMode", config.mixAuthenticationMode), ("w.MixEncryptionModes", config.mixEncryptionMode),
+            ("w.MixAuthenticationMode", config.mixAuthenticationMode), ("w.MixEncryptionModes", config.mixEncryptionModes),
             ("w.SSIDAdvertisementEnabled", advertisement), ("w.WMMEnable", config.wmmEnable),
             ("w.MaxAssociateNum", config.deviceNum), ("w.BeaconType", "11i"),
             ("w.WEPEncryptionLevel", config.encryptionLevel), ("w.WEPKeyIndex", config.keyIndex),
