@@ -995,18 +995,19 @@ public actor HuaweiOntClient {
         isVisible: Bool
     ) async throws -> WifiUpdateResult {
         try Self.validateWifiCredentials(ssid: ssid, password: password)
-        let initialConfigs = try await fetchWlanBasic()
-        guard !initialConfigs.contains(where: {
-            Self.band(for: $0.ssidIndex) == band && $0.ssid.caseInsensitiveCompare(ssid) == .orderedSame
-        }) else {
-            throw OntError.badResponse("Wi-Fi network name already exists on this band")
-        }
-
+        // Read only the selected radio's page. `fetchWlanBasic()` reads the full page
+        // plus both band-specific pages, adding several serialized router requests
+        // before the write and making the Add sheet appear to hang on slower ONTs.
         let pageSuffix = band == .twoPointFour ? "?2G" : "?5G"
         let latestPage = try await fetchWlanBasicPage(suffix: pageSuffix)
         let latestConfigs = Self.parseWlanBasic(latestPage)
-        let allConfigs = Self.mergeWlanBasicConfigs([initialConfigs, latestConfigs])
-        let occupied = Set(allConfigs.filter {
+        guard !latestConfigs.contains(where: {
+            band.wlanIndices.contains($0.ssidIndex)
+                && $0.ssid.caseInsensitiveCompare(ssid) == .orderedSame
+        }) else {
+            throw OntError.badResponse("Wi-Fi network name already exists on this band")
+        }
+        let occupied = Set(latestConfigs.filter {
             band.wlanIndices.contains($0.ssidIndex) && !$0.ssid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }.map(\.ssidIndex))
         guard let targetIndex = band.secondaryIndices.first(where: { !occupied.contains($0) }) else {

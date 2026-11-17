@@ -1107,7 +1107,10 @@ public final class MonitorViewModel: ObservableObject {
             wifiMutationRefreshTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 guard let self, !Task.isCancelled else { return }
-                if await self.refreshWifiManagementState() { return }
+                // The first read can succeed while the radio is still returning its
+                // pre-change state. Always read again after the normal 5–10 second
+                // WLAN restart window so newly added/changed SSIDs become visible.
+                _ = await self.refreshWifiManagementState()
                 try? await Task.sleep(nanoseconds: 6_000_000_000)
                 guard !Task.isCancelled else { return }
                 _ = await self.refreshWifiManagementState()
