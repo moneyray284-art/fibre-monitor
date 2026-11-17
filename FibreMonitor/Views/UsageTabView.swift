@@ -43,9 +43,9 @@ public struct UsageTabView: View {
                         showSettings = true
                     }
                 }
-                StandaloneTopBarTrailingItem {
-                    RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: settings.isConfigured)
-                }
+                StandaloneTopBarTrailingItem(
+                    content: RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: settings.isConfigured)
+                )
             }
             .navigationDestination(isPresented: $showSettings) {
                 SettingsTabView(viewModel: viewModel)

@@ -199,7 +199,7 @@ public struct ClientsTabView: View {
                                 action: {
                                     isOnlineExpanded.toggle()
                                 },
-                                content: { clientRows(visibleOnline) }
+                                content: clientRows(visibleOnline)
                             )
                         }
 
@@ -213,7 +213,7 @@ public struct ClientsTabView: View {
                                 action: {
                                     isOfflineExpanded.toggle()
                                 },
-                                content: { clientRows(visibleOffline) }
+                                content: clientRows(visibleOffline)
                             )
                         }
                     }
@@ -230,12 +230,10 @@ public struct ClientsTabView: View {
             .navigationTitle("Clients")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                StandaloneTopBarTrailingItem {
-                    filterMenu
-                }
-                StandaloneTopBarTrailingItem {
-                    RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured)
-                }
+                StandaloneTopBarTrailingItem(content: filterMenu)
+                StandaloneTopBarTrailingItem(
+                    content: RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured)
+                )
             }
         }
         .onAppear(perform: refreshLocalWiFiAddress)
@@ -523,7 +521,7 @@ private struct ClientDeviceSectionCard<Content: View>: View {
     let tint: Color
     let isExpanded: Bool
     let action: () -> Void
-    @ViewBuilder let content: Content
+    let content: Content
 
     init(
         icon: String,
@@ -532,7 +530,7 @@ private struct ClientDeviceSectionCard<Content: View>: View {
         tint: Color,
         isExpanded: Bool,
         action: @escaping () -> Void,
-        @ViewBuilder content: () -> Content
+        content: Content
     ) {
         self.icon = icon
         self.title = title
@@ -540,7 +538,7 @@ private struct ClientDeviceSectionCard<Content: View>: View {
         self.tint = tint
         self.isExpanded = isExpanded
         self.action = action
-        self.content = content()
+        self.content = content
     }
 
     var body: some View {

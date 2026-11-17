@@ -66,13 +66,13 @@ public struct DashboardView: View {
                             .foregroundStyle(.primary)
                     }
                 }
-                StandaloneTopBarTrailingItem {
-                    homeToolbarButton(symbol: "gearshape", label: "Settings") {
+                StandaloneTopBarTrailingItem(
+                    content: homeToolbarButton(symbol: "gearshape", label: "Settings") {
                         showSettings = true
                     }
-                }
-                StandaloneTopBarTrailingItem {
-                    homeToolbarButton(
+                )
+                StandaloneTopBarTrailingItem(
+                    content: homeToolbarButton(
                         symbol: "arrow.clockwise",
                         label: "Refresh router data",
                         isDisabled: viewModel.isRefreshing || !settings.isConfigured,
@@ -80,7 +80,7 @@ public struct DashboardView: View {
                     ) {
                         Task { await viewModel.refreshAll(forceReauthIfNeeded: true) }
                     }
-                }
+                )
             }
             .navigationDestination(isPresented: $showSettings) {
                 SettingsTabView(viewModel: viewModel)

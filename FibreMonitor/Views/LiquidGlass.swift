@@ -166,8 +166,8 @@ public extension View {
 struct StandaloneTopBarTrailingItem<Content: View>: ToolbarContent {
     private let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
+    init(content: Content) {
+        self.content = content
     }
 
     @ToolbarContentBuilder
