@@ -820,12 +820,14 @@ private struct ClientDetailSheet: View {
                 }
 
                 if currentDevice.port.isWifi && !isThisPhone {
-                    Section("Wi-Fi Access") {
+                    Section {
                         Button(role: .destructive) {
                             Task { await blockCurrentDevice() }
                         } label: {
                             Label("Block Device", systemImage: "hand.raised.fill")
                         }
+                    } header: {
+                        Text("Wi-Fi Access")
                     } footer: {
                         Text("This device will be added to the router's Wi-Fi blacklist and disconnected.")
                     }
