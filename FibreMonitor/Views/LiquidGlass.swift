@@ -156,6 +156,14 @@ public extension View {
     func liquidGlassCapsule() -> some View {
         modifier(LiquidGlassCapsuleModifier())
     }
+
+    func liquidGlassToolbarCapsule() -> some View {
+        modifier(LiquidGlassToolbarCapsuleModifier())
+    }
+
+    func hideSharedToolbarBackground() -> some View {
+        modifier(HideSharedToolbarBackgroundModifier())
+    }
 }
 
 private struct AlwaysScrollBounceModifier: ViewModifier {
@@ -204,7 +212,28 @@ struct LiquidGlassToolbarCircleModifier: ViewModifier {
         } else {
             content
                 .background(.regularMaterial, in: Circle())
-                .overlay(Circle().stroke(Color.primary.opacity(0.1), lineWidth: 0.8))
+        }
+    }
+}
+
+private struct LiquidGlassToolbarCapsuleModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            content.background(.regularMaterial, in: Capsule())
+        }
+    }
+}
+
+private struct HideSharedToolbarBackgroundModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.sharedBackgroundVisibility(.hidden)
+        } else {
+            content
         }
     }
 }

@@ -60,6 +60,7 @@ public struct WifiTabView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured)
+                        .hideSharedToolbarBackground()
                 }
             }
         }

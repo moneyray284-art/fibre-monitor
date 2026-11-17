@@ -137,13 +137,11 @@ public struct ClientsTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @State private var searchText = ""
     @State private var selectedDevice: OntDevice?
+    @State private var selectedBlockedDevice: BlockedRouterDevice?
     @State private var selectedFilter: ClientDeviceFilter = .online
     @State private var localWiFiIPv4: String?
     @State private var isOnlineExpanded = true
     @State private var isOfflineExpanded = false
-    @State private var actionDevice: OntDevice?
-    @State private var actionBlockedDevice: BlockedRouterDevice?
-    @State private var showDeviceActions = false
     @State private var pendingBlockConflictDevice: OntDevice?
     @State private var showBlockConflictAlert = false
 
@@ -153,98 +151,77 @@ public struct ClientsTabView: View {
 
     public var body: some View {
         NavigationStack {
-            List {
-                if !viewModel.settings.isConfigured {
-                    ClientsEmptyCard(
-                        icon: "wifi.router",
-                        title: "No Router Configured",
-                        message: "Add a router in Settings to see connected clients."
-                    )
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                } else if selectedFilter == .blocked && filteredBlockedDevices.isEmpty {
-                    ClientsEmptyCard(
-                        icon: "hand.raised",
-                        title: "No blocked devices",
-                        message: "Devices you block from Wi-Fi will appear here."
-                    )
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                } else if selectedFilter != .blocked && visibleOnline.isEmpty && visibleOffline.isEmpty {
-                    ClientsEmptyCard(
-                        icon: searchText.isEmpty
-                            ? (viewModel.isLoggedOut ? "rectangle.portrait.and.arrow.right" : "laptopcomputer.and.iphone")
-                            : "magnifyingglass",
-                        title: clientsEmptyTitle,
-                        message: clientsEmptyMessage,
-                        isLoading: searchText.isEmpty && viewModel.isRefreshing && !viewModel.isLoggedOut,
-                        actionTitle: searchText.isEmpty && viewModel.isLoggedOut ? "Reconnect" : nil,
-                        action: viewModel.isLoggedOut ? { viewModel.reconnectSession() } : nil
-                    )
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                } else if selectedFilter == .blocked {
-                    Section {
-                        ForEach(filteredBlockedDevices) { device in
-                            blockedButton(for: device)
-                        }
-                    } header: {
-                        CardHeader(icon: "hand.raised.fill", title: "Blocked") {
-                            Pill(text: "\(filteredBlockedDevices.count)", color: .red)
-                        }
-                        .textCase(nil)
-                        .font(.subheadline)
-                    }
-                } else {
-                    if !visibleOnline.isEmpty {
-                        Section {
-                            if isOnlineExpanded {
-                                ForEach(visibleOnline) { device in
-                                    clientButton(for: device)
+            ScrollView {
+                VStack(spacing: 14) {
+                    if !viewModel.settings.isConfigured {
+                        ClientsEmptyCard(
+                            icon: "wifi.router",
+                            title: "No Router Configured",
+                            message: "Add a router in Settings to see connected clients."
+                        )
+                    } else if selectedFilter == .blocked {
+                        if filteredBlockedDevices.isEmpty {
+                            ClientsEmptyCard(
+                                icon: "hand.raised",
+                                title: "No blocked devices",
+                                message: "Devices you block from Wi-Fi will appear here."
+                            )
+                        } else {
+                            VStack(spacing: 10) {
+                                CardHeader(icon: "hand.raised.fill", title: "Blocked") {
+                                    Pill(text: "\(filteredBlockedDevices.count)", color: .red)
+                                }
+                                ForEach(filteredBlockedDevices) { device in
+                                    blockedButton(for: device)
                                 }
                             }
-                        } header: {
-                            CollapsibleClientSectionHeader(
-                                icon: "bolt.horizontal.circle.fill",
+                            .linkWaveGlassCard()
+                        }
+                    } else if visibleOnline.isEmpty && visibleOffline.isEmpty {
+                        ClientsEmptyCard(
+                            icon: searchText.isEmpty
+                                ? (viewModel.isLoggedOut ? "rectangle.portrait.and.arrow.right" : "laptopcomputer.and.iphone")
+                                : "magnifyingglass",
+                            title: clientsEmptyTitle,
+                            message: clientsEmptyMessage,
+                            isLoading: searchText.isEmpty && viewModel.isRefreshing && !viewModel.isLoggedOut,
+                            actionTitle: searchText.isEmpty && viewModel.isLoggedOut ? "Reconnect" : nil,
+                            action: viewModel.isLoggedOut ? { viewModel.reconnectSession() } : nil
+                        )
+                    } else {
+                        if !visibleOnline.isEmpty {
+                            ClientDeviceSectionCard(
+                                icon: "wifi",
                                 title: "Online",
                                 count: visibleOnline.count,
                                 tint: .green,
-                                isExpanded: isOnlineExpanded
-                            ) {
-                                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                                isExpanded: isOnlineExpanded,
+                                action: {
                                     isOnlineExpanded.toggle()
-                                }
-                            }
-                            .textCase(nil)
+                                },
+                                content: { clientRows(visibleOnline) }
+                            )
                         }
-                    }
 
-                    if !visibleOffline.isEmpty {
-                        Section {
-                            if isOfflineExpanded {
-                                ForEach(visibleOffline) { device in
-                                    clientButton(for: device)
-                                }
-                            }
-                        } header: {
-                            CollapsibleClientSectionHeader(
-                                icon: "moon.zzz",
+                        if !visibleOffline.isEmpty {
+                            ClientDeviceSectionCard(
+                                icon: "moon.zzz.fill",
                                 title: "Offline",
                                 count: visibleOffline.count,
                                 tint: .secondary,
-                                isExpanded: isOfflineExpanded
-                            ) {
-                                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                                isExpanded: isOfflineExpanded,
+                                action: {
                                     isOfflineExpanded.toggle()
-                                }
-                            }
-                            .textCase(nil)
+                                },
+                                content: { clientRows(visibleOffline) }
+                            )
                         }
                     }
                 }
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
             .background { LiquidGlassBackground() }
             .liquidGlassScrollEdges()
             .alwaysScrollBounce()
@@ -254,10 +231,11 @@ public struct ClientsTabView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    filterMenu
+                    filterMenu.hideSharedToolbarBackground()
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured)
+                        .hideSharedToolbarBackground()
                 }
             }
         }
@@ -267,38 +245,18 @@ public struct ClientsTabView: View {
             if tab == .clients { refreshLocalWiFiAddress() }
         }
         .sheet(item: $selectedDevice) { device in
-            ClientDetailSheet(viewModel: viewModel, device: currentSnapshot(of: device))
+            ClientDetailSheet(
+                viewModel: viewModel,
+                device: currentSnapshot(of: device),
+                isThisPhone: isThisPhone(device)
+            )
         }
-        .confirmationDialog(
-            deviceActionTitle,
-            isPresented: $showDeviceActions,
-            titleVisibility: .visible
-        ) {
-            if let device = actionDevice {
-                Button("View Details") {
-                    selectedDevice = device
-                    clearActionTarget()
-                }
-                if device.port.isWifi && !isThisPhone(device) {
-                    Button("Block Device", role: .destructive) {
-                        requestBlock(device)
-                        clearActionTarget()
-                    }
-                }
-            }
-            if let device = actionBlockedDevice {
-                Button("Unblock Device") {
-                    Task { await viewModel.unblockWifiDevice(device) }
-                    clearActionTarget()
-                }
-            }
-            Button("Cancel", role: .cancel) { clearActionTarget() }
-        } message: {
-            if let device = actionDevice {
-                Text("Choose an action for \(viewModel.name(for: device)).")
-            } else if let device = actionBlockedDevice {
-                Text("Restore Wi-Fi access for \(device.name.isEmpty ? device.mac : device.name).")
-            }
+        .sheet(item: $selectedBlockedDevice) { device in
+            BlockedClientDetailSheet(
+                device: device,
+                displayName: displayName(for: device),
+                onUnblock: { Task { await viewModel.unblockWifiDevice(device) } }
+            )
         }
         .alert("Existing Access-Control Entries", isPresented: $showBlockConflictAlert) {
             Button("Clear & Block Device", role: .destructive) {
@@ -328,9 +286,7 @@ public struct ClientsTabView: View {
     private func clientButton(for device: OntDevice) -> some View {
         let thisPhone = isThisPhone(device)
         return Button {
-            actionDevice = device
-            actionBlockedDevice = nil
-            showDeviceActions = true
+            selectedDevice = device
         } label: {
             ClientRow(
                 device: device,
@@ -339,54 +295,40 @@ public struct ClientsTabView: View {
             )
         }
         .buttonStyle(.plain)
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+        .contextMenu {
             if !thisPhone && device.port.isWifi {
                 Button(role: .destructive) {
-                    actionDevice = device
-                    actionBlockedDevice = nil
-                    showDeviceActions = true
+                    requestBlock(device)
                 } label: {
-                    Label("Block", systemImage: "hand.raised.fill")
+                    Label("Block Device", systemImage: "hand.raised.fill")
                 }
             }
         }
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
-        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
     }
 
     private func blockedButton(for device: BlockedRouterDevice) -> some View {
         BlockedClientRow(
             device: device,
             displayName: displayName(for: device),
-            onSelect: {
-                actionBlockedDevice = device
-                actionDevice = nil
-                showDeviceActions = true
-            },
+            onSelect: { selectedBlockedDevice = device },
             onUnblock: { Task { await viewModel.unblockWifiDevice(device) } }
         )
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) {
-                Task { await viewModel.unblockWifiDevice(device) }
-            } label: {
-                Label("Unblock", systemImage: "hand.raised.slash")
+    }
+
+    @ViewBuilder
+    private func clientRows(_ devices: [OntDevice]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(devices.enumerated()), id: \.offset) { entry in
+                clientButton(for: entry.element)
+                if entry.offset < devices.count - 1 {
+                    Divider()
+                        .padding(.leading, 54)
+                        .padding(.trailing, 12)
+                }
             }
         }
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
-        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-    }
-
-    private var deviceActionTitle: String {
-        if let device = actionDevice { return viewModel.name(for: device) }
-        if let device = actionBlockedDevice { return device.name.isEmpty ? device.mac : device.name }
-        return "Device Actions"
-    }
-
-    private func clearActionTarget() {
-        actionDevice = nil
-        actionBlockedDevice = nil
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
     }
 
     private func displayName(for blocked: BlockedRouterDevice) -> String {
@@ -520,7 +462,7 @@ public struct ClientsTabView: View {
             .padding(.horizontal, 10)
             .frame(height: 38)
             .contentShape(Capsule())
-            .liquidGlassCapsule()
+            .liquidGlassToolbarCapsule()
         }
         .accessibilityLabel("Filter devices")
         .accessibilityValue("\(selectedFilter.menuTitle), \(selectedCount) devices")
@@ -575,41 +517,71 @@ public struct ClientsTabView: View {
     }
 }
 
-private struct CollapsibleClientSectionHeader: View {
+private struct ClientDeviceSectionCard<Content: View>: View {
     let icon: String
     let title: String
     let count: Int
     let tint: Color
     let isExpanded: Bool
     let action: () -> Void
+    @ViewBuilder let content: Content
+
+    init(
+        icon: String,
+        title: String,
+        count: Int,
+        tint: Color,
+        isExpanded: Bool,
+        action: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.icon = icon
+        self.title = title
+        self.count = count
+        self.tint = tint
+        self.isExpanded = isExpanded
+        self.action = action
+        self.content = content()
+    }
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .foregroundStyle(Color.accentColor)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .font(.subheadline.weight(.bold))
-                Spacer()
-                Pill(text: "\(count)", color: tint)
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16)
-                    .accessibilityHidden(true)
+        VStack(spacing: 0) {
+            Button(action: action) {
+                HStack(spacing: 10) {
+                    Image(systemName: icon)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(tint)
+                        .frame(width: 36, height: 36)
+                        .background(tint.opacity(0.14), in: Circle())
+                        .accessibilityHidden(true)
+                    Text(title)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Pill(text: "\(count)", color: tint)
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
+                        .frame(width: 18, height: 24)
+                        .accessibilityHidden(true)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.bar)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(title), \(count) devices")
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint("Double-tap to \(isExpanded ? "collapse" : "expand") this section")
+
+            if isExpanded {
+                content
+            }
         }
-        .buttonStyle(.plain)
-        .listRowInsets(EdgeInsets())
-        .accessibilityLabel("\(title), \(count) devices")
-        .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
-        .accessibilityHint("Double-tap to \(isExpanded ? "collapse" : "expand") this section")
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .linkWaveGlassCard(padding: 0)
+        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: isExpanded)
     }
 }
 
@@ -650,28 +622,70 @@ private struct BlockedClientRow: View {
     }
 }
 
+private struct BlockedClientDetailSheet: View {
+    let device: BlockedRouterDevice
+    let displayName: String
+    let onUnblock: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    LabeledContent("Name", value: displayName.isEmpty ? device.mac : displayName)
+                    LabeledContent("MAC Address", value: device.mac)
+                    LabeledContent("Wi-Fi Network", value: device.ssidName)
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        onUnblock()
+                        dismiss()
+                    } label: {
+                        Label("Unblock Device", systemImage: "hand.raised.slash")
+                    }
+                } footer: {
+                    Text("This restores the device's access to the selected Wi-Fi network.")
+                }
+            }
+            .navigationTitle(displayName.isEmpty ? "Blocked Device" : displayName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .tabBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
 private struct ClientRow: View {
     let device: OntDevice
     let displayName: String
     var isThisPhone = false
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Image(systemName: ClientDeviceIcon.symbol(for: device, isThisPhone: isThisPhone))
                 .font(.subheadline.weight(.semibold))
-                .foregroundColor(device.isOnline ? .accentColor : .secondary)
-                .frame(width: 34, height: 34)
-                .background((device.isOnline ? Color.accentColor : Color.secondary).opacity(device.isOnline ? 0.14 : 0.1), in: Circle())
+                .foregroundStyle(device.isOnline ? Color.accentColor : Color.secondary)
+                .frame(width: 38, height: 38)
+                .background(
+                    (device.isOnline ? Color.accentColor : Color.secondary)
+                        .opacity(device.isOnline ? 0.14 : 0.1),
+                    in: Circle()
+                )
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(isGenericHost ? "This Phone" : displayName)
+                    Text(isThisPhone && isGenericHost ? "This Phone" : displayName)
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.primary)
                         .lineLimit(1)
-                    if isThisPhone && !isGenericHost {
-                        Text("This Phone")
+                    if isThisPhone {
+                        Text("This Device")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(Color.accentColor)
                             .padding(.horizontal, 6)
@@ -679,15 +693,17 @@ private struct ClientRow: View {
                             .background(Color.accentColor.opacity(0.12), in: Capsule())
                     }
                 }
-                if isThisPhone && isGenericHost {
-                    Text("Reported as \(reportedName)")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                HStack(spacing: 4) {
+                    Text(device.ip.isEmpty ? device.mac : device.ip)
                         .lineLimit(1)
+                    if device.isOnline, !device.connectedText.isEmpty {
+                        Text("·")
+                        Text(device.connectedText)
+                            .lineLimit(1)
+                    }
                 }
-                Text(device.ip.isEmpty ? device.mac : device.ip)
-                    .font(.caption.monospaced())
-                    .foregroundColor(.secondary)
+                .font(.caption.monospaced())
+                .foregroundColor(.secondary)
                 if let rateSummary = rateText {
                     Text(rateSummary)
                         .font(.caption2.monospacedDigit())
@@ -697,19 +713,26 @@ private struct ClientRow: View {
 
             Spacer(minLength: 8)
 
-            VStack(alignment: .trailing, spacing: 4) {
-                HStack(spacing: 6) {
-                    ClientSignalBars(level: ClientSignal.bars(for: device), color: ClientSignal.color(for: device))
-                    Text(device.isOnline ? device.connectedText : "Offline")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+            if device.isOnline {
+                VStack(alignment: .trailing, spacing: 5) {
+                    HStack(spacing: 5) {
+                        ClientSignalBars(level: ClientSignal.bars(for: device), color: ClientSignal.color(for: device))
+                        if let rssi = device.rssiDbm, device.port.isWifi {
+                            Text("\(Int(rssi.rounded())) dBm")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    if let bandLabel {
+                        Pill(text: bandLabel, color: .accentColor)
+                    }
                 }
-                if let signalDetail = ClientSignal.detail(for: device) {
-                    Text(signalDetail)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundColor(.secondary)
-                }
-                Pill(text: device.port.label, color: badgeColor)
+            } else {
+                Text(offlineCaption)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
             }
 
             Image(systemName: "chevron.right")
@@ -717,8 +740,8 @@ private struct ClientRow: View {
                 .foregroundColor(.secondary.opacity(0.6))
                 .accessibilityHidden(true)
         }
-        .padding(10)
-        .liquidGlassPill()
+        .padding(.horizontal, 8)
+        .padding(.vertical, 10)
         .accessibilityElement(children: .combine)
         .accessibilityHint("Double-tap to inspect device details")
     }
@@ -729,18 +752,18 @@ private struct ClientRow: View {
         return ["iphone", "unknown", "unknown device", "unknown_device", "--", ""].contains(normalized)
     }
 
-    private var reportedName: String {
-        let hostname = device.hostName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return hostname.isEmpty || hostname == "--" ? displayName : hostname
+    private var bandLabel: String? {
+        switch device.port {
+        case .wifi5, .wifi24: return device.port.label
+        case .lan: return "LAN"
+        case .other: return nil
+        }
     }
 
-    private var badgeColor: Color {
-        switch device.port {
-        case .wifi5: return .purple
-        case .wifi24: return .blue
-        case .lan: return .teal
-        case .other: return .secondary
-        }
+    private var offlineCaption: String {
+        if device.port.isWifi { return "Offline · \(device.port.label)" }
+        if device.port.isLan { return "Offline · LAN" }
+        return "Offline"
     }
 
     private var rateText: String? {
@@ -755,16 +778,17 @@ private struct ClientRow: View {
         return parts.isEmpty ? nil : parts.joined(separator: "  ")
     }
 }
-
 private struct ClientDetailSheet: View {
     @ObservedObject var viewModel: MonitorViewModel
     let device: OntDevice
+    let isThisPhone: Bool
     @Environment(\.dismiss) private var dismiss
 
     @State private var showRouterRename = false
     @State private var showLocalRename = false
     @State private var localAliasInput = ""
     @State private var confirmRemove = false
+    @State private var showBlockConflictConfirmation = false
 
     private var currentDevice: OntDevice {
         viewModel.devices.first(where: { $0.mac == device.mac }) ?? device
@@ -795,6 +819,18 @@ private struct ClientDetailSheet: View {
                         if let up = currentDevice.trafficSendRate {
                             LabeledContent("Upload Rate", value: TrafficRateFormatter.string(bytesPerSecond: up))
                         }
+                    }
+                }
+
+                if currentDevice.port.isWifi && !isThisPhone {
+                    Section("Wi-Fi Access") {
+                        Button(role: .destructive) {
+                            Task { await blockCurrentDevice() }
+                        } label: {
+                            Label("Block Device", systemImage: "hand.raised.fill")
+                        }
+                    } footer: {
+                        Text("This device will be added to the router's Wi-Fi blacklist and disconnected.")
                     }
                 }
 
@@ -881,6 +917,26 @@ private struct ClientDetailSheet: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This only clears the offline device from the router's list. If it connects again it will reappear.")
+        }
+        .alert("Existing Access-Control Entries", isPresented: $showBlockConflictConfirmation) {
+            Button("Clear & Block Device", role: .destructive) {
+                Task {
+                    await viewModel.blockWifiDevice(currentDevice, clearConflictingEntries: true)
+                    if viewModel.actionMessage?.hasPrefix("Blocked ") == true { dismiss() }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This clears the router's existing WLAN and LAN MAC access-control entries, enables blacklist mode, and blocks the selected device.")
+        }
+    }
+
+    private func blockCurrentDevice() async {
+        let hasConflict = await viewModel.blockWifiDevice(currentDevice)
+        if hasConflict {
+            showBlockConflictConfirmation = true
+        } else if viewModel.actionMessage?.hasPrefix("Blocked ") == true {
+            dismiss()
         }
     }
 }

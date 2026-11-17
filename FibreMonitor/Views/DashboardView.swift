@@ -67,7 +67,19 @@ public struct DashboardView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    homeToolbarControls
+                    homeToolbarButton(symbol: "gearshape", label: "Settings") {
+                        showSettings = true
+                    }.hideSharedToolbarBackground()
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    homeToolbarButton(
+                        symbol: "arrow.clockwise",
+                        label: "Refresh router data",
+                        isDisabled: viewModel.isRefreshing || !settings.isConfigured,
+                        isRefreshing: viewModel.isRefreshing
+                    ) {
+                        Task { await viewModel.refreshAll(forceReauthIfNeeded: true) }
+                    }.hideSharedToolbarBackground()
                 }
             }
             .navigationDestination(isPresented: $showSettings) {
@@ -76,33 +88,6 @@ public struct DashboardView: View {
             }
             .onChange(of: showSettings) { isPresented in
                 if !isPresented { viewModel.settingsDidDismiss() }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var homeToolbarControls: some View {
-        if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: 10) {
-                homeToolbarButtons
-            }
-        } else {
-            homeToolbarButtons
-        }
-    }
-
-    private var homeToolbarButtons: some View {
-        HStack(spacing: 10) {
-            homeToolbarButton(symbol: "gearshape", label: "Settings") {
-                showSettings = true
-            }
-            homeToolbarButton(
-                symbol: "arrow.clockwise",
-                label: "Refresh router data",
-                isDisabled: viewModel.isRefreshing || !settings.isConfigured,
-                isRefreshing: viewModel.isRefreshing
-            ) {
-                Task { await viewModel.refreshAll(forceReauthIfNeeded: true) }
             }
         }
     }
