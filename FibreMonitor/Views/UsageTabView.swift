@@ -34,6 +34,7 @@ public struct UsageTabView: View {
             }
             .background { LiquidGlassBackground() }
             .liquidGlassScrollEdges()
+            .alwaysScrollBounce()
             .refreshable { await viewModel.refreshAll() }
             .navigationTitle("Usage")
             .navigationBarTitleDisplayMode(.large)

@@ -169,9 +169,25 @@ public extension View {
         modifier(LiquidGlassScrollEdgeEffectModifier())
     }
 
+    /// Keeps vertical pull-to-refresh available on short and initially empty scroll views.
+    func alwaysScrollBounce() -> some View {
+        modifier(AlwaysScrollBounceModifier())
+    }
+
     /// A compact capsule surface for controls such as the Clients filter menu.
     func liquidGlassCapsule() -> some View {
         modifier(LiquidGlassCapsuleModifier())
+    }
+}
+
+private struct AlwaysScrollBounceModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 16.4, *) {
+            content.scrollBounceBehavior(.always)
+        } else {
+            content
+        }
     }
 }
 

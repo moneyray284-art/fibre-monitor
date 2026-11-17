@@ -30,6 +30,8 @@ public final class MonitorViewModel: ObservableObject {
     private var diagnosticTask: Task<Void, Never>?
     @Published public private(set) var isConnected = false
     @Published public private(set) var isRefreshing = false
+    @Published public private(set) var isSpeedTestRunning = false
+    @Published public private(set) var isLiveTrafficActive = false
     @Published public private(set) var lastUpdate: Date?
     @Published public private(set) var routerResponseTimeMs: Int?
     @Published public var errorMessage: String?
@@ -47,6 +49,7 @@ public final class MonitorViewModel: ObservableObject {
     private var refreshRequestedAfterCurrent = false
     private let reachabilityFailureThreshold = 3
     private var lastCoreSync: Date = .distantPast
+    private var lastTrafficSampleAt: Date = .distantPast
     private let coreSyncInterval: TimeInterval = 10
     // Health, Wi-Fi and LAN come from full web pages (50-130 KB), so sync them rarely.
     private var lastPageSync: Date = .distantPast
@@ -102,6 +105,62 @@ public final class MonitorViewModel: ObservableObject {
         WidgetSnapshotStore.updateUsage(summary: settings.dataUsageSummary, at: Date())
         resetReachabilityFailures()
         Task { await client.logout() }
+    }
+
+    /// Samples only the WAN counters while the app is active. This deliberately does
+    /// not touch `isRefreshing`, so the manual refresh control stays idle during live ticks.
+    public func runLiveTrafficFeed() async {
+        guard !isLiveTrafficActive else { return }
+        isLiveTrafficActive = true
+        defer { isLiveTrafficActive = false }
+
+        var nextTick = ProcessInfo.processInfo.systemUptime
+        while !Task.isCancelled {
+            nextTick += 1
+            if !isSpeedTestRunning {
+                await pollLiveTraffic()
+            }
+            if Task.isCancelled { break }
+            let remaining = max(0, nextTick - ProcessInfo.processInfo.systemUptime)
+            if remaining > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+            }
+        }
+    }
+
+    public func setSpeedTestRunning(_ running: Bool) {
+        isSpeedTestRunning = running
+    }
+
+    private func pollLiveTraffic() async {
+        guard !awaitingRouterSelection,
+              settings.isConfigured,
+              !isLoggedOut,
+              !isRefreshing,
+              !isSpeedTestRunning,
+              let profileId = settings.activeProfile?.id else { return }
+
+        let provider = client
+        let sampledAt = Date()
+        do {
+            let sample = try await provider.pollTraffic(now: sampledAt)
+            guard settings.activeProfile?.id == profileId else { return }
+            acceptTraffic(sample, sampledAt: sampledAt, profileId: profileId)
+            isConnected = true
+        } catch {
+            // Keep live ticks quiet. The explicit sync path owns connection errors and banners.
+        }
+    }
+
+    private func acceptTraffic(_ sample: TrafficState, sampledAt: Date, profileId: UUID?) {
+        guard sampledAt >= lastTrafficSampleAt else { return }
+        lastTrafficSampleAt = sampledAt
+        traffic = sample
+        if let profileId,
+           let downloaded = sample.cumulativeDownloadBytes,
+           let uploaded = sample.cumulativeUploadBytes {
+            settings.recordTrafficCounters(download: downloaded, upload: uploaded, for: profileId)
+        }
     }
 
     /// Explicit user-triggered logout from Settings. Pauses automatic sync until Reconnect is tapped.
@@ -176,6 +235,7 @@ public final class MonitorViewModel: ObservableObject {
         guard !isRefreshing else { return }
         isLoggedOut = false
         lastCoreSync = .distantPast
+        lastTrafficSampleAt = .distantPast
         lastPageSync = .distantPast
         lastLanSync = .distantPast
         resetReachabilityFailures()
@@ -184,6 +244,7 @@ public final class MonitorViewModel: ObservableObject {
 
     private func refreshAfterMutation() async {
         lastCoreSync = .distantPast
+        lastTrafficSampleAt = .distantPast
         lastPageSync = .distantPast
         lastLanSync = .distantPast
         guard !isRefreshing else {
@@ -195,6 +256,7 @@ public final class MonitorViewModel: ObservableObject {
 
     private func clearViewState() {
         traffic = TrafficState()
+        lastTrafficSampleAt = .distantPast
         blockedDevices = []
         wan = WanInfo()
         optical = OpticalInfo()
@@ -247,13 +309,10 @@ public final class MonitorViewModel: ObservableObject {
         }
         do {
             let requestStartedAt = ProcessInfo.processInfo.systemUptime
-            traffic = try await client.pollTraffic(now: Date())
+            let sampledAt = Date()
+            let trafficSample = try await client.pollTraffic(now: sampledAt)
+            acceptTraffic(trafficSample, sampledAt: sampledAt, profileId: settings.activeProfile?.id)
             routerResponseTimeMs = max(0, Int((ProcessInfo.processInfo.systemUptime - requestStartedAt) * 1_000))
-            if let profileId = settings.activeProfile?.id,
-               let downloaded = traffic.cumulativeDownloadBytes,
-               let uploaded = traffic.cumulativeUploadBytes {
-                settings.recordTrafficCounters(download: downloaded, upload: uploaded, for: profileId)
-            }
             if let activeId = settings.activeProfile?.id, let identity = await client.routerIdentity() {
                 settings.recordDetection(for: activeId, model: identity.model, cfgMode: identity.cfgMode)
             }

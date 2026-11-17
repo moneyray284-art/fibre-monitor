@@ -38,7 +38,7 @@ public struct DashboardView: View {
                             openUsage: { viewModel.selectedTab = .usage },
                             openClients: { viewModel.selectedTab = .clients }
                         )
-                        ConnectionHistoryCard(events: settings.connectionHistory)
+                        SpeedTestCard(viewModel: viewModel)
                     }
                 }
                 .padding(.horizontal)
@@ -47,6 +47,7 @@ public struct DashboardView: View {
             }
             .background { LiquidGlassBackground() }
             .liquidGlassScrollEdges()
+            .alwaysScrollBounce()
             .refreshable { await viewModel.refreshAll() }
             .navigationTitle("Home")
             .navigationBarTitleDisplayMode(.inline)
@@ -188,7 +189,10 @@ private struct RouterHeaderCard: View {
 
     private var statusText: String {
         if viewModel.isLoggedOut { return "LOGGED OUT" }
-        return viewModel.isConnected ? "CONNECTED" : (viewModel.isRefreshing ? "CONNECTING" : "OFFLINE")
+        if viewModel.isConnected {
+            return viewModel.isLiveTrafficActive && !viewModel.isSpeedTestRunning ? "CONNECTED · Live" : "CONNECTED"
+        }
+        return viewModel.isRefreshing ? "CONNECTING" : "OFFLINE"
     }
 
     private var wifiOnline: Bool {
@@ -353,7 +357,7 @@ private struct CompactSpeedCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Live speed")
         .accessibilityValue(
-            String(format: "Download %.1f megabits per second, upload %.1f megabits per second", traffic.downloadMbps, traffic.uploadMbps)
+            "Download \(Self.accessibilitySpeed(traffic.downloadMbps)), upload \(Self.accessibilitySpeed(traffic.uploadMbps))"
         )
     }
 
@@ -370,17 +374,174 @@ private struct CompactSpeedCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(value >= 100 ? String(format: "%.0f", value) : String(format: "%.1f", value))
+                    Text(value >= 1 ? String(format: value >= 100 ? "%.0f" : "%.1f", value) : String(format: "%.0f", value * 1_000))
                         .font(.system(.title3, design: .rounded).weight(.bold))
                         .monospacedDigit()
                         .contentTransition(.numericText())
-                    Text("Mbps")
+                    Text(value >= 1 ? "Mbps" : "Kbps")
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private static func accessibilitySpeed(_ mbps: Double) -> String {
+        if mbps < 1 { return String(format: "%.0f kilobits per second", mbps * 1_000) }
+        return String(format: "%.1f megabits per second", mbps)
+    }
+}
+
+private struct SpeedTestCard: View {
+    @ObservedObject var viewModel: MonitorViewModel
+    @State private var result: SpeedTestResult?
+    @State private var progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
+    @State private var errorMessage: String?
+    @State private var isRunning = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            HStack(spacing: 9) {
+                Image(systemName: "speedometer")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.cyan)
+                Text("Speed Test")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Spacer()
+                if isRunning {
+                    Text(progress.phase.rawValue.uppercased())
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(.cyan)
+                        .lineLimit(1)
+                }
+            }
+
+            if let result {
+                HStack(spacing: 0) {
+                    resultMetric("Ping", value: String(format: "%.0f ms", result.pingMs), tint: .white)
+                    resultMetric("Jitter", value: String(format: "%.0f ms", result.jitterMs), tint: .white)
+                    resultMetric("Download", value: Self.speed(result.downloadMbps), tint: .cyan)
+                    resultMetric("Upload", value: Self.speed(result.uploadMbps), tint: .mint)
+                }
+            } else {
+                HStack(spacing: 0) {
+                    resultMetric("Ping", value: "-- ms", tint: .white)
+                    resultMetric("Jitter", value: "-- ms", tint: .white)
+                    if isRunning {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(progress.phase == .ping ? "Latency" : (progress.phase == .download ? "Download" : "Upload"))
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.58))
+                            Text(progress.detail)
+                                .font(.system(.caption, design: .rounded).weight(.semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+
+            if isRunning {
+                ProgressView(value: progress.fraction)
+                    .tint(.cyan)
+                    .accessibilityLabel("Speed test progress")
+            } else if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if isRunning {
+                HStack(spacing: 8) {
+                    ProgressView().tint(.cyan)
+                    Text(progress.phase.rawValue)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.72))
+                    Spacer()
+                    Text("\(Int(progress.fraction * 100))%")
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+            } else {
+                Button(action: startTest) {
+                    Label(result == nil ? "Start Test" : "Test Again", systemImage: result == nil ? "play.fill" : "arrow.clockwise")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.cyan)
+                }
+                .buttonStyle(.plain)
+                .disabled(!viewModel.settings.isConfigured)
+            }
+        }
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(LinearGradient(
+                            colors: [
+                                Color(red: 0.035, green: 0.055, blue: 0.085).opacity(0.88),
+                                Color(red: 0.055, green: 0.105, blue: 0.15).opacity(0.78)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                }
+        }
+        .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func resultMetric(_ title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.58))
+                .lineLimit(1)
+            Text(value)
+                .font(.system(.subheadline, design: .rounded).weight(.bold))
+                .foregroundStyle(tint)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func startTest() {
+        guard !isRunning else { return }
+        isRunning = true
+        result = nil
+        errorMessage = nil
+        progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
+        viewModel.setSpeedTestRunning(true)
+
+        Task { @MainActor in
+            defer {
+                isRunning = false
+                viewModel.setSpeedTestRunning(false)
+            }
+            do {
+                result = try await SpeedTestService.run { update in
+                    progress = update
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private static func speed(_ mbps: Double) -> String {
+        if mbps >= 1_000 { return String(format: "%.2f Gbps", mbps / 1_000) }
+        return String(format: "%.1f Mbps", mbps)
     }
 }
 

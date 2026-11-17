@@ -84,8 +84,20 @@ public struct MainTabView: View {
         .onChange(of: viewModel.selectedTab) { _ in
             Task { await viewModel.refreshIfStale(maxAge: 10) }
         }
+        .task(id: shouldRunLiveTrafficFeed) {
+            guard shouldRunLiveTrafficFeed else { return }
+            await viewModel.runLiveTrafficFeed()
+        }
         .onChange(of: settings.appIconChoice) { choice in
             AppIconManager.apply(choice)
         }
+    }
+
+    private var shouldRunLiveTrafficFeed: Bool {
+        scenePhase == .active
+            && !viewModel.awaitingRouterSelection
+            && viewModel.settings.isConfigured
+            && !viewModel.isLoggedOut
+            && !viewModel.isSpeedTestRunning
     }
 }
