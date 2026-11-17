@@ -19,9 +19,15 @@ struct SpeedTestProgress: Equatable, Sendable {
     let detail: String
 }
 
+private struct RTTMeasurement: Sendable {
+    let milliseconds: Double
+    let usedPersistentConnection: Bool
+}
+
 enum SpeedTestService {
     private static let fastEndpoint = URL(string: "https://api.fast.com/netflix/speedtest/v2?https=true&token=YXNkZmFzZGxmbnNkYWZoYXNkZmhrYWxm&urlCount=5")!
     private static let appleConfigURL = URL(string: "https://mensura.cdn-apple.com/api/v1/gm/config")!
+    private static let applePingFallbackURL = URL(string: "https://mensura.cdn-apple.com/api/v1/gm/small")!
     private static let transferWindow: TimeInterval = 8
     private static let fastRangeBytes = 512 * 1_024
     private static let uploadBytes = 512 * 1_024
@@ -50,14 +56,11 @@ enum SpeedTestService {
             throw SpeedTestError.noServers
         }
 
-        var pings: [Double] = []
-        if fastTargets.count >= 5 {
-            pings = await measureFastPing(targets: Array(fastTargets.prefix(5)), onProgress: onProgress)
-        }
-        if pings.count < 5, let apple {
-            pings = await measureApplePing(endpoint: apple.smallDownload, onProgress: onProgress)
-        }
-        guard pings.count == 5 else { throw SpeedTestError.latencyFailed }
+        let latency = try await measureLatency(
+            fastTargets: fastTargets,
+            appleFallback: apple?.smallDownload,
+            onProgress: onProgress
+        )
 
         let fastDownloadURLs = fastTargets.compactMap { rangeURL(for: $0, byteCount: fastRangeBytes) }
         var downloadMbps = 0.0
@@ -99,10 +102,12 @@ enum SpeedTestService {
         }
         guard uploadMbps > 0 else { throw SpeedTestError.uploadFailed }
 
-        let ping = pings.reduce(0, +) / Double(pings.count)
-        let jitterSamples = zip(pings, pings.dropFirst()).map { abs($1 - $0) }
-        let jitter = jitterSamples.isEmpty ? 0 : jitterSamples.reduce(0, +) / Double(jitterSamples.count)
-        return SpeedTestResult(pingMs: ping, jitterMs: jitter, downloadMbps: downloadMbps, uploadMbps: uploadMbps)
+        return SpeedTestResult(
+            pingMs: latency.pingMs,
+            jitterMs: latency.jitterMs,
+            downloadMbps: downloadMbps,
+            uploadMbps: uploadMbps
+        )
     }
 
     private static func fetchFastTargets() async throws -> [URL] {
@@ -132,54 +137,116 @@ enum SpeedTestService {
         return try JSONDecoder().decode(AppleEndpoints.self, from: data)
     }
 
-    private static func measureFastPing(
-        targets: [URL],
+    private static func measureLatency(
+        fastTargets: [URL],
+        appleFallback: URL?,
+        onProgress: @escaping @MainActor (SpeedTestProgress) -> Void
+    ) async throws -> (pingMs: Double, jitterMs: Double) {
+        let delegate = RTTMetricsDelegate()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpMaximumConnectionsPerHost = 4
+        configuration.waitsForConnectivity = true
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        configuration.timeoutIntervalForRequest = 5
+        configuration.timeoutIntervalForResource = 10
+
+        // Reuse this one session for both warm-ups and probes; URLSession keeps its
+        // persistent connection alive between the sequential HEAD tasks.
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+
+        let fastEdge = fastTargets.first(where: isAllowedFastEdge)
+        var samples: [Double] = []
+        if let fastEdge {
+            samples = await warmedRTTSamples(
+                url: fastEdge,
+                label: "Warming Fast edge",
+                session: session,
+                delegate: delegate,
+                onProgress: onProgress
+            )
+        }
+
+        if samples.count != 8 {
+            let appleURL = [appleFallback, applePingFallbackURL]
+                .compactMap { $0 }
+                .first(where: isApplePingHost)
+            if let appleURL {
+                samples = await warmedRTTSamples(
+                    url: appleURL,
+                    label: "Warming Apple edge",
+                    session: session,
+                    delegate: delegate,
+                    onProgress: onProgress
+                )
+            }
+        }
+
+        guard samples.count == 8, let ping = median(samples) else {
+            throw SpeedTestError.latencyFailed
+        }
+
+        let outlierLimit = ping * 3
+        let jitterPairs = zip(samples, samples.dropFirst()).filter {
+            $0.0 <= outlierLimit && $0.1 <= outlierLimit
+        }
+        let jitter = jitterPairs.isEmpty
+            ? 0
+            : jitterPairs.reduce(0) { $0 + abs($1.1 - $1.0) } / Double(jitterPairs.count)
+        return (ping, jitter)
+    }
+
+    private static func warmedRTTSamples(
+        url: URL,
+        label: String,
+        session: URLSession,
+        delegate: RTTMetricsDelegate,
         onProgress: @escaping @MainActor (SpeedTestProgress) -> Void
     ) async -> [Double] {
+        await onProgress(.init(phase: .ping, fraction: 0, detail: label))
+
+        // These requests complete DNS, TCP, and TLS setup but are deliberately discarded.
+        for index in 0..<2 {
+            guard let warmup = await delegate.measureRTT(to: url, in: session) else { return [] }
+            if index == 1 && !warmup.usedPersistentConnection { return [] }
+        }
+
         var samples: [Double] = []
-        for index in 0..<5 {
-            let target = targets[index]
-            guard let url = rangeURL(for: target, byteCount: 0) else { continue }
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 5
-            request.cachePolicy = .reloadIgnoringLocalCacheData
-            let started = ProcessInfo.processInfo.systemUptime
-            do {
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
-                    samples.append((ProcessInfo.processInfo.systemUptime - started) * 1_000)
-                }
-            } catch {
-                // Continue all five probes; Apple's endpoint is used if Fast cannot complete them.
+        for index in 0..<8 {
+            if let sample = await delegate.measureRTT(to: url, in: session), sample.usedPersistentConnection {
+                samples.append(sample.milliseconds)
             }
-            await onProgress(.init(phase: .ping, fraction: Double(index + 1) / 5, detail: "Probe \(index + 1) of 5"))
+            await onProgress(.init(
+                phase: .ping,
+                fraction: Double(index + 1) / 8,
+                detail: "Probe \(index + 1) of 8"
+            ))
+            if index < 7 {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
         }
         return samples
     }
 
-    private static func measureApplePing(
-        endpoint: URL,
-        onProgress: @escaping @MainActor (SpeedTestProgress) -> Void
-    ) async -> [Double] {
-        var samples: [Double] = []
-        for index in 0..<5 {
-            var request = URLRequest(url: endpoint)
-            request.httpMethod = "HEAD"
-            request.timeoutInterval = 5
-            request.cachePolicy = .reloadIgnoringLocalCacheData
-            let started = ProcessInfo.processInfo.systemUptime
-            do {
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let http = response as? HTTPURLResponse, (200..<400).contains(http.statusCode) {
-                    samples.append((ProcessInfo.processInfo.systemUptime - started) * 1_000)
-                }
-            } catch {
-                // Keep probing so a transient request failure does not end the whole test early.
-            }
-            await onProgress(.init(phase: .ping, fraction: Double(index + 1) / 5, detail: "Probe \(index + 1) of 5"))
+    private static func isAllowedFastEdge(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https",
+              let host = url.host?.lowercased() else { return false }
+        return host != "api.fast.com" && !host.hasSuffix(".api.fast.com")
+    }
+
+    private static func isApplePingHost(_ url: URL) -> Bool {
+        url.scheme?.lowercased() == "https" && url.host?.lowercased() == "mensura.cdn-apple.com"
+    }
+
+    private static func median(_ samples: [Double]) -> Double? {
+        guard !samples.isEmpty else { return nil }
+        let sorted = samples.sorted()
+        let middle = sorted.count / 2
+        if sorted.count.isMultiple(of: 2) {
+            return (sorted[middle - 1] + sorted[middle]) / 2
         }
-        return samples
+        return sorted[middle]
     }
 
     private enum TransferMode: Sendable {
@@ -272,5 +339,123 @@ enum SpeedTestService {
             case .uploadFailed: "The upload test did not complete. Try again in a moment."
             }
         }
+    }
+}
+
+/// Collects URLSession transaction timing for sequential, warmed HEAD probes.
+private final class RTTMetricsDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private struct Probe {
+        let continuation: CheckedContinuation<RTTMeasurement?, Never>
+        var measurement: RTTMeasurement?
+        var hasMetrics = false
+        var completedSuccessfully: Bool?
+    }
+
+    private struct Completion {
+        let continuation: CheckedContinuation<RTTMeasurement?, Never>
+        let measurement: RTTMeasurement?
+    }
+
+    private let lock = NSLock()
+    private var probes: [Int: Probe] = [:]
+
+    func measureRTT(to url: URL, in session: URLSession) async -> RTTMeasurement? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<RTTMeasurement?, Never>) in
+            var request = URLRequest(url: url)
+            request.httpMethod = "HEAD"
+            request.timeoutInterval = 5
+            request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+
+            let task = session.dataTask(with: request)
+            store(Probe(continuation: continuation), for: task.taskIdentifier)
+            task.resume()
+        }
+    }
+
+    private func store(_ probe: Probe, for taskIdentifier: Int) {
+        lock.lock()
+        probes[taskIdentifier] = probe
+        lock.unlock()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didFinishCollecting metrics: URLSessionTaskMetrics
+    ) {
+        let lastTransaction = metrics.transactionMetrics.last
+        let measurement: RTTMeasurement?
+        if let requestStart = lastTransaction?.requestStartDate,
+           let responseStart = lastTransaction?.responseStartDate,
+           responseStart >= requestStart {
+            measurement = RTTMeasurement(
+                milliseconds: responseStart.timeIntervalSince(requestStart) * 1_000,
+                usedPersistentConnection: lastTransaction?.isReusedConnection ?? false
+            )
+        } else {
+            measurement = nil
+        }
+
+        var completion: Completion?
+        lock.lock()
+        if var probe = probes[task.taskIdentifier] {
+            probe.measurement = measurement
+            probe.hasMetrics = true
+            if let succeeded = probe.completedSuccessfully {
+                probes.removeValue(forKey: task.taskIdentifier)
+                completion = Completion(
+                    continuation: probe.continuation,
+                    measurement: succeeded ? measurement : nil
+                )
+            } else {
+                probes[task.taskIdentifier] = probe
+            }
+        }
+        lock.unlock()
+
+        if let completion {
+            completion.continuation.resume(returning: completion.measurement)
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        let succeeded = error == nil && task.response is HTTPURLResponse
+        var completion: Completion?
+        lock.lock()
+        if var probe = probes[task.taskIdentifier] {
+            probe.completedSuccessfully = succeeded
+            if !succeeded {
+                probes.removeValue(forKey: task.taskIdentifier)
+                completion = Completion(continuation: probe.continuation, measurement: nil)
+            } else if probe.hasMetrics {
+                probes.removeValue(forKey: task.taskIdentifier)
+                completion = Completion(
+                    continuation: probe.continuation,
+                    measurement: probe.measurement
+                )
+            } else {
+                probes[task.taskIdentifier] = probe
+            }
+        }
+        lock.unlock()
+
+        if let completion {
+            completion.continuation.resume(returning: completion.measurement)
+        }
+    }
+
+    /// Use the server's first response directly instead of timing a redirected host.
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }
