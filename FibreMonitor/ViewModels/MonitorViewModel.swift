@@ -1,7 +1,16 @@
 import Foundation
+import Combine
 import Network
 import SwiftUI
 import UIKit
+
+public enum RouterConnectionState: Equatable, Sendable {
+    case offline
+    case connecting
+    case connected
+    case temporarilyLocked
+    case invalidCredentials
+}
 
 public enum AppTab: Hashable, Sendable {
     case home, usage, clients, wifi
@@ -29,6 +38,8 @@ public final class MonitorViewModel: ObservableObject {
     @Published public private(set) var isDiagnosing = false
     private var diagnosticTask: Task<Void, Never>?
     @Published public private(set) var isConnected = false
+    @Published public private(set) var isAuthenticated = false
+    @Published public private(set) var connectionState: RouterConnectionState = .offline
     @Published public private(set) var isRefreshing = false
     @Published public private(set) var isSpeedTestRunning = false
     @Published public private(set) var isLiveTrafficActive = false
@@ -50,6 +61,11 @@ public final class MonitorViewModel: ObservableObject {
     private var reachabilityFailureStartedAt: Date?
     private var refreshRequestedAfterCurrent = false
     private var routerRecoveryTask: Task<Void, Never>?
+    private var settingsChangeTask: Task<Void, Never>?
+    private var settingsReconnectTask: Task<Void, Never>?
+    private var settingsCancellables = Set<AnyCancellable>()
+    private var lastObservedRouterConfiguration: RouterConfigurationFingerprint
+    private var routerConfigurationGeneration = 0
     private var didAttemptAutomaticRouterRecovery = false
     private let reachabilityFailureThreshold = 3
     private var lastCoreSync: Date = .distantPast
@@ -61,11 +77,34 @@ public final class MonitorViewModel: ObservableObject {
     private var lastLanSync: Date = .distantPast
     private let lanSyncInterval: TimeInterval = 300
 
+    private struct RouterConfigurationFingerprint: Equatable {
+        let profileID: UUID?
+        let credentials: HuaweiOntClient.Credentials
+        let credentialsRevision: UInt64
+    }
+
     public init(settings: SettingsStore = .shared, transport: OntTransport = URLSessionOntTransport()) {
         self.settings = settings
         self.transport = transport
         self.client = RouterProviderFactory.make(profile: settings.activeProfile, credentials: settings.credentials, transport: transport)
         self.awaitingRouterSelection = settings.profiles.count >= 2
+        self.lastObservedRouterConfiguration = RouterConfigurationFingerprint(
+            profileID: settings.activeProfile?.id,
+            credentials: settings.credentials,
+            credentialsRevision: settings.routerCredentialsRevision
+        )
+        settings.$activeProfileId
+            .dropFirst()
+            .sink { [weak self] _ in self?.scheduleSettingsConfigurationCheck() }
+            .store(in: &settingsCancellables)
+        settings.$profiles
+            .dropFirst()
+            .sink { [weak self] _ in self?.scheduleSettingsConfigurationCheck() }
+            .store(in: &settingsCancellables)
+        settings.$routerCredentialsRevision
+            .dropFirst()
+            .sink { [weak self] _ in self?.scheduleSettingsConfigurationCheck() }
+            .store(in: &settingsCancellables)
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let onWifi = path.usesInterfaceType(.wifi)
             Task { @MainActor [weak self] in
@@ -94,6 +133,29 @@ public final class MonitorViewModel: ObservableObject {
 
     public func name(for device: OntDevice) -> String {
         settings.alias(for: device.mac) ?? device.displayName
+    }
+
+    private var currentRouterConfiguration: RouterConfigurationFingerprint {
+        RouterConfigurationFingerprint(
+            profileID: settings.activeProfile?.id,
+            credentials: settings.credentials,
+            credentialsRevision: settings.routerCredentialsRevision
+        )
+    }
+
+    private func scheduleSettingsConfigurationCheck() {
+        settingsChangeTask?.cancel()
+        settingsChangeTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, !Task.isCancelled else { return }
+            self.settingsChangeTask = nil
+            self.reconnectIfSettingsChanged()
+        }
+    }
+
+    /// Reconnects automatically when the active profile or its Keychain credentials change.
+    public func reconnectIfSettingsChanged() {
+        reconnectToSavedConfiguration(force: false)
     }
 
     // MARK: Event-driven Sync & Router Switching
@@ -176,15 +238,21 @@ public final class MonitorViewModel: ObservableObject {
               !isSpeedTestRunning,
               let profileId = settings.activeProfile?.id else { return }
 
+        let generation = routerConfigurationGeneration
         let provider = client
         let sampledAt = Date()
         do {
             let sample = try await provider.pollTraffic(now: sampledAt)
-            guard settings.activeProfile?.id == profileId else { return }
+            guard settings.activeProfile?.id == profileId,
+                  routerConfigurationGeneration == generation else { return }
             acceptTraffic(sample, sampledAt: sampledAt, profileId: profileId)
             isConnected = true
+            isAuthenticated = true
+            connectionState = .connected
         } catch {
-            guard !Self.isCancellationError(error), settings.activeProfile?.id == profileId else { return }
+            guard !Self.isCancellationError(error),
+                  settings.activeProfile?.id == profileId,
+                  routerConfigurationGeneration == generation else { return }
             if let failure = await provider.routerAuthFailure() {
                 handleRouterAuthFailure(failure)
             }
@@ -211,6 +279,8 @@ public final class MonitorViewModel: ObservableObject {
         cancelRouterRecovery()
         isLoggedOut = true
         isConnected = false
+        isAuthenticated = false
+        connectionState = .offline
         isRefreshing = false
         resetReachabilityFailures()
         await client.logout()
@@ -220,6 +290,7 @@ public final class MonitorViewModel: ObservableObject {
 
     public func reconnectSession() {
         isLoggedOut = false
+        connectionState = .connecting
         errorMessage = nil
         Task { await refreshAll() }
     }
@@ -228,53 +299,124 @@ public final class MonitorViewModel: ObservableObject {
     public func switchRouter(to profile: RouterProfile) async {
         diagnosticTask?.cancel()
         diagnosticTask = nil
+        routerConfigurationGeneration &+= 1
         cancelRouterRecovery()
         isRouterLoginPaused = false
         didAttemptAutomaticRouterRecovery = false
         clearViewState()
+        connectionState = .connecting
         isLoggedOut = false
         awaitingRouterSelection = false
 
         await client.logout()
         settings.selectProfile(profile.id)
+        lastObservedRouterConfiguration = currentRouterConfiguration
         client = RouterProviderFactory.make(profile: settings.activeProfile, credentials: settings.credentials, transport: transport)
         await client.switchCredentials(settings.credentials)
         await syncRouter()
     }
 
     public func selectRouterAndStart(_ profile: RouterProfile) {
+        if settings.activeProfile?.id == profile.id {
+            lastObservedRouterConfiguration = currentRouterConfiguration
+        }
         Task {
             await switchRouter(to: profile)
         }
     }
 
     public func settingsChanged() {
+        reconnectToSavedConfiguration(force: true)
+    }
+
+    /// Revalidates the router session whenever the Settings destination closes, even if the
+    /// user did not change a profile during that visit. This also clears any cached lockout.
+    public func settingsDidDismiss() {
+        if settingsReconnectTask != nil { return }
+        if connectionState == .connected,
+           let lastUpdate,
+           Date().timeIntervalSince(lastUpdate) < 3 {
+            return
+        }
+        reconnectToSavedConfiguration(force: true)
+    }
+
+    private func reconnectToSavedConfiguration(force: Bool) {
+        let configuration = currentRouterConfiguration
+        guard force || configuration != lastObservedRouterConfiguration else { return }
+        let profileChanged = configuration.profileID != lastObservedRouterConfiguration.profileID
+        lastObservedRouterConfiguration = configuration
+
         diagnosticTask?.cancel()
         diagnosticTask = nil
+        routerConfigurationGeneration &+= 1
         cancelRouterRecovery()
         isRouterLoginPaused = false
         didAttemptAutomaticRouterRecovery = false
-        clearViewState()
+        if profileChanged { clearViewState() }
         isLoggedOut = false
         awaitingRouterSelection = false
-        Task {
-            await client.logout()
-            client = RouterProviderFactory.make(profile: settings.activeProfile, credentials: settings.credentials, transport: transport)
-            await client.switchCredentials(settings.credentials)
-            if settings.isConfigured {
-                await syncRouter()
+
+        isConnected = false
+        isAuthenticated = false
+        isConnectionFailure = false
+        isForegroundSessionReady = false
+        isRefreshing = false
+        connectionState = settings.isConfigured ? .connecting : .offline
+        errorMessage = settings.isConfigured ? nil : OntError.notConfigured.errorDescription
+        lastCoreSync = .distantPast
+        lastTrafficSampleAt = .distantPast
+        lastPageSync = .distantPast
+        lastLanSync = .distantPast
+        resetReachabilityFailures()
+
+        guard settingsReconnectTask == nil else { return }
+        settingsReconnectTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                let generation = self.routerConfigurationGeneration
+                let oldClient = self.client
+                await oldClient.logout()
+                guard !Task.isCancelled else { break }
+                guard generation == self.routerConfigurationGeneration else { continue }
+
+                guard self.settings.isConfigured, self.settings.activeProfile != nil else {
+                    self.connectionState = .offline
+                    self.isConnected = false
+                    self.isAuthenticated = false
+                    self.errorMessage = OntError.notConfigured.errorDescription
+                    break
+                }
+
+                self.client = RouterProviderFactory.make(
+                    profile: self.settings.activeProfile,
+                    credentials: self.settings.credentials,
+                    transport: self.transport
+                )
+                self.lastObservedRouterConfiguration = self.currentRouterConfiguration
+                await self.syncRouter(allowDuringSettingsReconnect: true)
+                guard generation == self.routerConfigurationGeneration else { continue }
+                break
             }
+            self.settingsReconnectTask = nil
         }
     }
 
     public func useFallbackHost(_ fallbackHost: String = "192.168.100.1") async {
         guard var profile = settings.activeProfile else { return }
+        routerConfigurationGeneration &+= 1
         cancelRouterRecovery()
         isRouterLoginPaused = false
         didAttemptAutomaticRouterRecovery = false
         profile.host = fallbackHost
         settings.updateProfile(profile)
+        lastObservedRouterConfiguration = currentRouterConfiguration
         isLoggedOut = false
+        isConnected = false
+        isAuthenticated = false
+        connectionState = .connecting
+        isForegroundSessionReady = false
+        isRefreshing = false
         errorMessage = nil
         isConnectionFailure = false
         client = RouterProviderFactory.make(profile: settings.activeProfile, credentials: settings.credentials, transport: transport)
@@ -318,6 +460,8 @@ public final class MonitorViewModel: ObservableObject {
         diagnosticOutput = DiagnosticOutput()
         isDiagnosing = false
         isConnected = false
+        isAuthenticated = false
+        connectionState = .offline
         isForegroundSessionReady = false
         isRefreshing = false
         lastUpdate = nil
@@ -332,27 +476,44 @@ public final class MonitorViewModel: ObservableObject {
     }
 
     public func syncRouter() async {
-        guard !isRefreshing else { return }
+        await syncRouter(allowDuringSettingsReconnect: false)
+    }
+
+    private func syncRouter(allowDuringSettingsReconnect: Bool) async {
+        guard !isRefreshing,
+              allowDuringSettingsReconnect || settingsReconnectTask == nil else { return }
+        let syncGeneration = routerConfigurationGeneration
+        let provider = client
+        let profileID = settings.activeProfile?.id
         guard settings.activeProfile != nil else {
             isConnected = false
+            isAuthenticated = false
+            connectionState = .offline
             isConnectionFailure = false
             errorMessage = "Add a router in Settings to get started."
             return
         }
         guard settings.isConfigured else {
             isConnected = false
+            isAuthenticated = false
+            connectionState = .offline
             isConnectionFailure = false
             errorMessage = OntError.notConfigured.errorDescription
             return
         }
-        if let authFailure = await client.routerAuthFailure() {
+        if let authFailure = await provider.routerAuthFailure() {
+            guard syncGeneration == routerConfigurationGeneration else { return }
             handleRouterAuthFailure(authFailure)
             return
         }
+        guard syncGeneration == routerConfigurationGeneration else { return }
         isRefreshing = true
+        if !isConnected { connectionState = .connecting }
         defer {
-            isRefreshing = false
-            if refreshRequestedAfterCurrent {
+            if syncGeneration == routerConfigurationGeneration {
+                isRefreshing = false
+            }
+            if syncGeneration == routerConfigurationGeneration, refreshRequestedAfterCurrent {
                 refreshRequestedAfterCurrent = false
                 Task { await self.refreshAll() }
             }
@@ -360,36 +521,70 @@ public final class MonitorViewModel: ObservableObject {
         do {
             let requestStartedAt = ProcessInfo.processInfo.systemUptime
             let sampledAt = Date()
-            let trafficSample = try await client.pollTraffic(now: sampledAt)
-            acceptTraffic(trafficSample, sampledAt: sampledAt, profileId: settings.activeProfile?.id)
+            let trafficSample = try await provider.pollTraffic(now: sampledAt)
+            guard syncGeneration == routerConfigurationGeneration else { return }
+            acceptTraffic(trafficSample, sampledAt: sampledAt, profileId: profileID)
             routerResponseTimeMs = max(0, Int((ProcessInfo.processInfo.systemUptime - requestStartedAt) * 1_000))
-            if let activeId = settings.activeProfile?.id, let identity = await client.routerIdentity() {
+            // A valid WAN response proves the serialized coordinator established a session.
+            // Publish this now so every tab updates and the foreground feed starts while
+            // the less-frequent detail requests continue below.
+            isConnected = true
+            isAuthenticated = true
+            connectionState = .connected
+            isConnectionFailure = false
+            isRouterLoginPaused = false
+            isForegroundSessionReady = true
+            if let activeId = profileID, let identity = await provider.routerIdentity() {
+                guard syncGeneration == routerConfigurationGeneration else { return }
                 settings.recordDetection(for: activeId, model: identity.model, cfgMode: identity.cfgMode)
             }
             if Date().timeIntervalSince(lastCoreSync) >= coreSyncInterval {
                 lastCoreSync = Date()
-                if let w = try? await client.fetchWan() { wan = w }
-                if let o = try? await client.fetchOptical() { optical = o }
+                if let w = try? await provider.fetchWan() {
+                    guard syncGeneration == routerConfigurationGeneration else { return }
+                    wan = w
+                }
+                if let o = try? await provider.fetchOptical() {
+                    guard syncGeneration == routerConfigurationGeneration else { return }
+                    optical = o
+                }
                 if Date().timeIntervalSince(lastPageSync) >= pageSyncInterval {
                     lastPageSync = Date()
                     // Wi-Fi first: it tells the device list which SSID is on which band.
-                    if let w = try? await client.fetchWifi() { wifi = w }
-                    if let h = try? await client.fetchHealth() { health = h }
+                    if let w = try? await provider.fetchWifi() {
+                        guard syncGeneration == routerConfigurationGeneration else { return }
+                        wifi = w
+                    }
+                    if let h = try? await provider.fetchHealth() {
+                        guard syncGeneration == routerConfigurationGeneration else { return }
+                        health = h
+                    }
                 }
-                if let d = try? await client.fetchDevices() { devices = d }
-                if let blocked = try? await client.fetchWlanMacBlacklist() {
+                if let d = try? await provider.fetchDevices() {
+                    guard syncGeneration == routerConfigurationGeneration else { return }
+                    devices = d
+                }
+                if let blocked = try? await provider.fetchWlanMacBlacklist() {
+                    guard syncGeneration == routerConfigurationGeneration else { return }
                     blockedDevices = blocked.activeBlockedDevices
                 }
                 if Date().timeIntervalSince(lastLanSync) >= lanSyncInterval {
                     lastLanSync = Date()
-                    if let l = try? await client.fetchLan() { lan = l }
+                    if let l = try? await provider.fetchLan() {
+                        guard syncGeneration == routerConfigurationGeneration else { return }
+                        lan = l
+                    }
                 }
             }
-            if let authFailure = await client.routerAuthFailure() {
+            guard syncGeneration == routerConfigurationGeneration else { return }
+            if let authFailure = await provider.routerAuthFailure() {
+                guard syncGeneration == routerConfigurationGeneration else { return }
                 handleRouterAuthFailure(authFailure)
                 return
             }
             isConnected = true
+            isAuthenticated = true
+            connectionState = .connected
             isConnectionFailure = false
             isRouterLoginPaused = false
             isForegroundSessionReady = true
@@ -397,7 +592,7 @@ public final class MonitorViewModel: ObservableObject {
             cancelRouterRecovery()
             errorMessage = nil
             let syncDate = Date()
-            if let profileId = settings.activeProfile?.id {
+            if let profileId = profileID {
                 settings.recordSuccessfulSync(for: profileId, at: syncDate)
                 settings.recordConnectionObservation(isReachable: true, for: profileId, at: syncDate)
             }
@@ -412,12 +607,16 @@ public final class MonitorViewModel: ObservableObject {
                 at: syncDate
             )
         } catch {
+            guard syncGeneration == routerConfigurationGeneration else { return }
             if error is CancellationError || Self.isCancellationError(error) { return }
-            if let authFailure = await client.routerAuthFailure() {
+            if let authFailure = await provider.routerAuthFailure() {
+                guard syncGeneration == routerConfigurationGeneration else { return }
                 handleRouterAuthFailure(authFailure)
                 return
             }
             isConnected = false
+            isAuthenticated = false
+            connectionState = .offline
             isConnectionFailure = Self.isReachabilityError(error)
             errorMessage = Self.describe(error, host: settings.host)
             if isConnectionFailure, isPhoneOnWifi, let profileId = settings.activeProfile?.id {
@@ -447,6 +646,7 @@ public final class MonitorViewModel: ObservableObject {
 
     private func handleRouterAuthFailure(_ failure: RouterAuthFailure) {
         isConnected = false
+        isAuthenticated = false
         isConnectionFailure = false
         isForegroundSessionReady = false
         isRouterLoginPaused = true
@@ -454,9 +654,11 @@ public final class MonitorViewModel: ObservableObject {
 
         switch failure {
         case .invalidCredentials:
+            connectionState = .invalidCredentials
             cancelRouterRecovery()
             errorMessage = OntError.loginRejected.errorDescription
         case .temporarilyLocked(let retryAt):
+            connectionState = .temporarilyLocked
             if didAttemptAutomaticRouterRecovery {
                 errorMessage = "Router login is still temporarily locked. Save the router credentials in Settings to retry."
                 cancelRouterRecovery()

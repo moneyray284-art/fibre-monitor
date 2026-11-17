@@ -74,6 +74,9 @@ public struct DashboardView: View {
                 SettingsTabView(viewModel: viewModel)
                     .toolbar(.hidden, for: .tabBar)
             }
+            .onChange(of: showSettings) { isPresented in
+                if !isPresented { viewModel.settingsDidDismiss() }
+            }
         }
     }
 
@@ -199,15 +202,27 @@ private struct RouterHeaderCard: View {
 
     private var statusColor: Color {
         if viewModel.isLoggedOut { return .secondary }
-        return viewModel.isConnected ? .green : (viewModel.isRefreshing ? .orange : .red)
+        switch viewModel.connectionState {
+        case .connected: return .green
+        case .connecting, .temporarilyLocked: return .orange
+        case .invalidCredentials, .offline: return .red
+        }
     }
 
     private var statusText: String {
         if viewModel.isLoggedOut { return "LOGGED OUT" }
-        if viewModel.isConnected {
+        switch viewModel.connectionState {
+        case .connected:
             return viewModel.isLiveTrafficActive && !viewModel.isSpeedTestRunning ? "CONNECTED · Live" : "CONNECTED"
+        case .connecting:
+            return "CONNECTING"
+        case .temporarilyLocked:
+            return "LOGIN PAUSED"
+        case .invalidCredentials:
+            return "LOGIN REJECTED"
+        case .offline:
+            return "OFFLINE"
         }
-        return viewModel.isRefreshing ? "CONNECTING" : "OFFLINE"
     }
 
     private var wifiOnline: Bool {

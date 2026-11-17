@@ -44,7 +44,9 @@ public struct MainTabView: View {
         .sheet(isPresented: $viewModel.awaitingRouterSelection) {
             RouterLaunchPickerView(viewModel: viewModel)
         }
-        .sheet(isPresented: $showInitialSettings) {
+        .sheet(isPresented: $showInitialSettings, onDismiss: {
+            viewModel.settingsDidDismiss()
+        }) {
             NavigationStack {
                 SettingsTabView(viewModel: viewModel)
                     .toolbar {

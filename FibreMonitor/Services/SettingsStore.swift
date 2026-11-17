@@ -143,6 +143,8 @@ public final class SettingsStore: ObservableObject {
     private var usageByProfile: [String: ProfileUsage] = [:]
 
     @Published public private(set) var profiles: [RouterProfile] = []
+    /// Publishes in-app credential writes, including Keychain updates, to the shared router model.
+    @Published public private(set) var routerCredentialsRevision: UInt64 = 0
     @Published public var activeProfileId: UUID? {
         didSet {
             saveActiveProfileId()
@@ -295,6 +297,7 @@ public final class SettingsStore: ObservableObject {
 
     public func setPassword(_ password: String, for profileId: UUID) {
         passwordStore.setPassword(password, forAccount: profileId.uuidString)
+        if activeProfileId == profileId { routerCredentialsRevision &+= 1 }
         objectWillChange.send()
     }
 
@@ -309,7 +312,7 @@ public final class SettingsStore: ObservableObject {
         if select { item.lastUsed = Date() }
 
         profiles.append(item)
-        passwordStore.setPassword(password, forAccount: item.id.uuidString)
+        setPassword(password, for: item.id)
         if select || activeProfileId == nil {
             activeProfileId = item.id
         }
@@ -325,7 +328,9 @@ public final class SettingsStore: ObservableObject {
         updated.username = Self.cleanUsername(updated.username)
         profiles[index] = updated
         if let password {
-            passwordStore.setPassword(password, forAccount: updated.id.uuidString)
+            setPassword(password, for: updated.id)
+        } else if activeProfileId == updated.id {
+            routerCredentialsRevision &+= 1
         }
         saveProfiles()
     }
