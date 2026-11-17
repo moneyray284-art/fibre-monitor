@@ -307,6 +307,7 @@ final class Phase4WritesTests: XCTestCase {
         dropping.on("/index.asp", Fixtures.indexPage)
         dropping.on("/asp/GetRandCount.asp", Fixtures.token)
         dropping.on("/html/ssmp/common/GetRandToken.asp", Fixtures.token)
+        dropping.on("/html/amp/wlanbasic/WlanBasic.asp", Fixtures.gnmtnWlanBasic())
         dropping.on("/login.cgi", Fixtures.loginOk)
 
         let dropClient = HuaweiOntClient(
@@ -326,6 +327,7 @@ final class Phase4WritesTests: XCTestCase {
         succeeding.on("/index.asp", Fixtures.indexPage)
         succeeding.on("/asp/GetRandCount.asp", Fixtures.token)
         succeeding.on("/html/ssmp/common/GetRandToken.asp", Fixtures.token)
+        succeeding.on("/html/amp/wlanbasic/WlanBasic.asp", Fixtures.gnmtnWlanBasic())
         succeeding.on("/login.cgi", Fixtures.loginOk)
         succeeding.on("/html/amp/wlanbasic/set.cgi", "")
         succeeding.on("/html/amp/common/wlan_list.asp", Fixtures.gnmtnWlanList())
@@ -352,6 +354,7 @@ final class Phase4WritesTests: XCTestCase {
         transport.on("/index.asp", Fixtures.indexPage)
         transport.on("/asp/GetRandCount.asp", Fixtures.token)
         transport.on("/html/ssmp/common/GetRandToken.asp", Fixtures.token)
+        transport.on("/html/amp/wlanbasic/WlanBasic.asp", Fixtures.gnmtnWlanBasic())
         transport.on("/login.cgi", Fixtures.loginOk)
         transport.on("/html/bbsp/userdevinfo/set.cgi", "")
         transport.on("/html/amp/common/wlan_list.asp", Fixtures.gnmtnWlanList())

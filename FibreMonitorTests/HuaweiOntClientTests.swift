@@ -253,6 +253,7 @@ final class RouterPagesTests: XCTestCase {
     func testRadioToggleSendsWebFormAndConfirms() async throws {
         let t = router()
         t.on("/html/amp/common/wlan_list.asp", Fixtures.wlanList(radio1: true, radio2: true), Fixtures.wlanList(radio1: true, radio2: false))
+        t.on("/html/amp/wlanbasic/WlanBasic.asp", Fixtures.gnmtnWlanBasic())
         t.on("/html/amp/wlanbasic/set.cgi", "")
         let client = HuaweiOntClient(credentials: creds, transport: t)
         let after = try await client.setRadio(2, enabled: false)
