@@ -1,7 +1,6 @@
 import Foundation
-import WidgetKit
 
-public struct LinkWaveWidgetSnapshot: Codable, Sendable {
+public struct RouterSnapshot: Codable, Sendable {
     public var routerProfileID: String?
     public var routerHost: String?
     public var routerModel: String?
@@ -13,21 +12,19 @@ public struct LinkWaveWidgetSnapshot: Codable, Sendable {
     public var offlineClientCount: Int?
     public var pppoeUptimeSeconds: Int?
     public var updatedAt: Date
-    public var routerReachableAt: Date?
 
     public init(
-        rxPowerDbm: Double? = nil,
-        routerHost: String? = nil,
         routerProfileID: String? = nil,
+        routerHost: String? = nil,
         routerModel: String? = nil,
+        rxPowerDbm: Double? = nil,
         todayDownloadBytes: UInt64 = 0,
         todayUploadBytes: UInt64 = 0,
         todayTotalBytes: UInt64 = 0,
         onlineClientCount: Int = 0,
         offlineClientCount: Int? = nil,
         pppoeUptimeSeconds: Int? = nil,
-        updatedAt: Date = Date(),
-        routerReachableAt: Date? = nil
+        updatedAt: Date = Date()
     ) {
         self.routerProfileID = routerProfileID
         self.routerHost = routerHost
@@ -40,15 +37,17 @@ public struct LinkWaveWidgetSnapshot: Codable, Sendable {
         self.offlineClientCount = offlineClientCount
         self.pppoeUptimeSeconds = pppoeUptimeSeconds
         self.updatedAt = updatedAt
-        self.routerReachableAt = routerReachableAt
     }
 }
 
+/// Keeps the last router readings available to LinkWave itself between launches.
 @MainActor
-public enum WidgetSnapshotStore {
+public enum RouterSnapshotCache {
     public static let appGroupID = "group.dev.mattdev0.fibremonitor"
-    private static let snapshotKey = "linkwave.widget.snapshot.v1"
-    private static let snapshotFileName = "LinkWaveWidgetSnapshot.json"
+
+    private static let snapshotKey = "linkwave.router.snapshot.v1"
+    private static let legacyWidgetSnapshotKey = "linkwave.widget.snapshot.v1"
+    private static let legacySnapshotFileName = "LinkWaveWidgetSnapshot.json"
 
     public static func save(
         rxPowerDbm: Double?,
@@ -70,11 +69,11 @@ public enum WidgetSnapshotStore {
             previousMatchesProfile = previous?.routerHost?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 == routerHost?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         }
-        let snapshot = LinkWaveWidgetSnapshot(
-            rxPowerDbm: rxPowerDbm,
-            routerHost: routerHost,
+        persist(RouterSnapshot(
             routerProfileID: routerProfileID,
+            routerHost: routerHost,
             routerModel: routerModel ?? (previousMatchesProfile ? previous?.routerModel : nil),
+            rxPowerDbm: rxPowerDbm,
             todayDownloadBytes: summary.todayDownloadBytes,
             todayUploadBytes: summary.todayUploadBytes,
             todayTotalBytes: total.overflow ? UInt64.max : total.partialValue,
@@ -82,44 +81,59 @@ public enum WidgetSnapshotStore {
             offlineClientCount: offlineClientCount ?? (previousMatchesProfile ? previous?.offlineClientCount : nil),
             pppoeUptimeSeconds: pppoeUptimeSeconds,
             updatedAt: date
-        )
+        ))
+    }
+
+    /// Background refresh has fresh usage counters only, so retain other cached router details.
+    public static func updateUsage(summary: DataUsageSummary, at date: Date) {
+        var snapshot = read() ?? RouterSnapshot(updatedAt: .distantPast)
+        let total = summary.todayDownloadBytes.addingReportingOverflow(summary.todayUploadBytes)
+        snapshot.todayDownloadBytes = summary.todayDownloadBytes
+        snapshot.todayUploadBytes = summary.todayUploadBytes
+        snapshot.todayTotalBytes = total.overflow ? UInt64.max : total.partialValue
+        snapshot.updatedAt = date
         persist(snapshot)
     }
 
-    /// Background refresh only has fresh usage counters, so preserve router details from the last foreground sync.
-    public static func updateUsage(summary: DataUsageSummary, at date: Date) {
-        let previous = read() ?? LinkWaveWidgetSnapshot()
-        let total = summary.todayDownloadBytes.addingReportingOverflow(summary.todayUploadBytes)
-        var updated = previous
-        updated.todayDownloadBytes = summary.todayDownloadBytes
-        updated.todayUploadBytes = summary.todayUploadBytes
-        updated.todayTotalBytes = total.overflow ? UInt64.max : total.partialValue
-        updated.updatedAt = date
-        persist(updated)
-    }
+    public static func load() -> RouterSnapshot? { read() }
 
-    public static func load() -> LinkWaveWidgetSnapshot? { read() }
-
-    private static func read() -> LinkWaveWidgetSnapshot? {
-        let defaultsData = UserDefaults(suiteName: appGroupID)?.data(forKey: snapshotKey)
-        let fileData = snapshotURL.flatMap { try? Data(contentsOf: $0) }
-        guard let data = defaultsData ?? fileData else { return nil }
-        return try? JSONDecoder().decode(LinkWaveWidgetSnapshot.self, from: data)
-    }
-
-    private static func persist(_ snapshot: LinkWaveWidgetSnapshot) {
-        if let data = try? JSONEncoder().encode(snapshot) {
-            UserDefaults(suiteName: appGroupID)?.set(data, forKey: snapshotKey)
-            if let url = snapshotURL {
-                try? data.write(to: url, options: .atomic)
-            }
+    private static func read() -> RouterSnapshot? {
+        let shared = UserDefaults(suiteName: appGroupID)
+        for store in [shared, UserDefaults.standard] {
+            guard let data = store?.data(forKey: snapshotKey),
+                  let snapshot = try? JSONDecoder().decode(RouterSnapshot.self, from: data) else { continue }
+            return snapshot
         }
-        WidgetCenter.shared.reloadAllTimelines()
+        if let data = shared?.data(forKey: legacyWidgetSnapshotKey),
+           let snapshot = try? JSONDecoder().decode(RouterSnapshot.self, from: data) {
+            persist(snapshot)
+            return snapshot
+        }
+        if let data = snapshotFileURL.flatMap({ try? Data(contentsOf: $0) }),
+           let snapshot = try? JSONDecoder().decode(RouterSnapshot.self, from: data) {
+            persist(snapshot)
+            return snapshot
+        }
+        if let data = UserDefaults.standard.data(forKey: snapshotKey),
+           let snapshot = try? JSONDecoder().decode(RouterSnapshot.self, from: data) {
+            persist(snapshot)
+            return snapshot
+        }
+        return nil
     }
 
-    private static var snapshotURL: URL? {
+    private static func persist(_ snapshot: RouterSnapshot) {
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        UserDefaults.standard.set(data, forKey: snapshotKey)
+        UserDefaults(suiteName: appGroupID)?.set(data, forKey: snapshotKey)
+        if let snapshotFileURL {
+            try? data.write(to: snapshotFileURL, options: .atomic)
+        }
+    }
+
+    private static var snapshotFileURL: URL? {
         FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
-            .appendingPathComponent(snapshotFileName, isDirectory: false)
+            .appendingPathComponent(legacySnapshotFileName, isDirectory: false)
     }
 }

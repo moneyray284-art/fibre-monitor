@@ -140,7 +140,6 @@ public final class SettingsStore: ObservableObject {
     private let defaults: UserDefaults
     private let sharedDefaults: UserDefaults
     private let passwordStore: PasswordStore
-    private let personalUsageTracker: PersonalUsageTracker
     private var usageByProfile: [String: ProfileUsage] = [:]
 
     @Published public private(set) var profiles: [RouterProfile] = []
@@ -150,7 +149,6 @@ public final class SettingsStore: ObservableObject {
         didSet {
             saveActiveProfileId()
             refreshDataUsageSummary()
-            refreshPersonalUsageSnapshot()
         }
     }
     @Published public var theme: AppTheme {
@@ -176,7 +174,6 @@ public final class SettingsStore: ObservableObject {
         }
     }
     @Published public private(set) var dataUsageSummary = DataUsageSummary()
-    @Published public private(set) var personalUsageSnapshot = PersonalUsageSnapshot.empty
     @Published public private(set) var profileAliases: [String: [String: String]] = [:]
 
     private struct ProfileUsage: Codable {
@@ -217,19 +214,17 @@ public final class SettingsStore: ObservableObject {
     public init(
         defaults: UserDefaults = .standard,
         passwordStore: PasswordStore = SystemKeychainStore(),
-        sharedDefaults: UserDefaults? = nil,
-        personalUsageDefaults: UserDefaults? = nil
+        sharedDefaults: UserDefaults? = nil
     ) {
         self.defaults = defaults
         if let sharedDefaults {
             self.sharedDefaults = sharedDefaults
         } else if defaults === UserDefaults.standard {
-            self.sharedDefaults = UserDefaults(suiteName: WidgetSnapshotStore.appGroupID) ?? defaults
+            self.sharedDefaults = UserDefaults(suiteName: RouterSnapshotCache.appGroupID) ?? defaults
         } else {
             self.sharedDefaults = defaults
         }
         self.passwordStore = passwordStore
-        self.personalUsageTracker = PersonalUsageTracker(defaults: personalUsageDefaults ?? defaults)
 
         self.theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .system
         let accentColor = AppAccentColor(rawValue: defaults.string(forKey: Keys.accentColor) ?? "") ?? .blue
@@ -261,7 +256,6 @@ public final class SettingsStore: ObservableObject {
             migrateFromV1()
         }
         refreshDataUsageSummary()
-        refreshPersonalUsageSnapshot()
     }
 
     public var activeProfile: RouterProfile? {
@@ -344,7 +338,6 @@ public final class SettingsStore: ObservableObject {
     public func deleteProfile(_ id: UUID) {
         profiles.removeAll { $0.id == id }
         passwordStore.deletePassword(forAccount: id.uuidString)
-        personalUsageTracker.deleteProfile(id)
         usageByProfile.removeValue(forKey: id.uuidString)
         saveUsage()
         profileAliases.removeValue(forKey: id.uuidString)
@@ -566,39 +559,9 @@ public final class SettingsStore: ObservableObject {
         refreshDataUsageSummary()
     }
 
-    /// Samples the device's Wi-Fi interface counters against the active router profile.
-    public func samplePersonalUsage(
-        isConnectedToWiFi: Bool,
-        isLinkedToProfile: Bool,
-        at date: Date = Date()
-    ) {
-        personalUsageSnapshot = personalUsageTracker.sample(
-            profileID: activeProfile?.id,
-            isConnectedToWiFi: isConnectedToWiFi,
-            isLinkedToProfile: isLinkedToProfile,
-            at: date
-        )
-    }
-
-    /// Drops the raw counter baseline when LinkWave can no longer verify this router session.
-    public func pausePersonalUsageTracking(for profileID: UUID? = nil) {
-        personalUsageTracker.pause(profileID: profileID ?? activeProfile?.id)
-        if profileID == nil || profileID == activeProfile?.id {
-            refreshPersonalUsageSnapshot()
-        }
-    }
-
-    public func refreshPersonalUsageForCurrentLocalPeriod(at date: Date = Date()) {
-        personalUsageSnapshot = personalUsageTracker.snapshot(for: activeProfile?.id, at: date)
-    }
-
-    private func refreshPersonalUsageSnapshot() {
-        personalUsageSnapshot = personalUsageTracker.snapshot(for: activeProfile?.id)
-    }
-
-    /// Restores the latest shared-widget daily counters when the profile's local usage store
+    /// Restores the latest cached router counters when the profile's local usage store
     /// has not yet been hydrated, without lowering any more recent locally stored totals.
-    public func restoreTodayUsageFromSharedSnapshot(
+    public func restoreTodayUsageFromRouterSnapshot(
         downloadBytes: UInt64,
         uploadBytes: UInt64,
         for profileId: UUID

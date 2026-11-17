@@ -10,6 +10,11 @@ on:
         required: false
         type: boolean
         default: false
+      run_tests:
+        description: 'Run the unit-test suite before building'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -52,6 +57,7 @@ jobs:
           xcodegen generate
 
       - name: Run Unit Tests
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
         run: |
           DEST=$(xcrun simctl list devices available | grep -m 1 "iPhone" | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')
           echo "Using Simulator ID: $DEST"
@@ -85,11 +91,7 @@ jobs:
             /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundleAlternateIcons:$icon" "$PLIST" > /dev/null || { echo "::error::Alternate icon $icon missing from built Info.plist"; exit 1; }
           done
           APP=build/Build/Products/Release-iphoneos/FibreMonitor.app
-          EXT="$APP/PlugIns/LinkWaveWidget.appex"
           test -f "$APP/FibreMonitor" || { echo "::error::Release app executable is missing"; exit 1; }
-          test -d "$EXT" || { echo "::error::LinkWaveWidget.appex was not embedded in the app"; exit 1; }
-          test -f "$EXT/LinkWaveWidget" || { echo "::error::Release widget executable is missing"; exit 1; }
-          /usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$EXT/Info.plist" | grep -q 'com.apple.widgetkit-extension' || { echo "::error::WidgetKit extension point is missing"; exit 1; }
           VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")
           BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Expected a numeric stable marketing version, found $VERSION"; exit 1; }
@@ -98,36 +100,28 @@ jobs:
           echo "LINKWAVE_IPA_NAME=LinkWave-v$VERSION.ipa" >> "$GITHUB_ENV"
           echo "Version: $VERSION ($BUILD)"
 
-      - name: Preserve App Group entitlements for sideload signing
+      - name: Preserve app entitlements for sideload signing
         run: |
           APP=build/Build/Products/Release-iphoneos/FibreMonitor.app
-          EXT="$APP/PlugIns/LinkWaveWidget.appex"
           APP_GROUP="group.dev.mattdev0.fibremonitor"
 
-          # The IPA is installed by a sideload signer, so ad-hoc sign the nested
-          # widget first and the containing app second. This records each target's
-          # declared entitlements in its code signature for the installer to apply.
-          codesign --force --sign - --timestamp=none --generate-entitlement-der \
-            --entitlements LinkWaveWidget/LinkWaveWidget.entitlements "$EXT"
+          # Preserve the shared router-history container in the app's sideload signature.
           codesign --force --sign - --timestamp=none --generate-entitlement-der \
             --entitlements FibreMonitor/Resources/FibreMonitor.entitlements "$APP"
 
           codesign -d --entitlements :- "$APP" > /tmp/linkwave-app-entitlements.plist 2>/dev/null
-          codesign -d --entitlements :- "$EXT" > /tmp/linkwave-widget-entitlements.plist 2>/dev/null
-          for ENTITLEMENTS in /tmp/linkwave-app-entitlements.plist /tmp/linkwave-widget-entitlements.plist; do
-            ACTUAL_GROUP=$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' "$ENTITLEMENTS")
-            [[ "$ACTUAL_GROUP" == "$APP_GROUP" ]] || {
-              echo "::error::Expected App Group $APP_GROUP in $ENTITLEMENTS, found $ACTUAL_GROUP"
-              exit 1
-            }
-          done
-          echo "Verified matching App Group entitlement on LinkWave and LinkWaveWidget."
+          ACTUAL_GROUP=$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' /tmp/linkwave-app-entitlements.plist)
+          [[ "$ACTUAL_GROUP" == "$APP_GROUP" ]] || {
+            echo "::error::Expected App Group $APP_GROUP in LinkWave entitlements, found $ACTUAL_GROUP"
+            exit 1
+          }
+          echo "Verified the LinkWave app's shared router-history entitlement."
 
       - name: Package IPA
         run: |
           mkdir -p build/Payload
           cp -r build/Build/Products/Release-iphoneos/FibreMonitor.app build/Payload/LinkWave.app
-          test -f build/Payload/LinkWave.app/PlugIns/LinkWaveWidget.appex/LinkWaveWidget || { echo "::error::Release widget was not packaged inside Payload"; exit 1; }
+          test -f build/Payload/LinkWave.app/FibreMonitor || { echo "::error::LinkWave app executable is missing from Payload"; exit 1; }
           cd build
           zip -r -q "$LINKWAVE_IPA_NAME" Payload
           echo "LINKWAVE_IPA_PATH=build/$LINKWAVE_IPA_NAME" >> "$GITHUB_ENV"

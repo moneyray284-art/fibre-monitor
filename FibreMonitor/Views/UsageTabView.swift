@@ -17,11 +17,6 @@ public struct UsageTabView: View {
                     if settings.isConfigured {
                         SyncStatusCard(summary: settings.dataUsageSummary)
                         UsageTotalsCard(summary: settings.dataUsageSummary)
-                        PersonalUsageCard(
-                            snapshot: settings.personalUsageSnapshot,
-                            householdSummary: settings.dataUsageSummary,
-                            routerName: settings.activeProfile?.name ?? "your router"
-                        )
                         DailyUsageHistoryCard(
                             history: settings.dataUsageSummary.historicalDailyHistory,
                             todayDownloadBytes: settings.dataUsageSummary.todayDownloadBytes,
@@ -40,7 +35,6 @@ public struct UsageTabView: View {
             .liquidGlassScrollEdges()
             .alwaysScrollBounce()
             .refreshable { await viewModel.refreshAll(forceReauthIfNeeded: true) }
-            .onAppear { settings.refreshPersonalUsageForCurrentLocalPeriod() }
             .navigationTitle("Usage")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -186,124 +180,6 @@ private struct UsageTotalsCard: View {
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .linkWaveGlassCard()
-        .accessibilityElement(children: .combine)
-    }
-
-    private func usageRow(_ title: String, download: UInt64, upload: UInt64) -> some View {
-        HStack {
-            Text(title)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(Self.format(download))
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            Text(Self.format(upload))
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .font(.subheadline.monospacedDigit())
-    }
-
-    private static func total(_ download: UInt64, _ upload: UInt64) -> UInt64 {
-        let (total, overflow) = download.addingReportingOverflow(upload)
-        return overflow ? UInt64.max : total
-    }
-
-    private static func format(_ bytes: UInt64) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
-    }
-}
-
-private struct PersonalUsageCard: View {
-    let snapshot: PersonalUsageSnapshot
-    let householdSummary: DataUsageSummary
-    let routerName: String
-
-    private var householdMonthlyBytes: UInt64 {
-        Self.total(householdSummary.monthDownloadBytes, householdSummary.monthUploadBytes)
-    }
-
-    private var personalMonthlyBytes: UInt64 {
-        Self.total(snapshot.monthDownloadBytes, snapshot.monthUploadBytes)
-    }
-
-    private var householdShare: Double {
-        guard householdMonthlyBytes > 0 else { return 0 }
-        return min(1, Double(personalMonthlyBytes) / Double(householdMonthlyBytes))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            HStack(spacing: 8) {
-                Image(systemName: "iphone")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.purple)
-                Text("Personal Usage (This iPhone)")
-                    .font(.headline)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Spacer(minLength: 4)
-                Text("LOCAL TRACKING")
-                    .font(.system(size: 9, weight: .bold))
-                    .tracking(0.35)
-                    .foregroundStyle(.purple)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.purple.opacity(0.12), in: Capsule())
-            }
-
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(Self.format(personalMonthlyBytes))
-                    .font(.system(.title, design: .rounded).weight(.bold))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                Text("this month")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-            }
-
-            if householdMonthlyBytes > 0 {
-                VStack(alignment: .leading, spacing: 6) {
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            Capsule(style: .continuous)
-                                .fill(Color.purple.opacity(0.14))
-                            Capsule(style: .continuous)
-                                .fill(Color.purple.gradient)
-                                .frame(width: geometry.size.width * householdShare)
-                        }
-                    }
-                    .frame(height: 8)
-                    Text("\(householdShare * 100, specifier: "%.1f")% of \(Self.format(householdMonthlyBytes)) household total")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-                .accessibilityElement(children: .combine)
-            }
-
-            HStack {
-                Text("Period")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Download")
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                Text("Upload")
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .font(.caption2.weight(.medium))
-            .foregroundStyle(.secondary)
-
-            usageRow("Today", download: snapshot.todayDownloadBytes, upload: snapshot.todayUploadBytes)
-            Divider().opacity(0.55)
-            usageRow("This month", download: snapshot.monthDownloadBytes, upload: snapshot.monthUploadBytes)
-            Divider().opacity(0.55)
-            usageRow("Since tracking", download: snapshot.totalDownloadBytes, upload: snapshot.totalUploadBytes)
-
-            Text("Estimated by monitoring this iPhone's Wi-Fi network traffic while connected to \(routerName)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .linkWaveGlassCard()
         .accessibilityElement(children: .combine)
     }

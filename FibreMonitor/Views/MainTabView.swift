@@ -5,6 +5,9 @@ public struct MainTabView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var showInitialSettings = false
+    @State private var isLaunchAnimationVisible = true
+    @State private var launchAnimationFinished = false
+    @State private var presentInitialSettingsAfterLaunch = false
     @State private var foregroundPreparationTask: Task<Void, Never>?
     @State private var foregroundPreparationID: UUID?
     @State private var liveTrafficTask: Task<Void, Never>?
@@ -15,33 +18,41 @@ public struct MainTabView: View {
     public init() {}
 
     public var body: some View {
-        TabView(selection: $viewModel.selectedTab) {
-            DashboardView(viewModel: viewModel)
-                .tabItem {
-                    Label("Home", systemImage: "house")
-                }
-                .tag(AppTab.home)
+        ZStack {
+            TabView(selection: $viewModel.selectedTab) {
+                DashboardView(viewModel: viewModel)
+                    .tabItem {
+                        Label("Home", systemImage: "house")
+                    }
+                    .tag(AppTab.home)
 
-            UsageTabView(viewModel: viewModel)
-                .tabItem {
-                    Label("Usage", systemImage: "arrow.up.arrow.down.circle")
-                }
-                .tag(AppTab.usage)
+                UsageTabView(viewModel: viewModel)
+                    .tabItem {
+                        Label("Usage", systemImage: "arrow.up.arrow.down.circle")
+                    }
+                    .tag(AppTab.usage)
 
-            ClientsTabView(viewModel: viewModel)
-                .tabItem {
-                    Label("Clients", systemImage: "laptopcomputer.and.iphone")
-                }
-                .tag(AppTab.clients)
+                ClientsTabView(viewModel: viewModel)
+                    .tabItem {
+                        Label("Clients", systemImage: "laptopcomputer.and.iphone")
+                    }
+                    .tag(AppTab.clients)
 
-            WifiTabView(viewModel: viewModel)
-                .tabItem {
-                    Label("Wi-Fi", systemImage: "wifi")
-                }
-                .tag(AppTab.wifi)
+                WifiTabView(viewModel: viewModel)
+                    .tabItem {
+                        Label("Wi-Fi", systemImage: "wifi")
+                    }
+                    .tag(AppTab.wifi)
+            }
 
+            if isLaunchAnimationVisible {
+                LinkWaveLaunchAnimation(onFinished: finishLaunchAnimation)
+                    .transition(.opacity)
+                    .zIndex(10)
+            }
         }
-        .sheet(isPresented: $viewModel.awaitingRouterSelection) {
+        .statusBarHidden(isLaunchAnimationVisible)
+        .sheet(isPresented: routerPickerBinding) {
             RouterLaunchPickerView(viewModel: viewModel)
         }
         .sheet(isPresented: $showInitialSettings, onDismiss: {
@@ -69,10 +80,10 @@ public struct MainTabView: View {
         .tint(settings.accentColor.color)
         .onAppear {
             AppIconManager.apply(settings.appIconChoice)
-            if !viewModel.awaitingRouterSelection {
-                if !viewModel.settings.isConfigured {
-                    showInitialSettings = true
-                }
+            presentInitialSettingsAfterLaunch =
+                !viewModel.awaitingRouterSelection && !viewModel.settings.isConfigured
+            if launchAnimationFinished && presentInitialSettingsAfterLaunch {
+                showInitialSettings = true
             }
         }
         .task {
@@ -104,6 +115,28 @@ public struct MainTabView: View {
         }
         .onChange(of: settings.appIconChoice) { choice in
             AppIconManager.apply(choice)
+        }
+    }
+
+    private var routerPickerBinding: Binding<Bool> {
+        Binding(
+            get: { launchAnimationFinished && viewModel.awaitingRouterSelection },
+            set: { isPresented in
+                if !isPresented { viewModel.awaitingRouterSelection = false }
+            }
+        )
+    }
+
+    private func finishLaunchAnimation() {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            isLaunchAnimationVisible = false
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            launchAnimationFinished = true
+            if presentInitialSettingsAfterLaunch {
+                showInitialSettings = true
+            }
         }
     }
 

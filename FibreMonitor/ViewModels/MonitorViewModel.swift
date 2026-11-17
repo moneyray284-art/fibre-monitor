@@ -139,7 +139,6 @@ public final class MonitorViewModel: ObservableObject {
         self.connectionState = settings.isConfigured ? .connecting : .offline
         hydrateCachedRouterData()
         settings.refreshUsageSummaryForCurrentLocalDay()
-        settings.pausePersonalUsageTracking()
         settings.$activeProfileId
             .dropFirst()
             .sink { [weak self] _ in self?.scheduleSettingsConfigurationCheck() }
@@ -172,7 +171,6 @@ public final class MonitorViewModel: ObservableObject {
 
         guard wasConnectedToWiFi != state.isConnectedToWiFi else { return }
         if !state.isConnectedToWiFi {
-            settings.pausePersonalUsageTracking()
             networkReconnectTask?.cancel()
             networkReconnectTask = nil
             isWiFiRecoveryPending = false
@@ -251,14 +249,14 @@ public final class MonitorViewModel: ObservableObject {
         cachedOfflineDeviceCount = 0
         hasLoadedDeviceList = false
 
-        guard let snapshot = WidgetSnapshotStore.load(), Self.snapshot(snapshot, matches: settings) else { return }
+        guard let snapshot = RouterSnapshotCache.load(), Self.snapshot(snapshot, matches: settings) else { return }
         optical.rxPowerDbm = snapshot.rxPowerDbm
         health.model = snapshot.routerModel ?? cachedHealth.model
         cachedOnlineDeviceCount = snapshot.onlineClientCount
         cachedOfflineDeviceCount = snapshot.offlineClientCount ?? 0
         if Calendar.current.isDate(snapshot.updatedAt, inSameDayAs: Date()),
            let profileID = settings.activeProfile?.id {
-            settings.restoreTodayUsageFromSharedSnapshot(
+            settings.restoreTodayUsageFromRouterSnapshot(
                 downloadBytes: snapshot.todayDownloadBytes,
                 uploadBytes: snapshot.todayUploadBytes,
                 for: profileID
@@ -266,7 +264,7 @@ public final class MonitorViewModel: ObservableObject {
         }
     }
 
-    private static func snapshot(_ snapshot: LinkWaveWidgetSnapshot, matches settings: SettingsStore) -> Bool {
+    private static func snapshot(_ snapshot: RouterSnapshot, matches settings: SettingsStore) -> Bool {
         guard let profile = settings.activeProfile else { return false }
         if let cachedProfileID = snapshot.routerProfileID {
             return cachedProfileID == profile.id.uuidString
@@ -341,11 +339,6 @@ public final class MonitorViewModel: ObservableObject {
 
     /// Pauses foreground polling and its lockout timer as soon as the app backgrounds.
     public func pauseForegroundSession() {
-        settings.samplePersonalUsage(
-            isConnectedToWiFi: networkMonitor.isConnectedToWiFi,
-            isLinkedToProfile: isConnected && isAuthenticated
-        )
-        settings.pausePersonalUsageTracking()
         isForegroundSessionReady = false
         cancelRouterRecovery()
     }
@@ -353,9 +346,8 @@ public final class MonitorViewModel: ObservableObject {
     /// Closes the router session when the app backgrounds so its web UI stays usable for others.
     public func endForegroundSession() async {
         isForegroundSessionReady = false
-        settings.pausePersonalUsageTracking()
         cancelRouterRecovery()
-        WidgetSnapshotStore.updateUsage(summary: settings.dataUsageSummary, at: Date())
+        RouterSnapshotCache.updateUsage(summary: settings.dataUsageSummary, at: Date())
         resetReachabilityFailures()
         await client.logout()
     }
@@ -420,7 +412,6 @@ public final class MonitorViewModel: ObservableObject {
                   settings.activeProfile?.id == profileId,
                   routerConfigurationGeneration == generation else { return }
             guard routerRequestsAllowed else { return }
-            settings.pausePersonalUsageTracking(for: profileId)
             if let failure = await provider.routerAuthFailure() {
                 handleRouterAuthFailure(failure)
             }
@@ -437,21 +428,11 @@ public final class MonitorViewModel: ObservableObject {
                let uploaded = sample.cumulativeUploadBytes {
                 settings.recordTrafficCounters(download: downloaded, upload: uploaded, for: profileId)
             }
-            settings.samplePersonalUsage(
-                isConnectedToWiFi: networkMonitor.isConnectedToWiFi,
-                isLinkedToProfile: settings.activeProfile?.id == profileId,
-                at: sampledAt
-            )
         }
     }
 
     /// Explicit user-triggered logout from Settings. Pauses automatic sync until Reconnect is tapped.
     public func logoutSession() async {
-        settings.samplePersonalUsage(
-            isConnectedToWiFi: networkMonitor.isConnectedToWiFi,
-            isLinkedToProfile: isConnected && isAuthenticated
-        )
-        settings.pausePersonalUsageTracking()
         diagnosticTask?.cancel()
         diagnosticTask = nil
         isForegroundSessionReady = false
@@ -476,11 +457,6 @@ public final class MonitorViewModel: ObservableObject {
 
     /// Switches to a different router profile: logs out of the old session, resets cookies & view state, and syncs the new one.
     public func switchRouter(to profile: RouterProfile) async {
-        settings.samplePersonalUsage(
-            isConnectedToWiFi: networkMonitor.isConnectedToWiFi,
-            isLinkedToProfile: isConnected && isAuthenticated
-        )
-        settings.pausePersonalUsageTracking()
         diagnosticTask?.cancel()
         diagnosticTask = nil
         routerConfigurationReadyForSync = false
@@ -532,15 +508,6 @@ public final class MonitorViewModel: ObservableObject {
         let configuration = currentRouterConfiguration
         guard force || configuration != lastObservedRouterConfiguration else { return }
         let profileChanged = configuration.profileID != lastObservedRouterConfiguration.profileID
-        if profileChanged {
-            settings.pausePersonalUsageTracking(for: lastObservedRouterConfiguration.profileID)
-        } else {
-            settings.samplePersonalUsage(
-                isConnectedToWiFi: networkMonitor.isConnectedToWiFi,
-                isLinkedToProfile: isConnected && isAuthenticated
-            )
-            settings.pausePersonalUsageTracking()
-        }
         lastObservedRouterConfiguration = configuration
 
         diagnosticTask?.cancel()
@@ -938,7 +905,7 @@ public final class MonitorViewModel: ObservableObject {
             }
             resetReachabilityFailures()
             lastUpdate = syncDate
-            WidgetSnapshotStore.save(
+            RouterSnapshotCache.save(
                 rxPowerDbm: optical.rxPowerDbm,
                 routerHost: settings.activeProfile?.host,
                 routerProfileID: profileID?.uuidString,
@@ -953,7 +920,6 @@ public final class MonitorViewModel: ObservableObject {
             guard syncGeneration == routerConfigurationGeneration else { return }
             if error is CancellationError || Self.isCancellationError(error) { return }
             guard routerRequestsAllowed else { return }
-            settings.pausePersonalUsageTracking(for: profileID)
             if let authFailure = await provider.routerAuthFailure() {
                 guard syncGeneration == routerConfigurationGeneration else { return }
                 handleRouterAuthFailure(authFailure)
@@ -1002,7 +968,6 @@ public final class MonitorViewModel: ObservableObject {
     }
 
     private func handleRouterAuthFailure(_ failure: RouterAuthFailure) {
-        settings.pausePersonalUsageTracking()
         isConnected = false
         isAuthenticated = false
         isConnectionFailure = false
