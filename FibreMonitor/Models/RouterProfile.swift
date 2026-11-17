@@ -47,7 +47,7 @@ public struct RouterProfile: Identifiable, Codable, Equatable, Sendable {
         self.routerType = routerType
     }
 
-    /// Pre-filled template for the MTN GNMTNNCE HG8145X6-10 router (password is never prefilled).
+    /// Backwards-compatible prefilled MTN profile; the Add Router UI now uses its preset selector.
     public static func mtnTemplate(id: UUID = UUID()) -> RouterProfile {
         RouterProfile(id: id, name: "New router (MTN)", host: "192.168.2.1", username: "root")
     }

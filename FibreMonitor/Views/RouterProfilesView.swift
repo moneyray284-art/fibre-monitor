@@ -100,6 +100,13 @@ struct RouterProfileRow: View {
     }
 }
 
+private enum AddRouterPreset: Hashable {
+    case autoDetected
+    case telecel
+    case mtn
+    case standard
+}
+
 struct RouterProfileEditorView: View {
     enum Mode: Identifiable {
         case add
@@ -123,6 +130,10 @@ struct RouterProfileEditorView: View {
     @State private var username = "root"
     @State private var password = ""
     @State private var routerType: RouterType = .huaweiONT
+    @State private var selectedPreset: AddRouterPreset = .standard
+    @State private var autoDetectedProfile: RouterProfile?
+    @State private var gatewayForDetection: String?
+    @State private var hasUserEditedForm = false
 
     private var trimmedHost: String { host.trimmingCharacters(in: .whitespaces) }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -135,80 +146,44 @@ struct RouterProfileEditorView: View {
         NavigationStack {
             Form {
                 if case .add = mode {
-                    Section {
-                        Button {
-                            let template = RouterProfile.mtnTemplate()
-                            name = template.name
-                            host = template.host
-                            username = template.username
-                            password = ""
-                            routerType = .huaweiONT
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("New router (MTN)")
-                                        .font(.subheadline.weight(.semibold))
-                                    Text("192.168.2.1 · username root")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                Spacer()
-                                Text("Use template")
-                                    .font(.caption.weight(.semibold))
+                    Section("Device / ISP Preset") {
+                        Picker("Device / ISP Preset", selection: presetSelection) {
+                            if autoDetectedProfile != nil {
+                                Text("Auto-Detected").tag(AddRouterPreset.autoDetected)
                             }
+                            Text("Telecel Fibre (192.168.100.1)").tag(AddRouterPreset.telecel)
+                            Text("MTN Fibre (192.168.2.1)").tag(AddRouterPreset.mtn)
+                            Text("Standard Huawei ONT (192.168.100.1)").tag(AddRouterPreset.standard)
                         }
-
-                        Button {
-                            name = "Previous router"
-                            host = "192.168.100.1"
-                            username = "root"
-                            password = ""
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Standard Huawei ONT")
-                                        .font(.subheadline.weight(.semibold))
-                                    Text("192.168.100.1 · username root")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                Spacer()
-                                Text("Use template")
-                                    .font(.caption.weight(.semibold))
-                            }
-                        }
-                    } header: {
-                        Text("Templates")
-                    } footer: {
-                        Text("Enter the router's web login password yourself below.")
+                        .pickerStyle(.menu)
                     }
                 }
 
                 Section {
-                    Picker("Router Type", selection: $routerType) {
+                    Picker("Router Type", selection: routerTypeField) {
                         ForEach(RouterType.allCases) { type in
                             Text(type.title).tag(type)
                         }
                     }
                     LabeledContent("Profile name") {
-                        TextField("New router (MTN)", text: $name)
+                        TextField("Router name", text: nameField)
                             .multilineTextAlignment(.trailing)
                     }
                     LabeledContent("Router address") {
-                        TextField("192.168.2.1", text: $host)
+                        TextField("192.168.100.1", text: hostField)
                             .multilineTextAlignment(.trailing)
                             .keyboardType(.URL)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                     }
                     LabeledContent("Username") {
-                        TextField("root", text: $username)
+                        TextField("root", text: usernameField)
                             .multilineTextAlignment(.trailing)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                     }
                     LabeledContent("Password") {
-                        SecureField("Required", text: $password)
+                        SecureField("Required", text: passwordField)
                             .multilineTextAlignment(.trailing)
                     }
                 } header: {
@@ -238,14 +213,20 @@ struct RouterProfileEditorView: View {
                     .disabled(!canSave)
                 }
             }
+            .task(id: gatewayForDetection) {
+                guard case .add = mode, let gateway = gatewayForDetection else { return }
+                guard let detected = await RouterAutoDetector.detectProfile(at: gateway),
+                      !Task.isCancelled,
+                      !hasUserEditedForm else { return }
+                autoDetectedProfile = detected
+                selectedPreset = .autoDetected
+                apply(detected)
+            }
             .onAppear {
                 switch mode {
                 case .add:
                     if name.isEmpty && host.isEmpty {
-                        let template = RouterProfile.mtnTemplate()
-                        name = template.name
-                        host = template.host
-                        username = template.username
+                        prepareAddRouterForm()
                     }
                 case .edit(let profile):
                     name = profile.name
@@ -263,10 +244,86 @@ struct RouterProfileEditorView: View {
         return false
     }
 
+    private var presetSelection: Binding<AddRouterPreset> {
+        Binding(
+            get: { selectedPreset },
+            set: { preset in
+                guard case .add = mode else { return }
+                hasUserEditedForm = true
+                selectedPreset = preset
+                switch preset {
+                case .autoDetected:
+                    if let autoDetectedProfile { apply(autoDetectedProfile) }
+                case .telecel:
+                    apply(RouterProfile(name: "Telecel Fibre", host: "192.168.100.1"))
+                case .mtn:
+                    apply(RouterProfile(name: "MTN Fibre", host: "192.168.2.1"))
+                case .standard:
+                    apply(RouterProfile(name: "Huawei ONT", host: "192.168.100.1"))
+                }
+            }
+        )
+    }
+
+    private var nameField: Binding<String> {
+        Binding(get: { name }, set: { name = $0; hasUserEditedForm = true })
+    }
+
+    private var hostField: Binding<String> {
+        Binding(get: { host }, set: { host = $0; hasUserEditedForm = true })
+    }
+
+    private var usernameField: Binding<String> {
+        Binding(get: { username }, set: { username = $0; hasUserEditedForm = true })
+    }
+
+    private var passwordField: Binding<String> {
+        Binding(get: { password }, set: { password = $0; hasUserEditedForm = true })
+    }
+
+    private var routerTypeField: Binding<RouterType> {
+        Binding(get: { routerType }, set: { routerType = $0; hasUserEditedForm = true })
+    }
+
+    private func prepareAddRouterForm() {
+        guard let gateway = LocalWiFiAddress.defaultGatewayIPv4() else {
+            selectedPreset = .standard
+            apply(RouterProfile(name: "Huawei ONT", host: "192.168.100.1"))
+            return
+        }
+
+        gatewayForDetection = gateway
+        if gateway == "192.168.2.1" {
+            selectedPreset = .mtn
+            apply(RouterProfile(name: "MTN Fibre", host: gateway))
+        } else if gateway == "192.168.100.1" {
+            selectedPreset = .telecel
+            apply(RouterProfile(name: "Telecel Fibre", host: gateway))
+        } else {
+            selectedPreset = .standard
+            apply(RouterProfile(name: "Huawei ONT", host: gateway))
+        }
+        hasUserEditedForm = false
+    }
+
+    private func apply(_ profile: RouterProfile) {
+        name = profile.name
+        host = profile.host
+        username = profile.username
+        password = ""
+        routerType = profile.resolvedRouterType
+    }
+
     private func save() {
         switch mode {
         case .add:
-            let profile = RouterProfile(name: trimmedName, host: trimmedHost, username: username, routerType: routerType)
+            let profile = RouterProfile(
+                name: trimmedName,
+                host: trimmedHost,
+                username: username,
+                detectedModel: selectedPreset == .autoDetected ? autoDetectedProfile?.detectedModel : nil,
+                routerType: routerType
+            )
             let saved = settings.addProfile(profile, password: password, select: true)
             onSave(saved)
         case .edit(var existing):
