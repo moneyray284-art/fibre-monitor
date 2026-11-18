@@ -21,6 +21,10 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: FibreMonitor
+        excludes:
+          - Resources/Outfit-Variable.ttf
+    resources:
+      - path: FibreMonitor/Resources/Outfit-Variable.ttf
     # No `info:` block: XcodeGen would regenerate Info.plist from defaults and drop
     # the launch screen key (the app then runs letterboxed) and the network settings.
     settings:

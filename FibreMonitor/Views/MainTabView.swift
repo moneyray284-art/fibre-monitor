@@ -5,6 +5,7 @@ public struct MainTabView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var systemColorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showInitialSettings = false
     @State private var isLaunchAnimationVisible = true
     @State private var launchAnimationFinished = false
@@ -144,11 +145,11 @@ public struct MainTabView: View {
     }
 
     private func finishLaunchAnimation() {
-        withAnimation(.easeInOut(duration: 0.3)) {
+        withAnimation(.easeInOut(duration: reduceMotion ? 0 : 0.3)) {
             isLaunchAnimationVisible = false
         }
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 320_000_000)
+            try? await Task.sleep(nanoseconds: reduceMotion ? 20_000_000 : 320_000_000)
             launchAnimationFinished = true
             if presentInitialSettingsAfterLaunch {
                 showInitialSettings = true
