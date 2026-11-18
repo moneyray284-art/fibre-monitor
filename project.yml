@@ -54,3 +54,6 @@ schemes:
     build:
       targets:
         FibreMonitor: all
+    test:
+      targets:
+        - FibreMonitorTests
