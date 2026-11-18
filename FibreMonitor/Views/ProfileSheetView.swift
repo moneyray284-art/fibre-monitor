@@ -3,6 +3,19 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
 
+@MainActor
+private final class ProfileDraftStore: ObservableObject {
+    @Published var profileName: String
+    @Published var routerName: String
+    @Published var profilePhotoData: Data?
+
+    init(profile: RouterProfile?, photoData: Data?) {
+        profileName = profile?.name ?? ""
+        routerName = profile?.routerDisplayName ?? ""
+        profilePhotoData = photoData
+    }
+}
+
 struct ProfileSheetView: View {
     private enum ProfileField: Hashable { case profileName, routerName }
 
@@ -12,9 +25,7 @@ struct ProfileSheetView: View {
     @FocusState private var focusedField: ProfileField?
 
     @State private var editingProfileID: UUID?
-    @State private var draftProfileName: String
-    @State private var draftRouterName: String
-    @State private var draftProfilePhotoData: Data?
+    @StateObject private var draft: ProfileDraftStore
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var cropSourceImage: UIImage?
     @State private var isShowingPhotos = false
@@ -31,9 +42,10 @@ struct ProfileSheetView: View {
         let avatarStore = ProfileAvatarStore.shared
         _avatarStore = ObservedObject(wrappedValue: avatarStore)
         _editingProfileID = State(initialValue: profile?.id)
-        _draftProfileName = State(initialValue: profile?.name ?? "")
-        _draftRouterName = State(initialValue: profile?.routerDisplayName ?? "")
-        _draftProfilePhotoData = State(initialValue: avatarStore.savedPhotoData)
+        _draft = StateObject(wrappedValue: ProfileDraftStore(
+            profile: profile,
+            photoData: avatarStore.savedPhotoData
+        ))
     }
 
     private var settings: SettingsStore { viewModel.settings }
@@ -42,7 +54,7 @@ struct ProfileSheetView: View {
         return settings.profiles.first { $0.id == editingProfileID }
     }
     private var canSave: Bool {
-        editingProfile != nil && !draftProfileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        editingProfile != nil && !draft.profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
@@ -62,15 +74,15 @@ struct ProfileSheetView: View {
                             } label: {
                                 Label("Choose from Files", systemImage: "folder")
                             }
-                            if draftProfilePhotoData != nil {
+                            if draft.profilePhotoData != nil {
                                 Button(role: .destructive) {
-                                    draftProfilePhotoData = nil
+                                    draft.profilePhotoData = nil
                                 } label: {
                                     Label("Remove Photo", systemImage: "person.crop.circle.badge.xmark")
                                 }
                             }
                         } label: {
-                            Label(draftProfilePhotoData == nil ? "Set Profile Picture" : "Change Profile Picture", systemImage: "photo")
+                            Label(draft.profilePhotoData == nil ? "Set Profile Picture" : "Change Profile Picture", systemImage: "photo")
                         }
                     }
 
@@ -78,7 +90,7 @@ struct ProfileSheetView: View {
                         Text("Profile Name")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
-                        TextField("Saved router connection name", text: $draftProfileName)
+                        TextField("Saved router connection name", text: $draft.profileName)
                             .textContentType(.name)
                             .textInputAutocapitalization(.words)
                             .focused($focusedField, equals: .profileName)
@@ -88,7 +100,7 @@ struct ProfileSheetView: View {
                         Text("Router Name")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
-                        TextField("Name displayed on Home", text: $draftRouterName)
+                        TextField("Name displayed on Home", text: $draft.routerName)
                             .textInputAutocapitalization(.words)
                             .focused($focusedField, equals: .routerName)
                     }
@@ -168,8 +180,8 @@ struct ProfileSheetView: View {
                     image: cropSourceImage,
                     onCancel: { isShowingCropper = false },
                     onUsePhoto: { data in
-                        draftProfilePhotoData = data
-                        isShowingCropper = false
+                        // Commit only to this sheet's draft before Adjust Photo dismisses.
+                        draft.profilePhotoData = data
                     }
                 )
             }
@@ -193,7 +205,7 @@ struct ProfileSheetView: View {
 
     private var draftAvatarPreview: some View {
         Group {
-            if let data = draftProfilePhotoData, let image = UIImage(data: data) {
+            if let data = draft.profilePhotoData, let image = UIImage(data: data) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
@@ -205,7 +217,7 @@ struct ProfileSheetView: View {
                     .frame(width: 64, height: 64)
             }
         }
-        .accessibilityLabel(draftProfilePhotoData == nil ? "Default profile silhouette" : "Profile picture preview")
+        .accessibilityLabel(draft.profilePhotoData == nil ? "Default profile silhouette" : "Profile picture preview")
     }
 
     private var opticalRxText: String {
@@ -220,11 +232,12 @@ struct ProfileSheetView: View {
 
     private func save() {
         guard let profile = editingProfile else { return }
-        let cleanProfileName = draftProfileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanProfileName = draft.profileName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanProfileName.isEmpty else { return }
-        let cleanRouterName = draftRouterName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanRouterName = draft.routerName.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            try avatarStore.saveJPEGData(draftProfilePhotoData)
+            // Always commit the photo draft, even when neither name field changed.
+            try avatarStore.saveJPEGData(draft.profilePhotoData)
             settings.updateProfileNames(id: profile.id, profileName: cleanProfileName, routerName: cleanRouterName)
             dismiss()
         } catch {

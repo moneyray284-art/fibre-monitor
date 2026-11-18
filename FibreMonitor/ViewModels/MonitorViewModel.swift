@@ -652,7 +652,6 @@ public final class MonitorViewModel: ObservableObject {
         guard fullRefreshID == runID else { return }
         guard routerRequestsAllowed else { return }
         isLoggedOut = false
-        lastTrafficSampleAt = .distantPast
         resetReachabilityFailures()
 
         if forceReauthIfNeeded,
@@ -743,7 +742,6 @@ public final class MonitorViewModel: ObservableObject {
     }
 
     private func refreshAfterMutation() async {
-        lastTrafficSampleAt = .distantPast
         lastPageSync = .distantPast
         lastLanSync = .distantPast
         guard !isRefreshing else {

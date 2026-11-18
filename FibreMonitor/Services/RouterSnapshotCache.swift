@@ -46,8 +46,6 @@ public enum RouterSnapshotCache {
     public static let appGroupID = "group.dev.mattdev0.fibremonitor"
 
     private static let snapshotKey = "linkwave.router.snapshot.v1"
-    private static let legacyWidgetSnapshotKey = "linkwave.widget.snapshot.v1"
-    private static let legacySnapshotFileName = "LinkWaveWidgetSnapshot.json"
 
     public static func save(
         rxPowerDbm: Double?,
@@ -104,21 +102,6 @@ public enum RouterSnapshotCache {
                   let snapshot = try? JSONDecoder().decode(RouterSnapshot.self, from: data) else { continue }
             return snapshot
         }
-        if let data = shared?.data(forKey: legacyWidgetSnapshotKey),
-           let snapshot = try? JSONDecoder().decode(RouterSnapshot.self, from: data) {
-            persist(snapshot)
-            return snapshot
-        }
-        if let data = snapshotFileURL.flatMap({ try? Data(contentsOf: $0) }),
-           let snapshot = try? JSONDecoder().decode(RouterSnapshot.self, from: data) {
-            persist(snapshot)
-            return snapshot
-        }
-        if let data = UserDefaults.standard.data(forKey: snapshotKey),
-           let snapshot = try? JSONDecoder().decode(RouterSnapshot.self, from: data) {
-            persist(snapshot)
-            return snapshot
-        }
         return nil
     }
 
@@ -126,14 +109,5 @@ public enum RouterSnapshotCache {
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         UserDefaults.standard.set(data, forKey: snapshotKey)
         UserDefaults(suiteName: appGroupID)?.set(data, forKey: snapshotKey)
-        if let snapshotFileURL {
-            try? data.write(to: snapshotFileURL, options: .atomic)
-        }
-    }
-
-    private static var snapshotFileURL: URL? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
-            .appendingPathComponent(legacySnapshotFileName, isDirectory: false)
     }
 }

@@ -43,8 +43,8 @@ public final class ProfileAvatarStore: ObservableObject {
             throw ProfileAvatarStoreError.couldNotEncodeImage
         }
 
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let destination = documents.appendingPathComponent(filename)
+        let supportDirectory = try Self.applicationSupportDirectory()
+        let destination = supportDirectory.appendingPathComponent(filename, isDirectory: false)
         try jpegData.write(to: destination, options: .atomic)
         defaults.set(destination.path, forKey: storageKey)
         image = savedImage
@@ -54,8 +54,25 @@ public final class ProfileAvatarStore: ObservableObject {
         if let path = defaults.string(forKey: storageKey) {
             try? FileManager.default.removeItem(atPath: path)
         }
+        if let destination = try? Self.avatarURL() {
+            try? FileManager.default.removeItem(at: destination)
+        }
         defaults.removeObject(forKey: storageKey)
         image = nil
+    }
+
+    private static func applicationSupportDirectory() throws -> URL {
+        let manager = FileManager.default
+        guard let support = manager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw ProfileAvatarStoreError.couldNotSaveImage
+        }
+        let directory = support.appendingPathComponent("LinkWave", isDirectory: true)
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    private static func avatarURL() throws -> URL {
+        try applicationSupportDirectory().appendingPathComponent("LinkWaveProfileAvatar.jpg", isDirectory: false)
     }
 
     private static func squareThumbnail(_ image: UIImage) -> UIImage? {
@@ -75,11 +92,14 @@ public final class ProfileAvatarStore: ObservableObject {
 
 public enum ProfileAvatarStoreError: LocalizedError {
     case couldNotEncodeImage
+    case couldNotSaveImage
 
     public var errorDescription: String? {
         switch self {
         case .couldNotEncodeImage:
             return "This image couldn't be prepared for your profile."
+        case .couldNotSaveImage:
+            return "The profile picture couldn't be saved on this device."
         }
     }
 }

@@ -38,9 +38,6 @@ targets:
       configs:
         Release:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
-    dependencies:
-      - target: LinkWaveWidgetExtension
-        embed: true
   FibreMonitorTests:
     type: bundle.unit-test
     platform: iOS
@@ -52,34 +49,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mattdev0.fibremonitor.tests
-  LinkWaveWidgetExtension:
-    type: app-extension
-    platform: iOS
-    deploymentTarget: "17.0"
-    sources:
-      - path: LinkWaveWidget/WidgetOntTransport.swift
-      - path: LinkWaveWidget/WidgetSnapshotStore.swift
-      - path: LinkWaveWidget/LinkWaveWidget.swift
-      - path: FibreMonitor/Models/OntModels.swift
-      - path: FibreMonitor/Services/HuaweiJs.swift
-      - path: FibreMonitor/Services/HuaweiOntClient.swift
-      - path: FibreMonitor/Services/RouterAuthCoordinator.swift
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.mattdev0.fibremonitor.Widget
-        INFOPLIST_FILE: LinkWaveWidget/Info.plist
-        CODE_SIGN_STYLE: Automatic
-        APPLICATION_EXTENSION_API_ONLY: YES
-        SKIP_INSTALL: YES
-        TARGETED_DEVICE_FAMILY: "1"
-
 schemes:
   FibreMonitor:
     build:
       targets:
         FibreMonitor: all
-        LinkWaveWidgetExtension: all
-  LinkWaveWidgetExtension:
-    build:
-      targets:
-        LinkWaveWidgetExtension: all

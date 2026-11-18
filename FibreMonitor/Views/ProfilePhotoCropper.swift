@@ -51,8 +51,26 @@ struct ProfilePhotoCropper: View {
                             .allowsHitTesting(false)
                     }
                     .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
-                    .onAppear { cropSide = side }
-                    .onChange(of: geometry.size) { _ in cropSide = side }
+                    .onAppear {
+                        cropSide = side
+                        steadyOffset = clampedOffset(
+                            steadyOffset,
+                            displayedWidth: displayedWidth,
+                            displayedHeight: displayedHeight,
+                            cropSide: side
+                        )
+                        offsetAtGestureStart = steadyOffset
+                    }
+                    .onChange(of: geometry.size) { _ in
+                        cropSide = side
+                        steadyOffset = clampedOffset(
+                            steadyOffset,
+                            displayedWidth: displayedWidth,
+                            displayedHeight: displayedHeight,
+                            cropSide: side
+                        )
+                        offsetAtGestureStart = steadyOffset
+                    }
                     .simultaneousGesture(
                         DragGesture(minimumDistance: 1)
                             .onChanged { value in
@@ -149,9 +167,15 @@ struct ProfilePhotoCropper: View {
         let outputScale = 512 / frameSide
         let displayedWidth = imageWidth * baseScale * steadyScale
         let displayedHeight = imageHeight * baseScale * steadyScale
+        let exactOffset = clampedOffset(
+            steadyOffset,
+            displayedWidth: displayedWidth,
+            displayedHeight: displayedHeight,
+            cropSide: frameSide
+        )
         let imageOrigin = CGPoint(
-            x: (frameSide - displayedWidth) / 2 + steadyOffset.width,
-            y: (frameSide - displayedHeight) / 2 + steadyOffset.height
+            x: (frameSide - displayedWidth) / 2 + exactOffset.width,
+            y: (frameSide - displayedHeight) / 2 + exactOffset.height
         )
         let destination = CGRect(
             x: imageOrigin.x * outputScale,
@@ -163,8 +187,27 @@ struct ProfilePhotoCropper: View {
         format.scale = 1
         format.opaque = true
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 512, height: 512), format: format)
-        return renderer.jpegData(withCompressionQuality: 0.88) { _ in
+        let croppedImage = renderer.image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 512, height: 512))
             image.draw(in: destination)
+        }
+        if let jpegData = croppedImage.jpegData(compressionQuality: 0.88) { return jpegData }
+        if let uncroppedJPEG = image.jpegData(compressionQuality: 0.88) { return uncroppedJPEG }
+
+        // UIGraphicsImageRenderer always produces a JPEG Data value, giving Use Photo
+        // a non-nil fallback even if UIImage.jpegData cannot encode the source image.
+        return renderer.jpegData(withCompressionQuality: 0.88) { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 512, height: 512))
+            let fitScale = min(512 / imageWidth, 512 / imageHeight)
+            let fitSize = CGSize(width: imageWidth * fitScale, height: imageHeight * fitScale)
+            image.draw(in: CGRect(
+                x: (512 - fitSize.width) / 2,
+                y: (512 - fitSize.height) / 2,
+                width: fitSize.width,
+                height: fitSize.height
+            ))
         }
     }
 

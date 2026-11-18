@@ -91,19 +91,6 @@ jobs:
             SWIFT_OPTIMIZATION_LEVEL=-O \
             clean build
 
-      - name: Build Widget Extension scheme
-        run: |
-          xcodebuild -project FibreMonitor.xcodeproj \
-            -scheme LinkWaveWidgetExtension \
-            -sdk iphoneos \
-            -configuration Release \
-            -derivedDataPath build_widget \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            SWIFT_OPTIMIZATION_LEVEL=-O \
-            clean build
-
       - name: Verify Info.plist
         run: |
           # Without a launch screen key iOS runs the app letterboxed (legacy mode).
@@ -131,36 +118,25 @@ jobs:
           echo "LINKWAVE_IPA_NAME=LinkWave-v$VERSION.ipa" >> "$GITHUB_ENV"
           echo "Version: $VERSION ($BUILD)"
 
-      - name: Sign app and widget without restricted entitlements
+      - name: Sign app without restricted entitlements
         run: |
           APP=build/Build/Products/Release-iphoneos/FibreMonitor.app
-          WIDGET="$APP/PlugIns/LinkWaveWidgetExtension.appex"
-          test -d "$WIDGET" || { echo "::error::Widget extension was not embedded in LinkWave.app"; exit 1; }
-          codesign --force --sign - --timestamp=none "$WIDGET"
           codesign --force --sign - --timestamp=none "$APP"
-          for BUNDLE in "$APP" "$WIDGET"; do
-            ENTITLEMENTS=$(mktemp)
-            codesign -d --entitlements :- "$BUNDLE" > "$ENTITLEMENTS" 2>/dev/null || true
-            if grep -Eqi 'com\.apple\.security\.application-groups|keychain-access-groups' "$ENTITLEMENTS"; then
-              echo "::error::Restricted App Group or custom Keychain group found in $BUNDLE"
-              cat "$ENTITLEMENTS"
-              exit 1
-            fi
-            rm -f "$ENTITLEMENTS"
-          done
-          echo "Verified both bundles contain no App Group or custom Keychain group entitlement."
+          ENTITLEMENTS=$(mktemp)
+          codesign -d --entitlements :- "$APP" > "$ENTITLEMENTS" 2>/dev/null || true
+          if grep -Eqi 'com\.apple\.security\.application-groups|keychain-access-groups' "$ENTITLEMENTS"; then
+            echo "::error::Restricted App Group or custom Keychain group found in LinkWave.app"
+            cat "$ENTITLEMENTS"
+            exit 1
+          fi
+          rm -f "$ENTITLEMENTS"
+          echo "Verified LinkWave.app has no App Group or custom Keychain group entitlement."
 
       - name: Package IPA
         run: |
           mkdir -p build/Payload
           cp -r build/Build/Products/Release-iphoneos/FibreMonitor.app build/Payload/LinkWave.app
           test -f build/Payload/LinkWave.app/FibreMonitor || { echo "::error::LinkWave app executable is missing from Payload"; exit 1; }
-          WIDGET=build/Payload/LinkWave.app/PlugIns/LinkWaveWidgetExtension.appex
-          test -f "$WIDGET/LinkWaveWidgetExtension" || { echo "::error::Widget extension executable is missing"; exit 1; }
-          WIDGET_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$WIDGET/Info.plist")
-          [[ "$WIDGET_BUNDLE_ID" == "dev.mattdev0.fibremonitor.Widget" ]] || { echo "::error::Unexpected widget bundle identifier: $WIDGET_BUNDLE_ID"; exit 1; }
-          WIDGET_POINT=$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$WIDGET/Info.plist")
-          [[ "$WIDGET_POINT" == "com.apple.widgetkit-extension" ]] || { echo "::error::WidgetKit extension point is missing"; exit 1; }
           cd build
           zip -r -q "$LINKWAVE_IPA_NAME" Payload
           echo "LINKWAVE_IPA_PATH=build/$LINKWAVE_IPA_NAME" >> "$GITHUB_ENV"

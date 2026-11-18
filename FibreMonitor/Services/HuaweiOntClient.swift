@@ -31,6 +31,8 @@ public actor HuaweiOntClient {
     public private(set) var detectedIdentity: RouterIdentity?
 
     private var lastCounters: (rx: UInt64, tx: UInt64, time: Date)?
+    private var consecutiveZeroDownloadSamples = 0
+    private var consecutiveZeroUploadSamples = 0
     private var traffic = TrafficState()
     private let maxHistory = 60
 
@@ -46,7 +48,7 @@ public actor HuaweiOntClient {
         loggedIn = false
         await authCoordinator.updateCredentials(new)
         await transport.resetSession(host: new.host)
-        lastCounters = nil
+        resetTrafficCounterBaseline()
         traffic = TrafficState()
         wanDomain = nil
         ssidBands = [:]
@@ -59,7 +61,7 @@ public actor HuaweiOntClient {
         credentials = new
         loggedIn = false
         await authCoordinator.updateCredentials(new)
-        lastCounters = nil
+        resetTrafficCounterBaseline()
         traffic = TrafficState()
         wanDomain = nil
         ssidBands = [:]
@@ -92,7 +94,7 @@ public actor HuaweiOntClient {
         let currentHost = credentials.host
         await authCoordinator.beginSessionClose()
         loggedIn = false
-        lastCounters = nil
+        resetTrafficCounterBaseline()
         wanDomain = nil
         ssidBands = [:]
         detectedIdentity = nil
@@ -108,7 +110,7 @@ public actor HuaweiOntClient {
     /// Stops login work and cancels transport requests without sending a logout over cellular.
     public func suspendForNetworkLoss() async {
         loggedIn = false
-        lastCounters = nil
+        resetTrafficCounterBaseline()
         traffic.downloadMbps = 0
         traffic.uploadMbps = 0
         await authCoordinator.suspendForNetworkLoss()
@@ -243,22 +245,64 @@ public actor HuaweiOntClient {
     private func apply(counters: (rx: UInt64, tx: UInt64), at now: Date) {
         traffic.cumulativeDownloadBytes = counters.rx
         traffic.cumulativeUploadBytes = counters.tx
-        defer { lastCounters = (counters.rx, counters.tx, now) }
-        guard let last = lastCounters else { return }
+        guard let last = lastCounters else {
+            lastCounters = (counters.rx, counters.tx, now)
+            return
+        }
         let seconds = now.timeIntervalSince(last.time)
-        guard seconds >= 0.3,
-              let dRx = Self.delta(previous: last.rx, current: counters.rx),
-              let dTx = Self.delta(previous: last.tx, current: counters.tx) else { return }
+        // Keep the original baseline through short or out-of-order polls. This lets
+        // the next valid sample include the full elapsed byte delta instead of making
+        // refresh timing create a false 0 Kbps reading.
+        guard seconds >= 0.8 else { return }
+        guard let dRx = Self.delta(previous: last.rx, current: counters.rx),
+              let dTx = Self.delta(previous: last.tx, current: counters.tx) else {
+            lastCounters = (counters.rx, counters.tx, now)
+            consecutiveZeroDownloadSamples = 0
+            consecutiveZeroUploadSamples = 0
+            return
+        }
+        lastCounters = (counters.rx, counters.tx, now)
         let down = Double(dRx) * 8 / seconds / 1_000_000
         let up = Double(dTx) * 8 / seconds / 1_000_000
         // Anything above 10 Gbps is a counter glitch, not traffic.
-        guard down < 10_000, up < 10_000 else { return }
-        traffic.downloadMbps = down
-        traffic.uploadMbps = up
+        guard down < 10_000, up < 10_000 else {
+            consecutiveZeroDownloadSamples = 0
+            consecutiveZeroUploadSamples = 0
+            return
+        }
+
+        if dRx == 0 {
+            if seconds >= 1.0 {
+                consecutiveZeroDownloadSamples += 1
+                if consecutiveZeroDownloadSamples >= 2 { traffic.downloadMbps = 0 }
+            }
+        } else {
+            consecutiveZeroDownloadSamples = 0
+            traffic.downloadMbps = down
+        }
+        if dTx == 0 {
+            if seconds >= 1.0 {
+                consecutiveZeroUploadSamples += 1
+                if consecutiveZeroUploadSamples >= 2 { traffic.uploadMbps = 0 }
+            }
+        } else {
+            consecutiveZeroUploadSamples = 0
+            traffic.uploadMbps = up
+        }
         traffic.peakDownloadMbps = max(traffic.peakDownloadMbps, down)
         traffic.peakUploadMbps = max(traffic.peakUploadMbps, up)
-        traffic.history.append(ThroughputSample(downloadMbps: down, uploadMbps: up, time: now))
+        traffic.history.append(ThroughputSample(
+            downloadMbps: traffic.downloadMbps,
+            uploadMbps: traffic.uploadMbps,
+            time: now
+        ))
         if traffic.history.count > maxHistory { traffic.history.removeFirst(traffic.history.count - maxHistory) }
+    }
+
+    private func resetTrafficCounterBaseline() {
+        lastCounters = nil
+        consecutiveZeroDownloadSamples = 0
+        consecutiveZeroUploadSamples = 0
     }
 
     // MARK: WAN
@@ -1380,7 +1424,7 @@ public actor HuaweiOntClient {
             "/CustomApp/set.cgi?x=InternetGatewayDevice.X_HW_DEBUG.SMP.DM.ResetBoard&RequestFile=../CustomApp/mainpage.asp",
             form: [("x.X_HW_Token", token)], ajax: false))
         await invalidateSession()
-        lastCounters = nil
+        resetTrafficCounterBaseline()
     }
 
     private func freshTokenLoggingIn() async throws -> String {
