@@ -9,7 +9,6 @@ struct LinkWaveLaunchAnimation: View {
     @State private var waveProgress: CGFloat = 0
     @State private var logoIsVisible = false
     @State private var nodesArePulsing = false
-    @State private var isExiting = false
     @State private var didFinish = false
 
     private let brandCyan = Color(
@@ -39,7 +38,7 @@ struct LinkWaveLaunchAnimation: View {
                 )
                 .frame(width: 280, height: 280)
                 .scaleEffect(nodesArePulsing ? 1.08 : 0.92)
-                .opacity(logoIsVisible ? 1 : 0.38)
+                .opacity(logoIsVisible ? 1 : 0.42)
                 .animation(
                     reduceMotion ? nil : .easeInOut(duration: 0.78).repeatForever(autoreverses: true),
                     value: nodesArePulsing
@@ -54,26 +53,19 @@ struct LinkWaveLaunchAnimation: View {
                 .frame(width: 58, height: 70)
                 .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    LinkWaveWordmark(
-                        nodesArePulsing: nodesArePulsing,
-                        white: .white,
-                        cyan: brandCyan
-                    )
-                    Text("Fibre usage & link monitor")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .tracking(0.15)
-                }
+                LinkWaveWordmark(
+                    nodesArePulsing: nodesArePulsing,
+                    white: .white,
+                    cyan: brandCyan,
+                    stemColor: brandCyan
+                )
             }
             .opacity(logoIsVisible ? 1 : 0)
-            .scaleEffect(isExiting ? 0.985 : (logoIsVisible ? 1 : 0.94))
-            .offset(y: isExiting ? -3 : 0)
+            .scaleEffect(logoIsVisible ? 1 : 0.94)
             .animation(
-                reduceMotion ? nil : .easeOut(duration: 0.52),
+                reduceMotion ? nil : .easeOut(duration: 0.34),
                 value: logoIsVisible
             )
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.30), value: isExiting)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("LinkWave")
         }
@@ -83,39 +75,23 @@ struct LinkWaveLaunchAnimation: View {
             if reduceMotion {
                 waveProgress = 1
                 logoIsVisible = true
-                do {
-                    try await Task.sleep(nanoseconds: 200_000_000)
-                } catch {
-                    return
-                }
             } else {
-                withAnimation(.easeOut(duration: 0.54)) { nodesArePulsing = true }
-                do {
-                    try await Task.sleep(nanoseconds: 360_000_000)
-                } catch {
-                    return
-                }
+                withAnimation(.easeInOut(duration: 0.78)) { waveProgress = 1 }
+                withAnimation(.easeOut(duration: 0.38).delay(0.18)) { logoIsVisible = true }
+                do { try await Task.sleep(nanoseconds: 480_000_000) } catch { return }
                 guard !Task.isCancelled else { return }
-                withAnimation(.easeInOut(duration: 0.81)) { waveProgress = 1 }
-                do {
-                    try await Task.sleep(nanoseconds: 576_000_000)
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: 0.576)) { logoIsVisible = true }
-                do { try await Task.sleep(nanoseconds: 576_000_000) } catch { return }
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeInOut(duration: 0.288)) { isExiting = true }
-                do { try await Task.sleep(nanoseconds: 288_000_000) } catch { return }
+                nodesArePulsing = true
             }
+            do {
+                let remainingDuration: UInt64 = reduceMotion ? 1_800_000_000 : 1_320_000_000
+                try await Task.sleep(nanoseconds: remainingDuration)
+            } catch { return }
             guard !Task.isCancelled, !didFinish else { return }
             didFinish = true
             onFinished()
         }
-        .opacity(isExiting ? 0 : 1)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.30), value: isExiting)
         .allowsHitTesting(false)
+        .accessibilityAddTraits(.isModal)
     }
 }
 
@@ -125,6 +101,7 @@ struct LinkWaveWordmark: View {
     let cyan: Color
 
     var fontSize: CGFloat = 33
+    var stemColor: Color = .white
 
     var body: some View {
         let glyphScale = fontSize / 33
@@ -132,7 +109,7 @@ struct LinkWaveWordmark: View {
             Text("L")
                 .foregroundStyle(white)
 
-            HarmonicNodeI(isPulsing: nodesArePulsing, color: cyan, stemColor: white)
+            HarmonicNodeI(isPulsing: nodesArePulsing, color: cyan, stemColor: stemColor)
                 .frame(width: 11, height: 31)
                 .scaleEffect(glyphScale)
                 .frame(width: 11 * glyphScale, height: 31 * glyphScale)
@@ -195,9 +172,11 @@ private struct HarmonicWaveMark: View {
                     )
 
                 HarmonicPulseNode(isPulsing: nodesArePulsing, color: color)
-                    .position(x: geometry.size.width * 0.12, y: geometry.size.height * 0.50)
+                    .position(x: geometry.size.width * 0.61, y: geometry.size.height * 0.50)
                 HarmonicPulseNode(isPulsing: nodesArePulsing, color: color)
-                    .position(x: geometry.size.width * 0.88, y: geometry.size.height * 0.50)
+                    .position(x: geometry.size.width * 0.39, y: geometry.size.height * 0.20)
+                HarmonicPulseNode(isPulsing: nodesArePulsing, color: color)
+                    .position(x: geometry.size.width * 0.39, y: geometry.size.height * 0.80)
             }
         }
         .animation(.easeOut(duration: 0.78), value: progress)
@@ -231,10 +210,24 @@ private struct HarmonicWavePaths: Shape {
         }
 
         var path = Path()
-        path.move(to: point(0.12, 0.50))
-        path.addCurve(to: point(0.88, 0.50), control1: point(0.37, 0.07), control2: point(0.63, 0.93))
-        path.move(to: point(0.12, 0.50))
-        path.addCurve(to: point(0.88, 0.50), control1: point(0.37, 0.31), control2: point(0.63, 0.69))
+        path.move(to: point(0.61, 0.04))
+        path.addCurve(
+            to: point(0.61, 0.96),
+            control1: point(1.02, 0.24),
+            control2: point(1.02, 0.76)
+        )
+        path.move(to: point(0.39, 0.20))
+        path.addCurve(
+            to: point(0.39, 0.80),
+            control1: point(0.72, 0.34),
+            control2: point(0.72, 0.66)
+        )
+        path.move(to: point(0.18, 0.35))
+        path.addCurve(
+            to: point(0.18, 0.65),
+            control1: point(0.39, 0.43),
+            control2: point(0.39, 0.57)
+        )
         return path
     }
 }
