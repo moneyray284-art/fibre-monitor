@@ -119,6 +119,8 @@ public actor HuaweiOntClient {
     /// Full HTML pages are checked for `expect` (text the real page always contains), because
     /// an expired session answers with the login page instead.
     private func fetch(_ request: OntRequest, expect: String? = nil) async throws -> String {
+        var request = request
+        if request.timeoutInterval == nil { request.timeoutInterval = 5 }
         func valid(_ text: String) -> Bool {
             if let expect { return text.contains(expect) }
             return HuaweiJs.looksLikeData(text)
@@ -384,10 +386,16 @@ public actor HuaweiOntClient {
 
     public func fetchOptical() async throws -> OpticalInfo {
         let token = try await freshTokenLoggingIn()
-        let text = try await fetch(.init(.post, "/html/amp/common/getSmartDiagnoseResult.asp", form: [("x.X_HW_Token", token)]))
+        async let diagnoseRead = fetch(.init(.post, "/html/amp/common/getSmartDiagnoseResult.asp", form: [("x.X_HW_Token", token)]))
+        async let transceiverRead: String? = try? await sendAuthenticated(.init(
+            .post,
+            "/html/ssmp/common/getOpticTxRx.asp",
+            timeoutInterval: 5
+        ))
+        let text = try await diagnoseRead
         var info = Self.parseSmartDiagnose(text)
         // TX power and temperature, when the firmware exposes them. Optional.
-        if let optic = try? await sendAuthenticated(.init(.post, "/html/ssmp/common/getOpticTxRx.asp")),
+        if let optic = await transceiverRead,
            HuaweiJs.looksLikeData(optic) {
             Self.mergeOpticTxRx(optic, into: &info)
         }
@@ -425,10 +433,23 @@ public actor HuaweiOntClient {
     // MARK: Devices
 
     public func fetchDevices() async throws -> [OntDevice] {
-        let text = try await fetch(.init(.post, "/html/bbsp/common/GetLanUserDevInfo.asp"))
-        var devices = Self.parseDevices(text, ssidBands: ssidBands)
+        try await fetchDevices(bandBySSID: ssidBands)
+    }
+
+    public func fetchDevices(bandBySSID: [Int: String]) async throws -> [OntDevice] {
+        // Device data and DHCP enrichment are independent reads. Fetch them together,
+        // using the caller's last known SSID map to avoid a concurrent Wi-Fi update
+        // changing client band labels while this response is being parsed.
+        async let deviceRead = fetch(.init(.post, "/html/bbsp/common/GetLanUserDevInfo.asp"))
+        async let dhcpRead: String? = try? await sendAuthenticated(.init(
+            .post,
+            "/html/bbsp/common/GetLanUserDhcpInfo.asp",
+            timeoutInterval: 5
+        ))
+        let text = try await deviceRead
+        var devices = Self.parseDevices(text, ssidBands: bandBySSID)
         // Optional DHCP lease enrichment; older firmwares or sessions without it still succeed.
-        if let dhcp = try? await sendAuthenticated(.init(.post, "/html/bbsp/common/GetLanUserDhcpInfo.asp")),
+        if let dhcp = await dhcpRead,
            HuaweiJs.looksLikeData(dhcp) {
             devices = Self.enrichDevices(devices, withDhcpInfo: dhcp)
         }
@@ -658,8 +679,7 @@ public actor HuaweiOntClient {
     }
 
     public func fetchHealth() async throws -> RouterHealth {
-        try await login()
-        let req = OntRequest(.get, "/html/ssmp/deviceinfo/deviceinfo.asp", ajax: false)
+        let req = OntRequest(.get, "/html/ssmp/deviceinfo/deviceinfo.asp", ajax: false, timeoutInterval: 5)
         let response = try await sendAuthenticated(req)
         guard response.contains("cpuUsed") || response.contains("stDeviceInfo") else {
             throw OntError.badResponse("deviceinfo")
@@ -1364,7 +1384,7 @@ public actor HuaweiOntClient {
     }
 
     private func freshTokenLoggingIn() async throws -> String {
-        let request = OntRequest(.post, "/html/ssmp/common/GetRandToken.asp")
+        let request = OntRequest(.post, "/html/ssmp/common/GetRandToken.asp", timeoutInterval: 5)
         for attempt in 0..<2 {
             let token = HuaweiJs.clean(try await sendAuthenticated(request))
             if !token.isEmpty && !token.contains("<") { return token }

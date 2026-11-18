@@ -88,9 +88,7 @@ public final class MonitorViewModel: ObservableObject {
     private var didAttemptAutomaticRouterRecovery = false
     private var isWiFiRecoveryPending = false
     private let reachabilityFailureThreshold = 3
-    private var lastCoreSync: Date = .distantPast
     private var lastTrafficSampleAt: Date = .distantPast
-    private let coreSyncInterval: TimeInterval = 10
     // Health, Wi-Fi and LAN come from full web pages (50-130 KB), so sync them rarely.
     private var lastPageSync: Date = .distantPast
     private let pageSyncInterval: TimeInterval = 30
@@ -531,7 +529,6 @@ public final class MonitorViewModel: ObservableObject {
         isRefreshing = false
         connectionState = settings.isConfigured ? .connecting : .offline
         errorMessage = settings.isConfigured ? nil : OntError.notConfigured.errorDescription
-        lastCoreSync = .distantPast
         lastTrafficSampleAt = .distantPast
         lastPageSync = .distantPast
         lastLanSync = .distantPast
@@ -655,10 +652,7 @@ public final class MonitorViewModel: ObservableObject {
         guard fullRefreshID == runID else { return }
         guard routerRequestsAllowed else { return }
         isLoggedOut = false
-        lastCoreSync = .distantPast
         lastTrafficSampleAt = .distantPast
-        lastPageSync = .distantPast
-        lastLanSync = .distantPast
         resetReachabilityFailures()
 
         if forceReauthIfNeeded,
@@ -749,7 +743,6 @@ public final class MonitorViewModel: ObservableObject {
     }
 
     private func refreshAfterMutation() async {
-        lastCoreSync = .distantPast
         lastTrafficSampleAt = .distantPast
         lastPageSync = .distantPast
         lastLanSync = .distantPast
@@ -785,7 +778,6 @@ public final class MonitorViewModel: ObservableObject {
         errorMessage = nil
         isConnectionFailure = false
         actionMessage = nil
-        lastCoreSync = .distantPast
         lastPageSync = .distantPast
         lastLanSync = .distantPast
         resetReachabilityFailures()
@@ -827,7 +819,22 @@ public final class MonitorViewModel: ObservableObject {
         do {
             let requestStartedAt = ProcessInfo.processInfo.systemUptime
             let sampledAt = Date()
-            let trafficSample = try await provider.pollTraffic(now: sampledAt)
+            let shouldSyncPages = sampledAt.timeIntervalSince(lastPageSync) >= pageSyncInterval
+            let shouldSyncLan = sampledAt.timeIntervalSince(lastLanSync) >= lanSyncInterval
+            let knownBands = Dictionary(wifi.networks.map { ($0.ssidIndex, $0.band) }, uniquingKeysWith: { first, _ in first })
+
+            // Start independent reads together. Publish the lightweight traffic result
+            // first, while retaining the last good detail data until the other reads finish.
+            async let trafficRead = provider.pollTraffic(now: sampledAt)
+            async let wanRead: WanInfo? = try? await provider.fetchWan()
+            async let opticalRead: OpticalInfo? = try? await provider.fetchOptical()
+            async let devicesRead: [OntDevice]? = try? await provider.fetchDevices(bandBySSID: knownBands)
+            async let blockedRead: WlanMacBlacklistState? = try? await provider.fetchWlanMacBlacklist()
+            async let wifiRead: WifiState? = shouldSyncPages ? try? await provider.fetchWifi() : nil
+            async let healthRead: RouterHealth? = shouldSyncPages ? try? await provider.fetchHealth() : nil
+            async let lanRead: LanInfo? = shouldSyncLan ? try? await provider.fetchLan() : nil
+
+            let trafficSample = try await trafficRead
             guard routerRequestsAllowed,
                   syncGeneration == routerConfigurationGeneration else { return }
             acceptTraffic(trafficSample, sampledAt: sampledAt, profileId: profileID)
@@ -845,43 +852,24 @@ public final class MonitorViewModel: ObservableObject {
                 guard syncGeneration == routerConfigurationGeneration else { return }
                 settings.recordDetection(for: activeId, model: identity.model, cfgMode: identity.cfgMode)
             }
-            if Date().timeIntervalSince(lastCoreSync) >= coreSyncInterval {
-                lastCoreSync = Date()
-                let shouldSyncPages = Date().timeIntervalSince(lastPageSync) >= pageSyncInterval
-                if shouldSyncPages { lastPageSync = Date() }
-                let shouldSyncLan = Date().timeIntervalSince(lastLanSync) >= lanSyncInterval
-                if shouldSyncLan { lastLanSync = Date() }
-
-                // These router reads do not depend on each other. Run them together so
-                // one slow diagnostics or device page does not hold up every tab.
-                async let wanRead: WanInfo? = try? await provider.fetchWan()
-                async let opticalRead: OpticalInfo? = try? await provider.fetchOptical()
-                async let wifiRead: WifiState? = shouldSyncPages ? try? await provider.fetchWifi() : nil
-                async let healthRead: RouterHealth? = shouldSyncPages ? try? await provider.fetchHealth() : nil
-                let (freshWifi, freshHealth) = await (wifiRead, healthRead)
-                guard syncGeneration == routerConfigurationGeneration else { return }
-                if let freshWifi { wifi = freshWifi }
-                if let freshHealth { health = freshHealth }
-
-                // Fetch Wi-Fi before clients so the router client can map each device
-                // to its correct SSID band. The remaining reads are independent.
-                async let devicesRead: [OntDevice]? = try? await provider.fetchDevices()
-                async let blockedRead: WlanMacBlacklistState? = try? await provider.fetchWlanMacBlacklist()
-                async let lanRead: LanInfo? = shouldSyncLan ? try? await provider.fetchLan() : nil
-                let (freshWan, freshOptical, freshDevices, freshBlocked, freshLan) =
-                    await (wanRead, opticalRead, devicesRead, blockedRead, lanRead)
-                guard syncGeneration == routerConfigurationGeneration else { return }
-                if let freshWan { wan = freshWan }
-                if let freshOptical { optical = freshOptical }
-                if let freshDevices {
-                    devices = freshDevices
-                    hasLoadedDeviceList = true
-                    cachedOnlineDeviceCount = freshDevices.filter(\.isOnline).count
-                    cachedOfflineDeviceCount = max(0, freshDevices.count - cachedOnlineDeviceCount)
-                }
-                if let freshBlocked { blockedDevices = freshBlocked.activeBlockedDevices }
-                if let freshLan { lan = freshLan }
+            let (freshWan, freshOptical, freshDevices, freshBlocked, freshWifi, freshHealth, freshLan) = await (
+                wanRead, opticalRead, devicesRead, blockedRead, wifiRead, healthRead, lanRead
+            )
+            guard syncGeneration == routerConfigurationGeneration else { return }
+            if let freshWan { wan = freshWan }
+            if let freshOptical { optical = freshOptical }
+            if let freshDevices {
+                devices = freshDevices
+                hasLoadedDeviceList = true
+                cachedOnlineDeviceCount = freshDevices.filter(\.isOnline).count
+                cachedOfflineDeviceCount = max(0, freshDevices.count - cachedOnlineDeviceCount)
             }
+            if let freshBlocked { blockedDevices = freshBlocked.activeBlockedDevices }
+            if let freshWifi { wifi = freshWifi }
+            if let freshHealth { health = freshHealth }
+            if let freshLan { lan = freshLan }
+            if shouldSyncPages && (freshWifi != nil || freshHealth != nil) { lastPageSync = Date() }
+            if shouldSyncLan, freshLan != nil { lastLanSync = Date() }
             guard routerRequestsAllowed,
                   syncGeneration == routerConfigurationGeneration else { return }
             if let authFailure = await provider.routerAuthFailure() {

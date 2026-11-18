@@ -16,6 +16,7 @@ public protocol RouterProvider: Sendable {
     func fetchWan() async throws -> WanInfo
     func fetchOptical() async throws -> OpticalInfo
     func fetchDevices() async throws -> [OntDevice]
+    func fetchDevices(bandBySSID: [Int: String]) async throws -> [OntDevice]
     func fetchHealth() async throws -> RouterHealth
     func fetchWifi() async throws -> WifiState
     func fetchManagedWifiState() async throws -> WifiState
@@ -46,6 +47,7 @@ public extension HuaweiOntClient {
 
 public extension RouterProvider {
     func suspendForNetworkLoss() async {}
+    func fetchDevices(bandBySSID: [Int: String]) async throws -> [OntDevice] { try await fetchDevices() }
     func fetchManagedWifiState() async throws -> WifiState { try await fetchWifi() }
     func setWifiNetworkEnabled(ssidIndex: Int, enabled: Bool) async throws -> WifiUpdateResult {
         throw OntError.badResponse("extra Wi-Fi networks are unsupported")

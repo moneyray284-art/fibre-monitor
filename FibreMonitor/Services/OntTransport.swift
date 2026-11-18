@@ -71,7 +71,7 @@ public final class URLSessionOntTransport: OntTransport, @unchecked Sendable {
     public init() {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
-        config.timeoutIntervalForResource = 20
+        config.timeoutIntervalForResource = 12
         config.waitsForConnectivity = true
         config.allowsCellularAccess = false
         config.httpCookieAcceptPolicy = .always
