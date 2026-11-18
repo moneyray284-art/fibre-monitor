@@ -6,6 +6,8 @@ public struct UsageTabView: View {
     @ObservedObject var settings: SettingsStore
     @Environment(\.linkWaveThemePalette) private var palette
     @State private var showSettings = false
+    @State private var selectedUsageDay = Calendar.current.startOfDay(for: Date())
+    @State private var selectedUsageMonth = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Calendar.current.startOfDay(for: Date())
 
     public init(viewModel: MonitorViewModel) {
         self.viewModel = viewModel
@@ -19,10 +21,19 @@ public struct UsageTabView: View {
                     if settings.isConfigured {
                         SyncStatusCard(summary: settings.dataUsageSummary)
                         UsageTotalsCard(summary: settings.dataUsageSummary)
+                        UsageForecastCard(
+                            forecast: selectedMonthForecast,
+                            onInspect: { date in
+                                selectedUsageMonth = Calendar.current.dateInterval(of: .month, for: date)?.start ?? date
+                                selectedUsageDay = Calendar.current.startOfDay(for: date)
+                            }
+                        )
                         DailyUsageHistoryCard(
                             history: settings.dataUsageSummary.historicalDailyHistory,
                             todayDownloadBytes: settings.dataUsageSummary.todayDownloadBytes,
                             todayUploadBytes: settings.dataUsageSummary.todayUploadBytes,
+                            selectedDate: $selectedUsageDay,
+                            selectedMonth: $selectedUsageMonth,
                             onLocalDayRollover: { settings.refreshUsageSummaryForCurrentLocalDay() }
                         )
                     } else {
@@ -54,6 +65,15 @@ public struct UsageTabView: View {
         }
     }
 
+    private var selectedMonthForecast: UsageForecast {
+        NetworkInsightsAnalyzer.forecast(
+            history: settings.dataUsageSummary.historicalDailyHistory,
+            selectedMonth: selectedUsageMonth,
+            todayDownloadBytes: settings.dataUsageSummary.todayDownloadBytes,
+            todayUploadBytes: settings.dataUsageSummary.todayUploadBytes
+        )
+    }
+
     private var noRouterCard: some View {
         VStack(spacing: 12) {
             Image(systemName: "arrow.up.arrow.down.circle")
@@ -71,6 +91,97 @@ public struct UsageTabView: View {
         }
         .frame(maxWidth: .infinity)
         .linkWaveGlassCard()
+    }
+}
+
+private struct UsageForecastCard: View {
+    let forecast: UsageForecast
+    let onInspect: (Date) -> Void
+    @Environment(\.linkWaveThemePalette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                CardHeader(icon: "chart.line.uptrend.xyaxis", title: "Usage Forecast") {
+                    Text("\(forecast.activeReadingDayCount) reading day\(forecast.activeReadingDayCount == 1 ? "" : "s")")
+                        .font(.caption2.weight(.medium))
+                        .monospacedDigit()
+                        .linkWaveText(.secondary)
+                }
+            }
+
+            HStack(alignment: .top, spacing: 8) {
+                forecastMetric("Daily Average", value: formatGB(forecast.dailyAverageGb))
+                forecastMetric("Projected Month", value: formatGB(forecast.projectedMonthGb))
+                forecastMetric("Peak Day", value: peakDayText)
+            }
+
+            if let spike = forecast.spikeDays.first {
+                HStack(alignment: .center, spacing: 9) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Spike Detected")
+                            .font(.subheadline.weight(.semibold))
+                        Text("\(spike.date.formatted(.dateTime.month(.abbreviated).day())) · \(formatGB(spike.totalGb)) · \(String(format: "%.2f×", spike.multiplier)) average")
+                            .font(.caption.monospacedDigit())
+                            .linkWaveText(.secondary)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 4)
+                    Button {
+                        onInspect(spike.date)
+                    } label: {
+                        Text("Inspect \(spike.date.formatted(.dateTime.month(.abbreviated).day()))")
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .frame(minHeight: 44)
+                    .liquidGlassSmallButton()
+                }
+                .padding(.top, 2)
+            }
+
+            Text(forecast.paceNote)
+                .font(.caption)
+                .linkWaveText(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .linkWaveGlassCard()
+        .accessibilityElement(children: .contain)
+    }
+
+    private var peakDayText: String {
+        guard let peak = forecast.peakDay else { return "--" }
+        return "\(formatGB(peak.totalGb)) · \(peak.date.formatted(.dateTime.month(.abbreviated).day()))"
+    }
+
+    private func forecastMetric(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption2)
+                .linkWaveText(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(value)
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                .monospacedDigit()
+                .lineLimit(2)
+                .minimumScaleFactor(0.78)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func formatGB(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        return String(format: "%.2f GB", value)
+    }
+
+    private func formatGB(_ value: Double) -> String {
+        String(format: "%.2f GB", value)
     }
 }
 
@@ -212,8 +323,8 @@ private struct DailyUsageHistoryCard: View {
     let todayDownloadBytes: UInt64
     let todayUploadBytes: UInt64
     let onLocalDayRollover: () -> Void
-    @State private var selectedDate = Calendar.current.startOfDay(for: Date())
-    @State private var selectedMonth = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Calendar.current.startOfDay(for: Date())
+    @Binding var selectedDate: Date
+    @Binding var selectedMonth: Date
     @Environment(\.linkWaveThemePalette) private var palette
 
     private var calendar: Calendar { Calendar.current }
@@ -283,8 +394,6 @@ private struct DailyUsageHistoryCard: View {
         .linkWaveGlassCard()
         .onAppear {
             onLocalDayRollover()
-            selectedMonth = currentMonth
-            selectedDate = calendar.startOfDay(for: Date())
         }
         .onChange(of: currentMonth) { newMonth in
             selectedMonth = newMonth

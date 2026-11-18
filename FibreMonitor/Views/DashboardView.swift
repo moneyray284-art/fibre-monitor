@@ -4,6 +4,9 @@ public struct DashboardView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
     @State private var showSettings = false
+    @State private var showConnectionDiagnosis = false
+    @State private var startSpeedTestRequested = false
+    @State private var latestSpeedTestResult: SpeedTestResult?
     @State private var speedTestDownloadMbps: Double?
     @State private var speedTestUploadMbps: Double?
     @Environment(\.colorScheme) private var colorScheme
@@ -26,7 +29,9 @@ public struct DashboardView: View {
                             viewModel: viewModel,
                             settings: settings,
                             testDownloadMbps: speedTestDownloadMbps,
-                            testUploadMbps: speedTestUploadMbps
+                            testUploadMbps: speedTestUploadMbps,
+                            diagnosis: connectionDiagnosis,
+                            openDiagnosis: { showConnectionDiagnosis = true }
                         )
 
                         if !viewModel.isConnectedToWiFi {
@@ -60,7 +65,9 @@ public struct DashboardView: View {
                         SpeedTestCard(
                             viewModel: viewModel,
                             testDownloadMbps: $speedTestDownloadMbps,
-                            testUploadMbps: $speedTestUploadMbps
+                            testUploadMbps: $speedTestUploadMbps,
+                            startRequested: $startSpeedTestRequested,
+                            onCompleted: { latestSpeedTestResult = $0 }
                         )
                     }
                 }
@@ -107,8 +114,55 @@ public struct DashboardView: View {
                 SettingsTabView(viewModel: viewModel)
                     .toolbar(.hidden, for: .tabBar)
             }
+            .sheet(isPresented: $showConnectionDiagnosis) {
+                DiagnoseConnectionSheet(diagnosis: connectionDiagnosis, perform: performDiagnosisAction)
+                    .presentationDetents([.medium, .large])
+            }
             .onChange(of: showSettings) { isPresented in
                 if !isPresented { viewModel.settingsDidDismiss() }
+            }
+        }
+    }
+
+    private var connectionDiagnosis: ConnectionDiagnosis {
+        let summary = settings.dataUsageSummary
+        let snapshot = RouterSnapshot(
+            routerProfileID: settings.activeProfile?.id.uuidString,
+            routerHost: settings.activeProfile?.host,
+            routerModel: viewModel.displayModelName,
+            rxPowerDbm: viewModel.optical.rxPowerDbm,
+            todayDownloadBytes: summary.todayDownloadBytes,
+            todayUploadBytes: summary.todayUploadBytes,
+            onlineClientCount: viewModel.homeOnlineDeviceCount,
+            offlineClientCount: viewModel.homeOfflineDeviceCount,
+            pppoeUptimeSeconds: viewModel.wan.uptimeSeconds,
+            updatedAt: viewModel.lastUpdate ?? Date()
+        )
+        return NetworkInsightsAnalyzer.diagnose(
+            snapshot: snapshot,
+            devices: viewModel.devices,
+            deviceNames: Dictionary(
+                uniqueKeysWithValues: viewModel.devices.map { ($0.mac.lowercased().filter(\.isHexDigit), viewModel.name(for: $0)) }
+            ),
+            blockedDevices: viewModel.blockedDevices,
+            wifi: viewModel.wifi,
+            speedTest: latestSpeedTestResult
+        )
+    }
+
+    private func performDiagnosisAction(_ action: ConnectionDiagnosisAction) {
+        showConnectionDiagnosis = false
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 280_000_000)
+            switch action {
+            case .inspectWeakClients:
+                viewModel.clientsFilter = .weak
+                viewModel.selectedTab = .clients
+            case .reviewWiFiBands:
+                viewModel.selectedTab = .wifi
+            case .runSpeedTest:
+                viewModel.selectedTab = .home
+                startSpeedTestRequested = true
             }
         }
     }
@@ -145,6 +199,8 @@ private struct RouterHeaderCard: View {
     @ObservedObject var settings: SettingsStore
     let testDownloadMbps: Double?
     let testUploadMbps: Double?
+    let diagnosis: ConnectionDiagnosis
+    let openDiagnosis: () -> Void
     @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
@@ -209,6 +265,23 @@ private struct RouterHeaderCard: View {
                 downloadOverrideMbps: testDownloadMbps,
                 uploadOverrideMbps: testUploadMbps
             )
+
+            HStack(spacing: 8) {
+                Image(systemName: diagnosis.severity == .critical ? "xmark.octagon.fill" : (diagnosis.severity == .warning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(diagnosis.severity == .critical ? Color.red : (diagnosis.severity == .warning ? Color.orange : Color.green))
+                    .accessibilityHidden(true)
+                Text("\(diagnosis.severity.label) · \(diagnosis.inlineHint)")
+                    .font(.caption)
+                    .linkWaveText(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Diagnose", action: openDiagnosis)
+                    .font(.caption.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .liquidGlassSmallButton()
+            }
+            .accessibilityElement(children: .contain)
         }
         .linkWaveGlassCard()
         .accessibilityElement(children: .combine)
@@ -466,6 +539,8 @@ private struct SpeedTestCard: View {
     @ObservedObject var viewModel: MonitorViewModel
     @Binding var testDownloadMbps: Double?
     @Binding var testUploadMbps: Double?
+    @Binding var startRequested: Bool
+    let onCompleted: (SpeedTestResult) -> Void
     @State private var result: SpeedTestResult?
     @State private var progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
     @State private var errorMessage: String?
@@ -565,6 +640,11 @@ private struct SpeedTestCard: View {
                 ? "Speed test stopped because the internet path was lost."
                 : "Speed test stopped because Wi-Fi disconnected."
         }
+        .onChange(of: startRequested) { requested in
+            guard requested else { return }
+            startRequested = false
+            startTest()
+        }
         .onDisappear { testTask?.cancel() }
     }
 
@@ -632,7 +712,7 @@ private struct SpeedTestCard: View {
                 }
             }
             do {
-                result = try await SpeedTestService.run { update in
+                let completedResult = try await SpeedTestService.run { update in
                     progress = update
                     switch update.phase {
                     case .ping:
@@ -646,6 +726,8 @@ private struct SpeedTestCard: View {
                         testUploadMbps = update.currentMbps ?? 0
                     }
                 }
+                result = completedResult
+                onCompleted(completedResult)
             } catch is CancellationError {
                 if errorMessage == nil { errorMessage = "Speed test stopped." }
             } catch let error as URLError where error.code == .cancelled {

@@ -15,9 +15,28 @@ public enum AppTab: Hashable, Sendable {
     case home, usage, clients, wifi
 }
 
+public enum ClientsFilter: String, CaseIterable, Hashable, Sendable {
+    case all
+    case online
+    case weak
+    case offline
+    case blocked
+
+    public var menuTitle: String {
+        switch self {
+        case .all: "All"
+        case .online: "Online"
+        case .weak: "Weak"
+        case .offline: "Offline"
+        case .blocked: "Blocked"
+        }
+    }
+}
+
 @MainActor
 public final class MonitorViewModel: ObservableObject {
     @Published public var selectedTab: AppTab = .home
+    @Published public var clientsFilter: ClientsFilter = .online
     @Published public private(set) var isLoggedOut = false
     @Published public private(set) var traffic = TrafficState()
     @Published public private(set) var wan = WanInfo()

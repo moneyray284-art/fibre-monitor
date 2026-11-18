@@ -8,57 +8,122 @@ public final class ProfileAvatarStore: ObservableObject {
     @Published public private(set) var image: UIImage?
 
     private let defaults = UserDefaults.standard
-    private let storageKey = "linkwave_profile_avatar_path"
-    private let filename = "LinkWaveProfileAvatar.jpg"
+    private let pathsKey = "linkwave_profile_avatar_paths"
+    private let legacyStorageKey = "linkwave_profile_avatar_path"
+    private var activeProfileID: UUID?
+    private var imageCache: [String: UIImage] = [:]
 
-    public var savedPhotoData: Data? {
-        guard let path = defaults.string(forKey: storageKey) else { return nil }
+    private init() { }
+
+    public func activateProfile(_ profileID: UUID?) {
+        migrateLegacyImageIfNeeded(for: profileID)
+        activeProfileID = profileID
+        image = image(for: profileID)
+    }
+
+    public func image(for profileID: UUID?) -> UIImage? {
+        migrateLegacyImageIfNeeded(for: profileID)
+        let key = scopeKey(for: profileID)
+        if let cached = imageCache[key] { return cached }
+        guard let path = savedPath(for: key),
+              let savedImage = UIImage(contentsOfFile: path) else { return nil }
+        imageCache[key] = savedImage
+        return savedImage
+    }
+
+    public func savedPhotoData(for profileID: UUID?) -> Data? {
+        migrateLegacyImageIfNeeded(for: profileID)
+        guard let path = savedPath(for: scopeKey(for: profileID)) else { return nil }
         return try? Data(contentsOf: URL(fileURLWithPath: path))
     }
 
-    private init() {
-        guard let path = defaults.string(forKey: storageKey),
-              let savedImage = UIImage(contentsOfFile: path) else {
-            defaults.removeObject(forKey: storageKey)
-            return
-        }
-        image = savedImage
-    }
-
-    public func save(_ source: UIImage) throws {
-        guard let thumbnail = Self.squareThumbnail(source),
-              let jpegData = thumbnail.jpegData(compressionQuality: 0.84) else {
+    /// Normalizes orientation, center-crops with aspect fill, and saves the 512×512 JPEG immediately.
+    /// Returns the same fitted bytes for the profile sheet's preview.
+    @discardableResult
+    public func saveSelectedImageData(_ sourceData: Data, for profileID: UUID?) throws -> Data {
+        guard let source = UIImage(data: sourceData),
+              let normalized = Self.normalizedImage(source),
+              let fittedJPEG = Self.aspectFillJPEG(normalized) else {
             throw ProfileAvatarStoreError.couldNotEncodeImage
         }
 
-        try saveJPEGData(jpegData)
+        try saveJPEGData(fittedJPEG, for: profileID)
+        return fittedJPEG
     }
 
-    public func saveJPEGData(_ jpegData: Data?) throws {
+    public func saveJPEGData(_ jpegData: Data?, for profileID: UUID?) throws {
         guard let jpegData else {
-            remove()
+            remove(for: profileID)
             return
         }
         guard let savedImage = UIImage(data: jpegData) else {
             throw ProfileAvatarStoreError.couldNotEncodeImage
         }
 
+        migrateLegacyImageIfNeeded(for: profileID)
+        let key = scopeKey(for: profileID)
         let supportDirectory = try Self.applicationSupportDirectory()
-        let destination = supportDirectory.appendingPathComponent(filename, isDirectory: false)
+        let destination = supportDirectory.appendingPathComponent("LinkWaveProfileAvatar-\(key).jpg", isDirectory: false)
         try jpegData.write(to: destination, options: .atomic)
-        defaults.set(destination.path, forKey: storageKey)
-        image = savedImage
+
+        var paths = storedPaths
+        paths[key] = destination.path
+        defaults.set(paths, forKey: pathsKey)
+        imageCache[key] = savedImage
+        if activeProfileID == profileID { image = savedImage }
     }
 
-    public func remove() {
-        if let path = defaults.string(forKey: storageKey) {
+    public func remove(for profileID: UUID?) {
+        migrateLegacyImageIfNeeded(for: profileID)
+        let key = scopeKey(for: profileID)
+        var paths = storedPaths
+        if let path = paths.removeValue(forKey: key) {
             try? FileManager.default.removeItem(atPath: path)
         }
-        if let destination = try? Self.avatarURL() {
-            try? FileManager.default.removeItem(at: destination)
+        if let expectedURL = try? Self.avatarURL(for: key) {
+            try? FileManager.default.removeItem(at: expectedURL)
         }
-        defaults.removeObject(forKey: storageKey)
-        image = nil
+        defaults.set(paths, forKey: pathsKey)
+        imageCache.removeValue(forKey: key)
+        if activeProfileID == profileID { image = nil }
+    }
+
+    private var storedPaths: [String: String] {
+        defaults.dictionary(forKey: pathsKey) as? [String: String] ?? [:]
+    }
+
+    private func scopeKey(for profileID: UUID?) -> String {
+        profileID?.uuidString.lowercased() ?? "unconfigured"
+    }
+
+    private func savedPath(for key: String) -> String? {
+        storedPaths[key]
+    }
+
+    private func migrateLegacyImageIfNeeded(for profileID: UUID?) {
+        let key = scopeKey(for: profileID)
+        var paths = storedPaths
+        guard paths[key] == nil else { return }
+
+        // Move the existing single-avatar install to the first profile that uses the new store.
+        if let legacyPath = defaults.string(forKey: legacyStorageKey) {
+            paths[key] = legacyPath
+            defaults.set(paths, forKey: pathsKey)
+            defaults.removeObject(forKey: legacyStorageKey)
+            if let legacyImage = UIImage(contentsOfFile: legacyPath) {
+                imageCache[key] = legacyImage
+            }
+            return
+        }
+
+        // If an avatar was chosen before a router was configured, attach it to the first saved router.
+        guard profileID != nil,
+              let unconfiguredPath = paths.removeValue(forKey: "unconfigured") else { return }
+        paths[key] = unconfiguredPath
+        defaults.set(paths, forKey: pathsKey)
+        if let unconfiguredImage = imageCache.removeValue(forKey: "unconfigured") {
+            imageCache[key] = unconfiguredImage
+        }
     }
 
     private static func applicationSupportDirectory() throws -> URL {
@@ -71,22 +136,45 @@ public final class ProfileAvatarStore: ObservableObject {
         return directory
     }
 
-    private static func avatarURL() throws -> URL {
-        try applicationSupportDirectory().appendingPathComponent("LinkWaveProfileAvatar.jpg", isDirectory: false)
+    private static func avatarURL(for key: String) throws -> URL {
+        try applicationSupportDirectory().appendingPathComponent("LinkWaveProfileAvatar-\(key).jpg", isDirectory: false)
     }
 
-    private static func squareThumbnail(_ image: UIImage) -> UIImage? {
+    private static func normalizedImage(_ image: UIImage) -> UIImage? {
+        guard image.size.width > 0, image.size.height > 0 else { return nil }
+        guard image.imageOrientation != .up else { return image }
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: image.size, format: format)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }
+    }
+
+    private static func aspectFillJPEG(_ image: UIImage) -> Data? {
         guard image.size.width > 0, image.size.height > 0 else { return nil }
 
-        let side: CGFloat = 256
+        let side: CGFloat = 512
         let scale = max(side / image.size.width, side / image.size.height)
         let drawSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-        let drawOrigin = CGPoint(x: (side - drawSize.width) / 2, y: (side - drawSize.height) / 2)
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
-
-        return renderer.image { _ in
-            image.draw(in: CGRect(origin: drawOrigin, size: drawSize))
+        let drawRect = CGRect(
+            x: (side - drawSize.width) / 2,
+            y: (side - drawSize.height) / 2,
+            width: drawSize.width,
+            height: drawSize.height
+        )
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
+        let fitted = renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+            image.draw(in: drawRect)
         }
+        return fitted.jpegData(compressionQuality: 0.88)
     }
 }
 
@@ -106,20 +194,27 @@ public enum ProfileAvatarStoreError: LocalizedError {
 
 public struct ProfileAvatarView: View {
     @ObservedObject private var store: ProfileAvatarStore
+    private let profileID: UUID?
     private let size: CGFloat
     private let silhouetteSize: CGFloat
     private let cornerRadius: CGFloat
 
-    public init(size: CGFloat = 38, silhouetteSize: CGFloat = 25, cornerRadius: CGFloat = 12) {
+    public init(
+        size: CGFloat = 40,
+        silhouetteSize: CGFloat = 25,
+        cornerRadius: CGFloat = 12,
+        profileID: UUID? = nil
+    ) {
         self.size = size
         self.silhouetteSize = silhouetteSize
         self.cornerRadius = cornerRadius
+        self.profileID = profileID
         self._store = ObservedObject(wrappedValue: .shared)
     }
 
     public var body: some View {
         Group {
-            if let image = store.image {
+            if let image = store.image(for: profileID) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
@@ -131,7 +226,9 @@ public struct ProfileAvatarView: View {
                     .frame(width: size, height: size)
             }
         }
-        .accessibilityLabel(store.image == nil ? "Profile, no photo selected" : "Profile photo")
+        .onAppear { store.activateProfile(profileID) }
+        .onChange(of: profileID) { store.activateProfile($0) }
+        .accessibilityLabel(store.image(for: profileID) == nil ? "Profile, no photo selected" : "Profile photo")
     }
 }
 
@@ -141,21 +238,23 @@ public struct ProfileAvatarPickerButton: View {
     @State private var isShowingProfile = false
     @State private var sheetSessionID = UUID()
 
-    public init(viewModel: MonitorViewModel, size: CGFloat = 38) {
+    public init(viewModel: MonitorViewModel, size: CGFloat = 40) {
         self.viewModel = viewModel
         self.size = size
     }
+
+    private var activeProfileID: UUID? { viewModel.settings.activeProfile?.id }
 
     public var body: some View {
         Button {
             sheetSessionID = UUID()
             isShowingProfile = true
         } label: {
-            ProfileAvatarView(size: size)
+            ProfileAvatarView(size: size, profileID: activeProfileID)
         }
         .buttonStyle(.plain)
         .frame(width: size, height: size)
-        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityLabel("Open Profile")
         .sheet(isPresented: $isShowingProfile) {
             ProfileSheetView(viewModel: viewModel)

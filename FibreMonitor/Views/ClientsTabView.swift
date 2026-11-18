@@ -125,22 +125,6 @@ private struct ClientSignalBars: View {
     }
 }
 
-private enum ClientDeviceFilter: String, CaseIterable {
-    case all
-    case online
-    case offline
-    case blocked
-
-    var menuTitle: String {
-        switch self {
-        case .all: "All"
-        case .online: "Online"
-        case .offline: "Offline"
-        case .blocked: "Blocked"
-        }
-    }
-}
-
 public struct ClientsTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject private var discoveredNameStore: DiscoveredDeviceNameStore
@@ -148,7 +132,6 @@ public struct ClientsTabView: View {
     @State private var searchText = ""
     @State private var selectedDevice: OntDevice?
     @State private var selectedBlockedDevice: BlockedRouterDevice?
-    @State private var selectedFilter: ClientDeviceFilter = .online
     @State private var localWiFiIPv4: String?
     @State private var isOnlineExpanded = true
     @State private var isOfflineExpanded = false
@@ -159,6 +142,8 @@ public struct ClientsTabView: View {
         self.viewModel = viewModel
         _discoveredNameStore = ObservedObject(wrappedValue: .shared)
     }
+
+    private var selectedFilter: ClientsFilter { viewModel.clientsFilter }
 
     public var body: some View {
         NavigationStack {
@@ -398,9 +383,19 @@ public struct ClientsTabView: View {
         return devices.sorted { isThisPhone($0) && !isThisPhone($1) }
     }
 
+    private var filteredWeakClients: [OntDevice] {
+        filter(unblockedDeviceRecords.filter { $0.isOnline && ($0.rssiDbm ?? .infinity) <= -75 })
+            .sorted {
+                let left = $0.rssiDbm ?? .infinity
+                let right = $1.rssiDbm ?? .infinity
+                if left != right { return left < right }
+                return resolvedName(for: $0).localizedCaseInsensitiveCompare(resolvedName(for: $1)) == .orderedAscending
+            }
+    }
+
     private var clientFilterTabs: some View {
         HStack(spacing: 3) {
-            ForEach(ClientDeviceFilter.allCases, id: \.self) { filter in
+            ForEach(ClientsFilter.allCases, id: \.self) { filter in
                 Button {
                     selectFilter(filter)
                 } label: {
@@ -426,10 +421,11 @@ public struct ClientsTabView: View {
         .liquidGlassCapsule()
     }
 
-    private func count(for filter: ClientDeviceFilter) -> Int {
+    private func count(for filter: ClientsFilter) -> Int {
         switch filter {
         case .all: allCount
         case .online: filteredOnline.count
+        case .weak: filteredWeakClients.count
         case .offline: filteredOffline.count
         case .blocked: filteredBlockedDevices.count
         }
@@ -455,11 +451,15 @@ public struct ClientsTabView: View {
     }
 
     private var visibleOnline: [OntDevice] {
-        selectedFilter == .offline || selectedFilter == .blocked ? [] : filteredOnline
+        switch selectedFilter {
+        case .all, .online: filteredOnline
+        case .weak: filteredWeakClients
+        case .offline, .blocked: []
+        }
     }
 
     private var visibleOffline: [OntDevice] {
-        selectedFilter == .online || selectedFilter == .blocked ? [] : filteredOffline
+        selectedFilter == .all || selectedFilter == .offline ? filteredOffline : []
     }
 
     private var allCount: Int { filteredOnline.count + filteredOffline.count }
@@ -468,22 +468,28 @@ public struct ClientsTabView: View {
         switch selectedFilter {
         case .all: allCount
         case .online: filteredOnline.count
+        case .weak: filteredWeakClients.count
         case .offline: filteredOffline.count
         case .blocked: filteredBlockedDevices.count
         }
     }
 
-    private func selectFilter(_ filter: ClientDeviceFilter) {
+    private func selectFilter(_ filter: ClientsFilter) {
         withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
-            selectedFilter = filter
+            viewModel.clientsFilter = filter
             switch filter {
             case .all:
                 isOnlineExpanded = true
                 isOfflineExpanded = false
             case .online:
                 isOnlineExpanded = true
+                isOfflineExpanded = false
+            case .weak:
+                isOnlineExpanded = true
+                isOfflineExpanded = false
             case .offline:
                 isOfflineExpanded = true
+                isOnlineExpanded = false
             case .blocked:
                 break
             }
@@ -513,6 +519,19 @@ public struct ClientsTabView: View {
                     Text("Online (\(filteredOnline.count))")
                     Spacer()
                     if selectedFilter == .online {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+
+            Button {
+                selectFilter(.weak)
+            } label: {
+                HStack {
+                    Image(systemName: "wifi.exclamationmark")
+                    Text("Weak (\(filteredWeakClients.count))")
+                    Spacer()
+                    if selectedFilter == .weak {
                         Image(systemName: "checkmark")
                     }
                 }
@@ -564,6 +583,7 @@ public struct ClientsTabView: View {
         if !searchText.isEmpty { return "No Matching Clients" }
         if selectedFilter == .blocked { return "No blocked devices" }
         if selectedFilter == .online { return "No online devices" }
+        if selectedFilter == .weak { return "No Weak-Signal Clients" }
         if selectedFilter == .offline { return "No offline devices" }
         if viewModel.isLoggedOut { return "Logged Out of Router" }
         if viewModel.isConnected { return "No Clients Reported" }
@@ -574,6 +594,7 @@ public struct ClientsTabView: View {
         if !searchText.isEmpty { return "Try searching by name, IP address, MAC, or vendor." }
         if selectedFilter == .blocked { return "Devices you block from Wi-Fi will appear here." }
         if selectedFilter == .online { return "The router currently reports no online devices." }
+        if selectedFilter == .weak { return "All online devices have strong Wi-Fi signal above -75 dBm." }
         if selectedFilter == .offline { return "All reported devices are currently online." }
         if viewModel.isLoggedOut { return "Tap Reconnect to resume reading the device list." }
         if let err = viewModel.errorMessage { return err }
