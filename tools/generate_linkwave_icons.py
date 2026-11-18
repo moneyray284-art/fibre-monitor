@@ -1,7 +1,7 @@
-"""Generate only the five new LinkWave alternate icon sets.
+"""Generate the 15 Logo Color variants for LinkWave's five alternate designs.
 
-The primary AppIcon and the existing color alternate icons are deliberately
-left untouched. Artwork is drawn from vector bezier paths at 3x resolution and
+The primary AppIcon and all existing alternate icon sets are deliberately left
+untouched. Artwork is drawn from vector bezier paths at 3x resolution and
 downsampled with Lanczos filtering for clean, antialiased 1024px PNGs.
 """
 
@@ -17,12 +17,17 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parents[1] / "FibreMonitor/Resources/Assets.xcassets"
 SIZE = 1024
 SCALE = 3
-ICON_VARIANTS = {
-    "AppIconLaunchArcs": ("#22D3EE", "arcs"),
-    "AppIconMonogramI": ("#38BDF8", "i"),
-    "AppIconArcsI": ("#22D3EE", "arcs_i"),
-    "AppIconLinkRing": ("#2DD4BF", "ring"),
-    "AppIconWavefrontW": ("#38BDF8", "wave_w"),
+DESIGNS = {
+    "AppIconLaunchArcs": "arcs",
+    "AppIconMonogramI": "i",
+    "AppIconArcsI": "arcs_i",
+    "AppIconLinkRing": "ring",
+    "AppIconWavefrontW": "wave_w",
+}
+LOGO_COLORS = {
+    "Cyan": ("#0E7490", "#22D3EE"),
+    "Sky": ("#0284C7", "#38BDF8"),
+    "Mint": ("#0F766E", "#2DD4BF"),
 }
 
 
@@ -169,10 +174,10 @@ def make_artwork(kind: str, draw: ImageDraw.ImageDraw, accent, white) -> None:
     if kind == "arcs":
         launch_arcs(draw, accent)
     elif kind == "i":
-        harmonic_i(draw, accent, white, x=406, y=212, height=600)
+        harmonic_i(draw, accent, accent, x=406, y=212, height=600)
     elif kind == "arcs_i":
         launch_arcs(draw, accent, x=62, y=236, width=510, height=548)
-        harmonic_i(draw, white, white, x=682, y=236, height=548)
+        harmonic_i(draw, accent, accent, x=682, y=236, height=548)
     elif kind == "ring":
         link_ring(draw, accent, white)
     elif kind == "wave_w":
@@ -210,7 +215,7 @@ def render_icon(kind: str, accent_hex: str, appearance: str) -> Image.Image:
     return result.convert("RGB")
 
 
-def save_icon_set(set_name: str, accent: str, artwork: str) -> None:
+def save_icon_set(set_name: str, light_accent: str, dark_accent: str, artwork: str) -> None:
     folder = ROOT / f"{set_name}.appiconset"
     folder.mkdir(parents=True, exist_ok=True)
     entries = []
@@ -220,6 +225,7 @@ def save_icon_set(set_name: str, accent: str, artwork: str) -> None:
         (set_name + "-Tinted.png", "tinted"),
     )
     for filename, appearance in variants:
+        accent = dark_accent if appearance == "dark" else light_accent
         render_icon(artwork, accent, appearance).save(folder / filename, format="PNG", optimize=True)
         image_entry = {
             "filename": filename,
@@ -238,8 +244,14 @@ def save_icon_set(set_name: str, accent: str, artwork: str) -> None:
 
 
 def main() -> None:
-    for set_name, (accent, artwork) in ICON_VARIANTS.items():
-        save_icon_set(set_name, accent, artwork)
+    for design_name, artwork in DESIGNS.items():
+        for color_name, (light_accent, dark_accent) in LOGO_COLORS.items():
+            save_icon_set(
+                f"{design_name}{color_name}",
+                light_accent,
+                dark_accent,
+                artwork,
+            )
 
 
 if __name__ == "__main__":

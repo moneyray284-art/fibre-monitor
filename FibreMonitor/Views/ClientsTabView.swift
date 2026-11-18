@@ -81,9 +81,9 @@ private enum ClientSignal {
         return 1
     }
 
-    static func color(for device: OntDevice) -> Color {
-        guard device.isOnline else { return .secondary }
-        guard device.port.isWifi, let rssi = device.rssiDbm else { return .accentColor }
+    static func color(for device: OntDevice, accent: Color, neutral: Color) -> Color {
+        guard device.isOnline else { return neutral }
+        guard device.port.isWifi, let rssi = device.rssiDbm else { return accent }
         if rssi >= -65 { return .green }
         if rssi >= -79 { return .orange }
         return Color(red: 0.88, green: 0.24, blue: 0.35)
@@ -108,6 +108,7 @@ private enum ClientSignal {
 private struct ClientSignalBars: View {
     let level: Int
     let color: Color
+    let mutedColor: Color
 
     private let heights: [CGFloat] = [4, 7, 10, 13]
 
@@ -115,7 +116,7 @@ private struct ClientSignalBars: View {
         HStack(alignment: .bottom, spacing: 2) {
             ForEach(0..<4, id: \.self) { index in
                 Capsule()
-                    .fill(index < level ? color : Color.secondary.opacity(0.22))
+                    .fill(index < level ? color : mutedColor.opacity(0.42))
                     .frame(width: 3, height: heights[index])
             }
         }
@@ -142,6 +143,7 @@ private enum ClientDeviceFilter: String, CaseIterable {
 
 public struct ClientsTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
+    @Environment(\.linkWaveThemePalette) private var palette
     @State private var showSettings = false
     @State private var searchText = ""
     @State private var selectedDevice: OntDevice?
@@ -391,11 +393,11 @@ public struct ClientsTabView: View {
                         .monospacedDigit()
                         .lineLimit(1)
                         .minimumScaleFactor(0.78)
-                        .foregroundStyle(selectedFilter == filter ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(selectedFilter == filter ? palette.textAccent : palette.textSecondary.color)
                         .frame(maxWidth: .infinity, minHeight: 34)
                         .background {
                             if selectedFilter == filter {
-                                Capsule().fill(Color.accentColor.opacity(0.13))
+                                Capsule().fill(palette.textAccent.opacity(0.13))
                             }
                         }
                         .contentShape(Capsule())
@@ -664,6 +666,7 @@ private struct BlockedClientRow: View {
     let displayName: String
     let onSelect: () -> Void
     let onUnblock: () -> Void
+    @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
         HStack(spacing: 10) {
@@ -689,7 +692,7 @@ private struct BlockedClientRow: View {
             Button("Unblock", action: onUnblock)
                 .font(.caption.weight(.semibold))
                 .buttonStyle(.bordered)
-                .tint(.accentColor)
+                .tint(palette.textAccent)
         }
         .padding(10)
         .liquidGlassPill()
@@ -722,6 +725,7 @@ private struct BlockedClientDetailSheet: View {
                     Text("This restores the device's access to the selected Wi-Fi network.")
                 }
             }
+            .linkWaveThemedListSurface()
             .navigationTitle(displayName.isEmpty ? "Blocked Device" : displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .tabBar)
@@ -738,15 +742,20 @@ private struct ClientRow: View {
     let device: OntDevice
     let displayName: String
     var isThisPhone = false
+    @Environment(\.linkWaveThemePalette) private var palette
+
+    private var signalColor: Color {
+        ClientSignal.color(for: device, accent: palette.textAccent, neutral: palette.textSecondary.color)
+    }
 
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: ClientDeviceIcon.symbol(for: device, isThisPhone: isThisPhone))
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(device.isOnline ? Color.accentColor : Color.secondary)
+                .foregroundStyle(device.isOnline ? palette.textAccent : palette.textSecondary.color)
                 .frame(width: 38, height: 38)
                 .background(
-                    (device.isOnline ? Color.accentColor : Color.secondary)
+                    (device.isOnline ? palette.textAccent : palette.textSecondary.color)
                         .opacity(device.isOnline ? 0.14 : 0.1),
                     in: Circle()
                 )
@@ -761,10 +770,10 @@ private struct ClientRow: View {
                     if isThisPhone {
                         Text("This Device")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(palette.textAccent)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
-                            .background(Color.accentColor.opacity(0.12), in: Capsule())
+                            .background(palette.textAccent.opacity(0.12), in: Capsule())
                     }
                 }
                 HStack(spacing: 4) {
@@ -790,7 +799,11 @@ private struct ClientRow: View {
             if device.isOnline {
                 VStack(alignment: .trailing, spacing: 5) {
                     HStack(spacing: 5) {
-                        ClientSignalBars(level: ClientSignal.bars(for: device), color: ClientSignal.color(for: device))
+                        ClientSignalBars(
+                            level: ClientSignal.bars(for: device),
+                            color: signalColor,
+                            mutedColor: palette.textTertiary.color
+                        )
                         if let rssi = device.rssiDbm, device.port.isWifi {
                             Text("\(Int(rssi.rounded())) dBm")
                                 .font(.caption2.monospacedDigit())
@@ -798,12 +811,12 @@ private struct ClientRow: View {
                             if let quality = ClientSignal.quality(for: device) {
                                 Text("· \(quality)")
                                     .font(.caption2.weight(.medium))
-                                    .foregroundStyle(ClientSignal.color(for: device))
+                                    .foregroundStyle(signalColor)
                             }
                         }
                     }
                     if let bandLabel {
-                        Pill(text: bandLabel, color: .accentColor)
+                        Pill(text: bandLabel, color: palette.textAccent)
                     }
                 }
             } else {
@@ -816,7 +829,7 @@ private struct ClientRow: View {
 
             Image(systemName: "chevron.right")
                 .font(.caption2.weight(.semibold))
-                .foregroundColor(.secondary.opacity(0.6))
+                .foregroundColor(palette.textTertiary.color.opacity(0.8))
                 .accessibilityHidden(true)
         }
         .padding(.horizontal, 8)
@@ -962,6 +975,7 @@ private struct ClientDetailSheet: View {
                     }
                 }
             }
+            .linkWaveThemedListSurface()
             .navigationTitle(viewModel.name(for: currentDevice))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .tabBar)
@@ -1074,6 +1088,7 @@ private struct ClientRouterRenameSheet: View {
                     }
                 }
             }
+            .linkWaveThemedListSurface()
             .navigationTitle("Rename on Router")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .tabBar)

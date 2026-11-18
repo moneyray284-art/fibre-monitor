@@ -2,14 +2,15 @@ import SwiftUI
 
 struct SpeedSection: View {
     let traffic: TrafficState
+    @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
                 SpeedCard(title: "DOWNLOAD", mbps: traffic.downloadMbps, peak: traffic.peakDownloadMbps,
-                          icon: "arrow.down.circle.fill", tint: .accentColor)
+                          icon: "arrow.down.circle.fill", tint: palette.textAccent)
                 SpeedCard(title: "UPLOAD", mbps: traffic.uploadMbps, peak: traffic.peakUploadMbps,
-                          icon: "arrow.up.circle.fill", tint: Color.accentColor.opacity(0.72))
+                          icon: "arrow.up.circle.fill", tint: palette.textAccent.opacity(0.72))
             }
             Sparkline(samples: traffic.history)
                 .frame(height: 70)
@@ -64,13 +65,14 @@ private struct SpeedCard: View {
 /// Last minute of download and upload in the active LinkWave accent.
 private struct Sparkline: View {
     let samples: [ThroughputSample]
+    @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
         GeometryReader { geo in
             let maxValue = max(1, samples.map { max($0.downloadMbps, $0.uploadMbps) }.max() ?? 1)
             ZStack {
-                line(samples.map(\.downloadMbps), max: maxValue, in: geo.size).stroke(Color.accentColor, lineWidth: 2)
-                line(samples.map(\.uploadMbps), max: maxValue, in: geo.size).stroke(Color.accentColor.opacity(0.55), lineWidth: 2)
+                line(samples.map(\.downloadMbps), max: maxValue, in: geo.size).stroke(palette.textAccent, lineWidth: 2)
+                line(samples.map(\.uploadMbps), max: maxValue, in: geo.size).stroke(palette.textAccent.opacity(0.55), lineWidth: 2)
                 if samples.count < 2 {
                     Text("Collecting speed samples…").font(.caption2).linkWaveText(.secondary)
                 }
@@ -93,6 +95,7 @@ private struct Sparkline: View {
 /// Optical Rx power card with a calibrated bar reflecting `OpticalInfo.Quality` thresholds.
 struct FibreCard: View {
     let optical: OpticalInfo
+    @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -102,7 +105,7 @@ struct FibreCard: View {
                 } else {
                     Pill(
                         text: optical.isRegistered ? "Registered" : (optical.registrationState.isEmpty ? "—" : "Not registered"),
-                        color: optical.isRegistered ? .accentColor : .orange
+                        color: optical.isRegistered ? palette.textAccent : .orange
                     )
                 }
             }
@@ -111,7 +114,7 @@ struct FibreCard: View {
                 Text(optical.rxPowerDbm.map { String(format: "%.2f", $0) } ?? "—")
                     .font(.system(.largeTitle, design: .rounded).weight(.bold))
                     .monospacedDigit()
-                    .foregroundColor(optical.rxPowerDbm == nil ? .secondary : .primary)
+                    .foregroundColor(optical.rxPowerDbm == nil ? palette.textSecondary.color : palette.textPrimary.color)
                     .contentTransition(.numericText())
                 Text("dBm")
                     .font(.subheadline.weight(.semibold))
@@ -295,12 +298,13 @@ struct SystemLoadCard: View {
 private struct LoadBarRow: View {
     let label: String
     let percent: Int
+    @Environment(\.linkWaveThemePalette) private var palette
 
     private var clamped: Int { min(100, max(0, percent)) }
     private var tint: Color {
         if clamped >= 85 { return .red }
         if clamped >= 65 { return .orange }
-        return .accentColor
+        return palette.textAccent
     }
 
     var body: some View {
@@ -360,11 +364,12 @@ struct CardHeader<Accessory: View>: View {
     let icon: String
     let title: String
     @ViewBuilder var accessory: Accessory
+    @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
         HStack {
             Image(systemName: icon)
-                .foregroundColor(.accentColor)
+                .foregroundColor(palette.textAccent)
                 .accessibilityHidden(true)
             Text(title).font(.subheadline.weight(.bold))
             Spacer()

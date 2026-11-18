@@ -32,7 +32,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mattdev0.fibremonitor
         INFOPLIST_FILE: FibreMonitor/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIconOrange AppIconBlue AppIconPurple AppIconGreen AppIconLaunchArcs AppIconMonogramI AppIconArcsI AppIconLinkRing AppIconWavefrontW"
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIconOrange AppIconBlue AppIconPurple AppIconGreen AppIconLaunchArcs AppIconMonogramI AppIconArcsI AppIconLinkRing AppIconWavefrontW AppIconLaunchArcsCyan AppIconLaunchArcsSky AppIconLaunchArcsMint AppIconMonogramICyan AppIconMonogramISky AppIconMonogramIMint AppIconArcsICyan AppIconArcsISky AppIconArcsIMint AppIconLinkRingCyan AppIconLinkRingSky AppIconLinkRingMint AppIconWavefrontWCyan AppIconWavefrontWSky AppIconWavefrontWMint"
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_ENTITLEMENTS: FibreMonitor/Resources/FibreMonitor.entitlements

@@ -34,6 +34,7 @@ struct RouterLaunchPickerView: View {
                     }
                 }
             }
+            .linkWaveThemedListSurface()
             .navigationTitle("Choose Router")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $addingProfile) {
@@ -52,12 +53,13 @@ struct RouterLaunchPickerView: View {
 struct RouterProfileRow: View {
     let profile: RouterProfile
     let isActive: Bool
+    @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "wifi.router")
                 .font(.title3)
-                .foregroundColor(isActive ? .accentColor : .secondary)
+                .foregroundColor(isActive ? palette.textAccent : palette.textSecondary.color)
                 .frame(width: 28)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -91,7 +93,7 @@ struct RouterProfileRow: View {
 
             if isActive {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(palette.textAccent)
             }
         }
         .padding(.vertical, 2)
@@ -199,6 +201,7 @@ struct RouterProfileEditorView: View {
                     }
                 }
             }
+            .linkWaveThemedListSurface()
             .navigationTitle(isEditing ? "Edit Router" : "Add Router")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .tabBar)

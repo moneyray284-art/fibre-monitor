@@ -3,6 +3,7 @@ import SwiftUI
 public struct UsageTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
+    @Environment(\.linkWaveThemePalette) private var palette
     @State private var showSettings = false
 
     public init(viewModel: MonitorViewModel) {
@@ -70,7 +71,7 @@ public struct UsageTabView: View {
         VStack(spacing: 12) {
             Image(systemName: "arrow.up.arrow.down.circle")
                 .font(.system(size: 36))
-                .foregroundColor(.accentColor)
+                .foregroundColor(palette.textAccent)
                 .accessibilityHidden(true)
             Text("Usage tracking needs a router")
                 .font(.headline)
@@ -88,6 +89,7 @@ public struct UsageTabView: View {
 
 private struct SyncStatusCard: View {
     let summary: DataUsageSummary
+    @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -122,7 +124,7 @@ private struct SyncStatusCard: View {
             } else {
                 Label("Daily history has readings for the last 7 days", systemImage: "checkmark.circle.fill")
                     .font(.caption.weight(.medium))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(palette.textAccent)
             }
 
             Text("The iPhone checks the router while LinkWave is active. A long gap can leave the daily split incomplete.")
@@ -225,6 +227,7 @@ private struct DailyUsageHistoryCard: View {
     let onLocalDayRollover: () -> Void
     @State private var selectedDate = Calendar.current.startOfDay(for: Date())
     @State private var selectedMonth = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Calendar.current.startOfDay(for: Date())
+    @Environment(\.linkWaveThemePalette) private var palette
 
     private var calendar: Calendar { Calendar.current }
 
@@ -343,7 +346,7 @@ private struct DailyUsageHistoryCard: View {
                     .font(.system(size: 9, weight: .bold))
             }
             .font(.caption.weight(.semibold))
-            .foregroundStyle(Color.accentColor)
+            .foregroundStyle(palette.textAccent)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .liquidGlassCapsule()
@@ -386,7 +389,7 @@ private struct DailyUsageHistoryCard: View {
                         path.move(to: CGPoint(x: 0, y: plotHeight / 2))
                         path.addLine(to: CGPoint(x: plotWidth, y: plotHeight / 2))
                     }
-                    .stroke(Color.secondary.opacity(0.34), style: StrokeStyle(lineWidth: 0.8, dash: [2, 3]))
+                    .stroke(palette.textSecondary.color.opacity(0.34), style: StrokeStyle(lineWidth: 0.8, dash: [2, 3]))
                     .allowsHitTesting(false)
                 }
                 .frame(width: plotWidth, height: plotHeight, alignment: .bottomLeading)
@@ -444,18 +447,18 @@ private struct DailyUsageHistoryCard: View {
             selectedDate = point.date
         } label: {
             Capsule(style: .continuous)
-                .fill(Color.accentColor.opacity(isSelected ? 0.16 : 0.10))
+                .fill(palette.textAccent.opacity(isSelected ? 0.16 : 0.10))
                 .overlay(alignment: .bottom) {
                     if total > 0 {
                         Capsule(style: .continuous)
-                            .fill(Color.accentColor.opacity(isSelected ? 1 : 0.58))
+                            .fill(palette.textAccent.opacity(isSelected ? 1 : 0.58))
                             .frame(height: usageHeight)
                     }
                 }
                 .overlay {
                     if isSelected {
                         Capsule(style: .continuous)
-                            .stroke(Color.accentColor.opacity(0.9), lineWidth: 1)
+                            .stroke(palette.textAccent.opacity(0.9), lineWidth: 1)
                     }
                 }
                 .frame(width: width, height: height)
@@ -484,7 +487,7 @@ private struct DailyUsageHistoryCard: View {
                         .linkWaveText(.secondary)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                        .background(palette.textTertiary.color.opacity(0.18), in: Capsule())
                 }
             }
 

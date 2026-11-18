@@ -29,10 +29,9 @@ public struct SettingsTabView: View {
             }
             aboutSection
         }
-        .scrollContentBackground(.hidden)
-        .background { LiquidGlassBackground() }
         .environment(\.linkWaveThemePalette, palette)
         .environment(\.linkWaveSurfaceStyle, surfaceStyle)
+        .linkWaveThemedListSurface()
         .linkWaveText(.primary)
         .liquidGlassScrollEdges()
         .toolbar(.hidden, for: .tabBar)
@@ -130,6 +129,7 @@ public struct SettingsTabView: View {
             }
         } footer: {
             Text("Tap a router to switch to it. Switching logs out of the current router session first. Swipe or tap Edit to reorder or remove a profile.")
+                .linkWaveText(.secondary)
         }
     }
 
@@ -164,22 +164,18 @@ public struct SettingsTabView: View {
             }
             .pickerStyle(.segmented)
 
-            Picker("Accent Color", selection: $settings.accentColor) {
-                ForEach(AppAccentColor.allCases) { accent in
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(accent.color)
-                            .frame(width: 12, height: 12)
-                        Text(accent.title)
-                    }
-                    .tag(accent)
-                }
-            }
-            .pickerStyle(.menu)
+            ColorPicker(
+                "Accent Color",
+                selection: Binding(
+                    get: { palette.accent.color },
+                    set: { settings.setThemeColor($0, for: \.accent, scheme: colorScheme) }
+                ),
+                supportsOpacity: false
+            )
 
             Picker("Logo Color", selection: Binding(
                 get: { settings.logoColor },
-                set: { if let choice = $0 { settings.setLogoColor(choice) } }
+                set: { settings.setLogoColor($0) }
             )) {
                 ForEach(AppLogoColorChoice.allCases) { choice in
                     HStack(spacing: 8) {
@@ -188,7 +184,7 @@ public struct SettingsTabView: View {
                             .frame(width: 12, height: 12)
                         Text(choice.title)
                     }
-                    .tag(Optional(choice))
+                    .tag(choice)
                 }
             }
             .pickerStyle(.menu)
@@ -197,12 +193,11 @@ public struct SettingsTabView: View {
                 ForEach(AppIconChoice.allCases) { choice in
                     AppIconPickerTile(
                         choice: choice,
-                        isSelected: appIconManager.activeIconName == choice.alternateIconName,
-                        accent: palette.accent.color
+                        isSelected: appIconManager.activeIconName == choice.alternateIconName(logoColor: settings.logoColor),
+                        logoColor: settings.logoColor.color(for: colorScheme)
                     ) {
-                        settings.autoMatchAppIconToAccentColor = false
                         settings.appIconChoice = choice
-                        appIconManager.apply(choice)
+                        appIconManager.apply(choice, logoColor: settings.logoColor)
                     }
                     .disabled(!appIconManager.supportsAlternateIcons && choice != .classic)
                 }
@@ -211,7 +206,7 @@ public struct SettingsTabView: View {
             if !appIconManager.supportsAlternateIcons {
                 Text("Alternate app icons aren't supported on this device.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .linkWaveText(.secondary)
             }
             if let error = appIconManager.errorMessage {
                 Text(error)
@@ -220,8 +215,11 @@ public struct SettingsTabView: View {
                     .accessibilityLabel("App icon error: \(error)")
             }
 
-            Toggle("Auto-Match Accent Theme", isOn: $settings.autoMatchAppIconToAccentColor)
-                .accessibilityHint("Automatically uses the app icon that matches the selected accent color.")
+            Toggle("Auto-Match Accent Theme", isOn: Binding(
+                get: { settings.autoMatchAppIconToAccentColor },
+                set: { settings.setAutoMatchAccentTheme($0, sourceScheme: colorScheme) }
+            ))
+                .accessibilityHint("Keeps the Light and Dark accent colors in sync. The app icon and Logo Color remain independent.")
 
             NavigationLink {
                 ThemeSettingsView(settings: settings)
@@ -332,6 +330,7 @@ public struct SettingsTabView: View {
             Text("Session")
         } footer: {
             Text("Logging out frees the router's single-session web interface so you can open it in a browser.")
+                .linkWaveText(.secondary)
         }
     }
 

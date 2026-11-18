@@ -71,7 +71,7 @@ public enum ProfileAvatarStoreError: LocalizedError {
 
 public struct ProfileAvatarView: View {
     @ObservedObject private var store: ProfileAvatarStore
-    @Environment(\.linkWaveThemePalette) private var palette
+    @Environment(\.linkWaveLogoColor) private var logoColor
     private let size: CGFloat
 
     public init(size: CGFloat = 52) {
@@ -92,7 +92,7 @@ public struct ProfileAvatarView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(
                         LinearGradient(
-                            colors: [palette.accent.color, palette.accent.color.opacity(0.72)],
+                            colors: [logoColor, logoColor.opacity(0.72)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )

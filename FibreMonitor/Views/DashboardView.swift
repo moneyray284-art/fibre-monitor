@@ -83,7 +83,7 @@ public struct DashboardView: View {
                     LinkWaveWordmark(
                         nodesArePulsing: false,
                         white: settings.themePalette(for: colorScheme).textPrimary.color,
-                        cyan: settings.themePalette(for: colorScheme).accent.color,
+                        cyan: settings.logoColor.color(for: colorScheme),
                         fontSize: 18
                     )
                 }
@@ -145,13 +145,14 @@ private struct RouterHeaderCard: View {
     @ObservedObject var settings: SettingsStore
     let testDownloadMbps: Double?
     let testUploadMbps: Double?
+    @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.12))
+                        .fill(palette.textAccent.opacity(0.12))
                         .frame(width: 66, height: 54)
                     HuaweiOptiXstarIllustration(isOnline: viewModel.isConnected, wifiOnline: wifiOnline)
                 }
@@ -292,7 +293,7 @@ private struct HuaweiOptiXstarIllustration: View {
                 .frame(width: 62, height: 25)
                 .overlay {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(Color.primary.opacity(0.12), lineWidth: 0.8)
+                        .stroke(palette.textPrimary.color.opacity(0.12), lineWidth: 0.8)
                 }
                 .overlay(alignment: .bottomLeading) {
                     HStack(spacing: 5) {
@@ -332,6 +333,7 @@ private struct HuaweiOptiXstarIllustration: View {
 
 private struct FibreSignalMeter: View {
     let rxPowerDbm: Double
+    @Environment(\.linkWaveThemePalette) private var palette
 
     private var level: Int {
         if rxPowerDbm >= -24 { return 4 }
@@ -353,7 +355,7 @@ private struct FibreSignalMeter: View {
             HStack(alignment: .bottom, spacing: 2) {
                 ForEach(0..<4, id: \.self) { index in
                     Capsule()
-                        .fill(index < level ? tint : Color.secondary.opacity(0.18))
+                        .fill(index < level ? tint : palette.textTertiary.color.opacity(0.55))
                         .frame(width: 4, height: CGFloat(7 + index * 4))
                 }
             }
@@ -397,6 +399,7 @@ private struct CompactSpeedCard: View {
     let traffic: TrafficState
     var downloadOverrideMbps: Double? = nil
     var uploadOverrideMbps: Double? = nil
+    @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
         HStack(spacing: 13) {
@@ -404,18 +407,18 @@ private struct CompactSpeedCard: View {
                 title: "Download",
                 value: downloadOverrideMbps ?? traffic.downloadMbps,
                 icon: "arrow.down",
-                tint: .accentColor
+                tint: palette.textAccent
             )
 
             Rectangle()
-                .fill(Color.primary.opacity(0.1))
+                .fill(palette.textTertiary.color.opacity(0.45))
                 .frame(width: 1, height: 35)
 
             speedMetric(
                 title: "Upload",
                 value: uploadOverrideMbps ?? traffic.uploadMbps,
                 icon: "arrow.up",
-                tint: Color.accentColor.opacity(0.72)
+                tint: palette.textAccent.opacity(0.72)
             )
         }
         .padding(.vertical, 2)
@@ -467,13 +470,14 @@ private struct SpeedTestCard: View {
     @State private var errorMessage: String?
     @State private var isRunning = false
     @State private var testTask: Task<Void, Never>?
+    @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
             HStack(spacing: 9) {
                 Image(systemName: "speedometer")
                     .font(.headline.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(palette.textAccent)
                 Text("Speed Test")
                     .font(.headline.weight(.semibold))
                     .linkWaveText(.primary)
@@ -481,22 +485,22 @@ private struct SpeedTestCard: View {
                 if isRunning {
                     Text(progress.phase.rawValue.uppercased())
                         .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(palette.textAccent)
                         .lineLimit(1)
                 }
             }
 
             if let result {
                 HStack(spacing: 0) {
-                    resultMetric("Ping", value: String(format: "%.0f ms", result.pingMs), tint: .primary)
-                    resultMetric("Jitter", value: String(format: "%.0f ms", result.jitterMs), tint: .primary)
-                    resultMetric("Downlink", value: Self.speed(result.downloadMbps), tint: .accentColor)
-                    resultMetric("Uplink", value: Self.speed(result.uploadMbps), tint: Color.accentColor.opacity(0.72))
+                    resultMetric("Ping", value: String(format: "%.0f ms", result.pingMs), tint: palette.textPrimary.color)
+                    resultMetric("Jitter", value: String(format: "%.0f ms", result.jitterMs), tint: palette.textPrimary.color)
+                    resultMetric("Downlink", value: Self.speed(result.downloadMbps), tint: palette.textAccent)
+                    resultMetric("Uplink", value: Self.speed(result.uploadMbps), tint: palette.textAccent.opacity(0.72))
                 }
             } else {
                 HStack(spacing: 0) {
-                    resultMetric("Ping", value: "-- ms", tint: .primary)
-                    resultMetric("Jitter", value: "-- ms", tint: .primary)
+                    resultMetric("Ping", value: "-- ms", tint: palette.textPrimary.color)
+                    resultMetric("Jitter", value: "-- ms", tint: palette.textPrimary.color)
                     if isRunning {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(progress.phase == .ping ? "Latency" : (progress.phase == .download ? "Download" : "Upload"))
@@ -514,7 +518,7 @@ private struct SpeedTestCard: View {
 
             if isRunning {
                 ProgressView(value: progress.fraction)
-                    .tint(.accentColor)
+                    .tint(palette.textAccent)
                     .accessibilityLabel("Speed test progress")
             } else if let errorMessage {
                 Text(errorMessage)
@@ -525,7 +529,7 @@ private struct SpeedTestCard: View {
 
             if isRunning {
                 HStack(spacing: 8) {
-                    ProgressView().tint(.accentColor)
+                    ProgressView().tint(palette.textAccent)
                     Text(phaseStatus)
                         .font(.caption.weight(.medium))
                         .linkWaveText(.secondary)
@@ -536,13 +540,13 @@ private struct SpeedTestCard: View {
                     Button("Stop", action: stopTest)
                         .font(.caption.weight(.semibold))
                         .buttonStyle(.bordered)
-                        .tint(.accentColor)
+                        .tint(palette.textAccent)
                 }
             } else {
                 Button(action: startTest) {
                     Label(startButtonTitle, systemImage: startButtonSymbol)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(viewModel.canRunSpeedTest ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(viewModel.canRunSpeedTest ? palette.textAccent : palette.textSecondary.color)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                 }
@@ -663,6 +667,7 @@ private struct HomeSummaryRow: View {
     let offlineCount: Int
     let openUsage: () -> Void
     let openClients: () -> Void
+    @Environment(\.linkWaveThemePalette) private var palette
 
     private var todayTotalBytes: UInt64 {
         let (total, overflow) = summary.todayDownloadBytes.addingReportingOverflow(summary.todayUploadBytes)
@@ -686,9 +691,9 @@ private struct HomeSummaryRow: View {
                         .contentTransition(.numericText())
                     HStack(spacing: 7) {
                         Label(Self.format(summary.todayDownloadBytes), systemImage: "arrow.down")
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(palette.textAccent)
                         Label(Self.format(summary.todayUploadBytes), systemImage: "arrow.up")
-                            .foregroundStyle(Color.secondary)
+                            .foregroundStyle(palette.textSecondary.color)
                     }
                     .font(.system(size: 9, weight: .medium, design: .rounded))
                     .lineLimit(1)
@@ -723,7 +728,7 @@ private struct HomeSummaryRow: View {
                     Spacer(minLength: 0)
                     Label("View clients", systemImage: "chevron.right")
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(palette.textAccent)
                 }
                 .frame(maxWidth: .infinity, minHeight: 108, maxHeight: .infinity, alignment: .topLeading)
                 .linkWaveGlassCard()
@@ -741,6 +746,7 @@ private struct HomeSummaryRow: View {
 
 private struct MetricsTileGrid: View {
     @ObservedObject var viewModel: MonitorViewModel
+    @Environment(\.linkWaveThemePalette) private var palette
 
     private let columns = [
         GridItem(.flexible(), spacing: 12),
@@ -766,7 +772,7 @@ private struct MetricsTileGrid: View {
 
             MetricTile(
                 icon: "clock.arrow.circlepath",
-                iconTint: .accentColor,
+                iconTint: palette.textAccent,
                 title: wan.connectionType == "IPoE" ? "WAN Uptime" : "PPPoE Uptime",
                 value: InternetCard.uptime(wan.uptimeSeconds),
                 subtitle: wan.connectionStatus.isEmpty ? nil : wan.connectionStatus
@@ -775,7 +781,7 @@ private struct MetricsTileGrid: View {
             if let ontUptime = health.uptimeSeconds, ontUptime > 0 {
                 MetricTile(
                     icon: "timer",
-                    iconTint: .accentColor.opacity(0.72),
+                    iconTint: palette.textAccent.opacity(0.72),
                     title: "ONT Uptime",
                     value: InternetCard.uptime(ontUptime),
                     subtitle: health.model.isEmpty ? nil : health.model
@@ -804,10 +810,10 @@ private struct MetricsTileGrid: View {
             } label: {
                 MetricTile(
                     icon: "laptopcomputer.and.iphone",
-                    iconTint: .accentColor,
+                    iconTint: palette.textAccent,
                     title: "Active Devices",
                     value: "\(viewModel.onlineDevices.count)",
-                    pill: ("Clients", .accentColor),
+                    pill: ("Clients", palette.textAccent),
                     subtitle: viewModel.devices.count > viewModel.onlineDevices.count
                         ? "\(viewModel.devices.count - viewModel.onlineDevices.count) offline"
                         : "Tap to view all"
@@ -854,12 +860,13 @@ private struct RebootSection: View {
 
 private struct NoRouterCard: View {
     let openSettings: () -> Void
+    @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: "wifi.router")
                 .font(.system(size: 40))
-                .foregroundColor(.accentColor)
+                .foregroundColor(palette.textAccent)
             Text("No Router Configured")
                 .font(.headline)
             Text("Add a Huawei OptiXstar router profile in Settings to start live fibre monitoring.")

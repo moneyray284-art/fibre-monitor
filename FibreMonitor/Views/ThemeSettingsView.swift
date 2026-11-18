@@ -41,7 +41,7 @@ struct ThemeSettingsView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
         }
-        .background(palette.bgPrimary.color.ignoresSafeArea())
+        .background(palette.backgroundPrimary.ignoresSafeArea())
         .environment(\.linkWaveThemePalette, palette)
         .linkWaveText(.primary)
         .navigationTitle("Theme & Haptics")
@@ -237,12 +237,7 @@ struct ThemeSettingsView: View {
 
     private func cardContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(spacing: 0, content: content)
-            .background(palette.bgSecondary.color)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(palette.textTertiary.color.opacity(0.14), lineWidth: 0.75)
-            }
+            .linkWaveGlassCard(padding: 0)
     }
 
     private var divider: some View {

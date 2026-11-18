@@ -3,13 +3,13 @@ import SwiftUI
 struct AppIconPickerTile: View {
     let choice: AppIconChoice
     let isSelected: Bool
-    let accent: Color
+    let logoColor: Color
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 7) {
-                LinkWaveAppIconPreview(choice: choice, accent: accent)
+                LinkWaveAppIconPreview(choice: choice, logoColor: logoColor)
                     .frame(width: 66, height: 66)
 
                 Text(choice.title)
@@ -19,18 +19,18 @@ struct AppIconPickerTile: View {
 
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(isSelected ? accent : .secondary.opacity(0.55))
+                    .foregroundStyle(isSelected ? logoColor : .secondary.opacity(0.55))
                     .accessibilityHidden(true)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 9)
             .background(
-                isSelected ? accent.opacity(0.09) : Color.clear,
+                isSelected ? logoColor.opacity(0.09) : Color.clear,
                 in: RoundedRectangle(cornerRadius: 16, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(isSelected ? accent.opacity(0.45) : Color.primary.opacity(0.08), lineWidth: 1)
+                    .stroke(isSelected ? logoColor.opacity(0.45) : Color.primary.opacity(0.08), lineWidth: 1)
             }
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
@@ -41,7 +41,7 @@ struct AppIconPickerTile: View {
 
 private struct LinkWaveAppIconPreview: View {
     let choice: AppIconChoice
-    let accent: Color
+    let logoColor: Color
 
     var body: some View {
         ZStack {
@@ -70,23 +70,23 @@ private struct LinkWaveAppIconPreview: View {
     private var artwork: some View {
         switch choice {
         case .launchArcs:
-            LinkWaveIconArcMark().stroke(accent, style: StrokeStyle(lineWidth: 3.4, lineCap: .round, lineJoin: .round))
+            LinkWaveIconArcMark().stroke(logoColor, style: StrokeStyle(lineWidth: 3.4, lineCap: .round, lineJoin: .round))
                 .frame(width: 39, height: 40)
         case .monogramI:
-            HarmonicNodeIPreview(color: accent, stem: .white)
+            HarmonicNodeIPreview(color: logoColor, stem: logoColor)
                 .frame(width: 16, height: 40)
         case .arcsI:
             HStack(spacing: 2) {
-                LinkWaveIconArcMark().stroke(accent, style: StrokeStyle(lineWidth: 3.2, lineCap: .round, lineJoin: .round))
+                LinkWaveIconArcMark().stroke(logoColor, style: StrokeStyle(lineWidth: 3.2, lineCap: .round, lineJoin: .round))
                     .frame(width: 31, height: 38)
-                HarmonicNodeIPreview(color: .white, stem: .white)
+                HarmonicNodeIPreview(color: logoColor, stem: logoColor)
                     .frame(width: 13, height: 38)
             }
         case .linkRing:
-            LinkWaveLinkRing(accent: accent)
+            LinkWaveLinkRing(accent: logoColor)
                 .frame(width: 43, height: 40)
         case .wavefrontW:
-            LinkWaveWaveW().stroke(accent, style: StrokeStyle(lineWidth: 4.2, lineCap: .round, lineJoin: .round))
+            LinkWaveWaveW().stroke(logoColor, style: StrokeStyle(lineWidth: 4.2, lineCap: .round, lineJoin: .round))
                 .frame(width: 43, height: 35)
         case .classic, .orange, .blue, .purple, .green:
             ClassicWiFiPreviewMark()

@@ -1,0 +1,38 @@
+{
+    "images":  [
+                   {
+                       "size":  "1024x1024",
+                       "platform":  "ios",
+                       "filename":  "AppIconLaunchArcsCyan.png",
+                       "idiom":  "universal"
+                   },
+                   {
+                       "size":  "1024x1024",
+                       "platform":  "ios",
+                       "filename":  "AppIconLaunchArcsCyan-Dark.png",
+                       "idiom":  "universal",
+                       "appearances":  [
+                                           {
+                                               "value":  "dark",
+                                               "appearance":  "luminosity"
+                                           }
+                                       ]
+                   },
+                   {
+                       "size":  "1024x1024",
+                       "platform":  "ios",
+                       "filename":  "AppIconLaunchArcsCyan-Tinted.png",
+                       "idiom":  "universal",
+                       "appearances":  [
+                                           {
+                                               "value":  "tinted",
+                                               "appearance":  "luminosity"
+                                           }
+                                       ]
+                   }
+               ],
+    "info":  {
+                 "author":  "xcode",
+                 "version":  1
+             }
+}

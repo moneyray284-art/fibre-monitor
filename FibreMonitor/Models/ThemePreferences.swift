@@ -48,6 +48,12 @@ public struct ThemePalette: Codable, Equatable {
     public var textTertiary: CodableColor
     public var accent: CodableColor
 
+    public var backgroundPrimary: Color { bgPrimary.color }
+    public var backgroundSecondary: Color { bgSecondary.color }
+    public var backgroundTertiary: Color { bgTertiary.color }
+    public var backgroundElevated: Color { bgElevated.color }
+    public var textAccent: Color { accent.color }
+
     public init(
         bgPrimary: CodableColor,
         bgSecondary: CodableColor,
@@ -190,10 +196,19 @@ private struct LinkWaveThemePaletteKey: EnvironmentKey {
     static let defaultValue = AppThemePreset.linkWaveDefault.lightPalette
 }
 
+private struct LinkWaveLogoColorKey: EnvironmentKey {
+    static let defaultValue = AppLogoColorChoice.cyan.color(for: .light)
+}
+
 extension EnvironmentValues {
     var linkWaveThemePalette: ThemePalette {
         get { self[LinkWaveThemePaletteKey.self] }
         set { self[LinkWaveThemePaletteKey.self] = newValue }
+    }
+
+    var linkWaveLogoColor: Color {
+        get { self[LinkWaveLogoColorKey.self] }
+        set { self[LinkWaveLogoColorKey.self] = newValue }
     }
 }
 

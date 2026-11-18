@@ -4,6 +4,7 @@ import UIKit
 
 public struct WifiTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
+    @Environment(\.linkWaveThemePalette) private var palette
     @State private var pendingRadio: (radio: WifiRadio, enable: Bool)?
     @State private var activeSheet: WifiSheetRoute?
     @State private var showSettings = false
@@ -36,7 +37,7 @@ public struct WifiTabView: View {
                                     ProgressView().controlSize(.small)
                                 } else {
                                     Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(Color.accentColor)
+                                        .foregroundStyle(palette.textAccent)
                                 }
                                 Text(status)
                                     .font(.caption)
@@ -162,7 +163,7 @@ public struct WifiTabView: View {
                 let radio = entry.element
                 HStack(spacing: 12) {
                     Image(systemName: radio.enabled ? "wifi" : "wifi.slash")
-                        .foregroundColor(radio.enabled ? .accentColor : .secondary)
+                        .foregroundColor(radio.enabled ? palette.textAccent : palette.textSecondary.color)
                         .frame(width: 28)
                         .accessibilityHidden(true)
 
@@ -243,6 +244,7 @@ private struct WifiNetworkRow: View {
 
     @State private var optimisticEnabled: Bool?
     @State private var showDeleteConfirmation = false
+    @Environment(\.linkWaveThemePalette) private var palette
 
     private var enabledBinding: Binding<Bool> {
         Binding(
@@ -278,7 +280,7 @@ private struct WifiNetworkRow: View {
                     HStack(spacing: 5) {
                         Text(enabledBinding.wrappedValue ? "On" : "Off")
                             .font(.caption2.weight(.medium))
-                            .foregroundStyle(enabledBinding.wrappedValue ? Color.accentColor : Color.secondary)
+                            .foregroundStyle(enabledBinding.wrappedValue ? palette.textAccent : palette.textSecondary.color)
                         Toggle("SSID \(network.ssidIndex)", isOn: enabledBinding)
                             .labelsHidden()
                             .scaleEffect(0.86, anchor: .leading)
@@ -320,7 +322,7 @@ private struct WifiNetworkRow: View {
                     .accessibilityLabel("Delete \(network.name)")
                 }
             }
-            .foregroundStyle(Color.accentColor)
+            .foregroundStyle(palette.textAccent)
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 9)
@@ -410,7 +412,7 @@ private struct WifiQrSheet: View {
                     Text(cfg.ssid.isEmpty ? network.name : cfg.ssid)
                         .font(.title3.weight(.bold))
                     Spacer()
-                    Pill(text: cfg.authMode.displayName, color: .accentColor)
+                    Pill(text: cfg.authMode.displayName, color: palette.textAccent)
                 }
                 if cfg.isHidden {
                     HStack {
@@ -708,6 +710,7 @@ private struct WifiEditSheet: View {
                 LabeledContent("Hidden", value: cfg.isHidden ? "Yes" : "No")
             }
         }
+        .linkWaveThemedListSurface()
     }
 
     private func refusalView(title: String, message: String) -> some View {
@@ -825,6 +828,7 @@ private struct WifiEditConfirmSheet: View {
                     }
                 }
             }
+            .linkWaveThemedListSurface()
             .navigationTitle("Confirm Wi-Fi Change")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .tabBar)

@@ -51,7 +51,7 @@ public struct MainTabView: View {
 
             if isLaunchAnimationVisible {
                 LinkWaveLaunchAnimation(
-                    brandColor: activeThemePalette.accent.color,
+                    brandColor: settings.logoColor.color(for: effectiveColorScheme),
                     onFinished: finishLaunchAnimation
                 )
                     .transition(.opacity)
@@ -59,6 +59,7 @@ public struct MainTabView: View {
             }
         }
         .environment(\.linkWaveThemePalette, activeThemePalette)
+        .environment(\.linkWaveLogoColor, settings.logoColor.color(for: effectiveColorScheme))
         .environment(\.linkWaveSurfaceStyle, surfaceStyle)
         .foregroundStyle(activeThemePalette.textPrimary.color)
         .statusBarHidden(isLaunchAnimationVisible)
@@ -89,7 +90,7 @@ public struct MainTabView: View {
         .preferredColorScheme(settings.theme.colorScheme)
         .tint(activeThemePalette.accent.color)
         .onAppear {
-            AppIconManager.shared.apply(settings.appIconChoice)
+            AppIconManager.shared.apply(settings.appIconChoice, logoColor: settings.logoColor)
             presentInitialSettingsAfterLaunch =
                 !viewModel.awaitingRouterSelection && !viewModel.settings.isConfigured
             if launchAnimationFinished && presentInitialSettingsAfterLaunch {
@@ -125,7 +126,10 @@ public struct MainTabView: View {
             }
         }
         .onChange(of: settings.appIconChoice) { choice in
-            AppIconManager.shared.apply(choice)
+            AppIconManager.shared.apply(choice, logoColor: settings.logoColor)
+        }
+        .onChange(of: settings.logoColor) { logoColor in
+            AppIconManager.shared.apply(settings.appIconChoice, logoColor: logoColor)
         }
     }
 

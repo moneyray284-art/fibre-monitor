@@ -27,18 +27,6 @@ extension EnvironmentValues {
     }
 }
 
-private func linkWaveSolidSurfaceColor(_ colorScheme: ColorScheme) -> Color {
-    colorScheme == .dark
-        ? Color(red: 18.0 / 255.0, green: 28.0 / 255.0, blue: 42.0 / 255.0)
-        : .white
-}
-
-private func linkWaveSolidBorderColor(_ colorScheme: ColorScheme) -> Color {
-    colorScheme == .dark
-        ? Color(red: 55.0 / 255.0, green: 70.0 / 255.0, blue: 92.0 / 255.0)
-        : Color(red: 207.0 / 255.0, green: 218.0 / 255.0, blue: 232.0 / 255.0)
-}
-
 // Liquid Glass styling.
 //
 // On iOS 26+ everything here uses the system Liquid Glass material (`glassEffect`,
@@ -77,8 +65,8 @@ public struct LinkWaveGlassCard: ViewModifier {
             frosted(padded, shape: shape)
         case .cleanSolid:
             padded
-                .background(solidSurfaceColor, in: shape)
-                .overlay(shape.stroke(solidBorderColor, lineWidth: 1))
+                .background(palette.backgroundElevated, in: shape)
+                .overlay(shape.stroke(palette.backgroundTertiary, lineWidth: 1))
         }
     }
 
@@ -87,23 +75,13 @@ public struct LinkWaveGlassCard: ViewModifier {
             .background {
                 ZStack {
                     shape.fill(.thinMaterial)
-                    shape.fill(palette.accent.color.opacity(colorScheme == .dark ? 0.075 : 0.045))
+                    shape.fill(palette.backgroundSecondary.opacity(colorScheme == .dark ? 0.20 : 0.38))
+                    shape.fill(palette.textAccent.opacity(colorScheme == .dark ? 0.025 : 0.018))
                 }
             }
             .overlay(shape.stroke(palette.textSecondary.color.opacity(colorScheme == .dark ? 0.30 : 0.23), lineWidth: 1))
     }
 
-    private var solidSurfaceColor: Color {
-        colorScheme == .dark
-            ? Color(red: 18.0 / 255.0, green: 28.0 / 255.0, blue: 42.0 / 255.0)
-            : Color(red: 1.0, green: 1.0, blue: 1.0)
-    }
-
-    private var solidBorderColor: Color {
-        colorScheme == .dark
-            ? Color(red: 55.0 / 255.0, green: 70.0 / 255.0, blue: 92.0 / 255.0)
-            : Color(red: 207.0 / 255.0, green: 218.0 / 255.0, blue: 232.0 / 255.0)
-    }
 }
 
 /// A chip or inset field that sits inside a glass card.
@@ -127,15 +105,17 @@ private struct LegacyGlassModifier: ViewModifier {
 
 /// Full-width action button: prominent Liquid Glass on iOS 26, bordered prominent before.
 public struct LiquidGlassActionButtonModifier: ViewModifier {
-    let tint: Color
+    let tint: Color?
     @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
+    @Environment(\.linkWaveThemePalette) private var palette
 
     @ViewBuilder
     public func body(content: Content) -> some View {
+        let resolvedTint = tint ?? palette.textAccent
         if #available(iOS 26.0, *), surfaceStyle == .liquidGlass {
-            content.buttonStyle(.glassProminent).tint(tint).controlSize(.large)
+            content.buttonStyle(.glassProminent).tint(resolvedTint).controlSize(.large)
         } else {
-            content.buttonStyle(.borderedProminent).tint(tint).controlSize(.large)
+            content.buttonStyle(.borderedProminent).tint(resolvedTint).controlSize(.large)
         }
     }
 }
@@ -164,27 +144,25 @@ public struct LiquidGlassBackground: View {
 
     public var body: some View {
         ZStack {
-            colorScheme == .dark
-                ? Color(red: 7.0 / 255.0, green: 9.0 / 255.0, blue: 14.0 / 255.0)
-                : Color(red: 244.0 / 255.0, green: 246.0 / 255.0, blue: 250.0 / 255.0)
+            palette.backgroundPrimary
 
             if surfaceStyle != .cleanSolid {
                 GeometryReader { geo in
                     ZStack {
                         Circle()
-                            .fill(palette.accent.color.opacity(colorScheme == .dark ? 0.08 : 0.055))
+                            .fill(palette.textAccent.opacity(colorScheme == .dark ? 0.08 : 0.055))
                             .frame(width: geo.size.width * 0.85)
                             .blur(radius: 70)
                             .offset(x: -geo.size.width * 0.22, y: -geo.size.height * 0.18)
 
                         Circle()
-                            .fill(palette.accent.color.opacity(colorScheme == .dark ? 0.06 : 0.04))
+                            .fill(palette.textAccent.opacity(colorScheme == .dark ? 0.06 : 0.04))
                             .frame(width: geo.size.width * 0.75)
                             .blur(radius: 80)
                             .offset(x: geo.size.width * 0.32, y: geo.size.height * 0.12)
 
                         Circle()
-                            .fill(palette.accent.color.opacity(colorScheme == .dark ? 0.045 : 0.04))
+                            .fill(palette.textAccent.opacity(colorScheme == .dark ? 0.045 : 0.04))
                             .frame(width: geo.size.width * 0.7)
                             .blur(radius: 75)
                             .offset(x: -geo.size.width * 0.1, y: geo.size.height * 0.42)
@@ -193,6 +171,35 @@ public struct LiquidGlassBackground: View {
             }
         }
         .ignoresSafeArea()
+    }
+}
+
+private struct LinkWaveThemedListSurfaceModifier: ViewModifier {
+    @Environment(\.linkWaveThemePalette) private var palette
+    @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
+
+    func body(content: Content) -> some View {
+        content
+            .scrollContentBackground(.hidden)
+            .background { LiquidGlassBackground() }
+            .listRowBackground(rowBackground)
+            .foregroundStyle(palette.textPrimary.color)
+            .tint(palette.accent.color)
+    }
+
+    private var rowBackground: AnyView {
+        switch surfaceStyle {
+        case .liquidGlass:
+            AnyView(Color.clear)
+        case .frosted:
+            AnyView(
+                Rectangle()
+                    .fill(.thinMaterial)
+                    .overlay(palette.backgroundSecondary.opacity(0.52))
+            )
+        case .cleanSolid:
+            AnyView(palette.backgroundSecondary)
+        }
     }
 }
 
@@ -206,7 +213,7 @@ public extension View {
         modifier(LiquidGlassPillModifier())
     }
 
-    func liquidGlassActionButton(tint: Color = .accentColor) -> some View {
+    func liquidGlassActionButton(tint: Color? = nil) -> some View {
         modifier(LiquidGlassActionButtonModifier(tint: tint))
     }
 
@@ -235,6 +242,10 @@ public extension View {
 
     func liquidGlassToolbarCapsule() -> some View {
         modifier(LiquidGlassToolbarCapsuleModifier())
+    }
+
+    func linkWaveThemedListSurface() -> some View {
+        modifier(LinkWaveThemedListSurfaceModifier())
     }
 
     func linkWaveTabBarSurface() -> some View {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ConnectionHistoryCard: View {
     let events: [ConnectionInterruption]
+    @Environment(\.linkWaveThemePalette) private var palette
 
     private var visibleEvents: [ConnectionInterruption] { Array(events.prefix(4)) }
 
@@ -14,7 +15,7 @@ struct ConnectionHistoryCard: View {
             if visibleEvents.isEmpty {
                 Label("No interruptions observed", systemImage: "checkmark.circle.fill")
                     .font(.subheadline.weight(.medium))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(palette.textAccent)
                 Text("The app records router connection changes while it is open and checking.")
                     .font(.caption)
                     .linkWaveText(.secondary)
