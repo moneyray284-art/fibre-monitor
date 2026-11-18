@@ -49,11 +49,13 @@ public struct LiquidGlassPillModifier: ViewModifier {
 /// Pre-iOS 26 approximation using regular material and a soft shadow.
 private struct LegacyGlassModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.linkWaveThemePalette) private var palette
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
         content
             .background(.regularMaterial, in: shape)
+            .overlay(shape.fill(palette.bgSecondary.color.opacity(colorScheme == .dark ? 0.07 : 0.045)))
             .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.06), radius: 14, y: 6)
     }
 }
@@ -87,29 +89,30 @@ public struct LiquidGlassSmallButtonModifier: ViewModifier {
 /// Soft coloured light behind the glass so the material has something to refract.
 public struct LiquidGlassBackground: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.linkWaveThemePalette) private var palette
 
     public init() {}
 
     public var body: some View {
         ZStack {
-            Color(colorScheme == .dark ? UIColor.systemBackground : UIColor.systemGroupedBackground)
+            palette.bgPrimary.color
 
             GeometryReader { geo in
                 ZStack {
                     Circle()
-                        .fill(Color(red: 0.90, green: 0.15, blue: 0.20).opacity(colorScheme == .dark ? 0.16 : 0.09))
+                        .fill(palette.accent.color.opacity(colorScheme == .dark ? 0.08 : 0.055))
                         .frame(width: geo.size.width * 0.85)
                         .blur(radius: 70)
                         .offset(x: -geo.size.width * 0.22, y: -geo.size.height * 0.18)
 
                     Circle()
-                        .fill(Color.blue.opacity(colorScheme == .dark ? 0.14 : 0.08))
+                        .fill(palette.accent.color.opacity(colorScheme == .dark ? 0.06 : 0.04))
                         .frame(width: geo.size.width * 0.75)
                         .blur(radius: 80)
                         .offset(x: geo.size.width * 0.32, y: geo.size.height * 0.12)
 
                     Circle()
-                        .fill(Color.purple.opacity(colorScheme == .dark ? 0.12 : 0.06))
+                        .fill(palette.accent.color.opacity(colorScheme == .dark ? 0.045 : 0.04))
                         .frame(width: geo.size.width * 0.7)
                         .blur(radius: 75)
                         .offset(x: -geo.size.width * 0.1, y: geo.size.height * 0.42)

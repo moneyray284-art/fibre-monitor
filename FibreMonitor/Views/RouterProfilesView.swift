@@ -18,7 +18,7 @@ struct RouterLaunchPickerView: View {
                                 isActive: profile.id == viewModel.settings.activeProfile?.id
                             )
                         }
-                        .foregroundStyle(.primary)
+                        .linkWaveText(.primary)
                     }
                 } header: {
                     Text("Saved routers")
@@ -67,23 +67,23 @@ struct RouterProfileRow: View {
                     if let model = profile.detectedModel, !model.isEmpty {
                         Text(model)
                             .font(.caption2.weight(.medium))
-                            .foregroundColor(.secondary)
+                            .linkWaveText(.secondary)
                     }
                 }
                 HStack(spacing: 6) {
                     Text(profile.host)
                         .font(.caption.monospaced())
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                     if let cfg = profile.cfgMode, !cfg.isEmpty {
                         Text("· \(cfg)")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .linkWaveText(.secondary)
                     }
                 }
                 if let lastUsed = profile.lastUsed {
                     Text("Last used \(lastUsed.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                 }
             }
 

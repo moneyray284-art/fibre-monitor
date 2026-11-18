@@ -4,6 +4,7 @@ public struct MainTabView: View {
     @StateObject private var viewModel = MonitorViewModel()
     @ObservedObject private var settings = SettingsStore.shared
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var systemColorScheme
     @State private var showInitialSettings = false
     @State private var isLaunchAnimationVisible = true
     @State private var launchAnimationFinished = false
@@ -51,6 +52,8 @@ public struct MainTabView: View {
                     .zIndex(10)
             }
         }
+        .environment(\.linkWaveThemePalette, activeThemePalette)
+        .foregroundStyle(activeThemePalette.textPrimary.color)
         .statusBarHidden(isLaunchAnimationVisible)
         .sheet(isPresented: routerPickerBinding) {
             RouterLaunchPickerView(viewModel: viewModel)
@@ -77,7 +80,7 @@ public struct MainTabView: View {
             Button("OK", role: .cancel) {}
         }
         .preferredColorScheme(settings.theme.colorScheme)
-        .tint(settings.accentColor.color)
+        .tint(activeThemePalette.accent.color)
         .onAppear {
             AppIconManager.apply(settings.appIconChoice)
             presentInitialSettingsAfterLaunch =
@@ -103,6 +106,7 @@ public struct MainTabView: View {
             }
         }
         .onChange(of: viewModel.selectedTab) { _ in
+            Haptics.impact()
             guard scenePhase == .active else { return }
             Task { await viewModel.refreshIfStale(maxAge: 10) }
         }
@@ -116,6 +120,18 @@ public struct MainTabView: View {
         .onChange(of: settings.appIconChoice) { choice in
             AppIconManager.apply(choice)
         }
+    }
+
+    private var effectiveColorScheme: ColorScheme {
+        switch settings.theme {
+        case .system: systemColorScheme
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+
+    private var activeThemePalette: ThemePalette {
+        settings.themePalette(for: effectiveColorScheme)
     }
 
     private var routerPickerBinding: Binding<Bool> {

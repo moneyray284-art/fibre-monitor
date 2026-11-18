@@ -38,7 +38,7 @@ private struct SpeedCard: View {
                 Image(systemName: icon)
                     .foregroundColor(tint)
                     .accessibilityHidden(true)
-                Text(title).font(.caption2.weight(.bold)).foregroundColor(.secondary)
+                Text(title).font(.caption2.weight(.bold)).linkWaveText(.secondary)
                 Spacer()
             }
             HStack(alignment: .lastTextBaseline, spacing: 4) {
@@ -47,11 +47,11 @@ private struct SpeedCard: View {
                     .contentTransition(.numericText())
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
-                Text("Mbps").font(.caption.weight(.semibold)).foregroundColor(.secondary)
+                Text("Mbps").font(.caption.weight(.semibold)).linkWaveText(.secondary)
             }
             Text(peak > 0 ? "Peak \(String(format: "%.1f", peak)) Mbps" : "Peak —")
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .linkWaveText(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .linkWaveGlassCard()
@@ -70,7 +70,7 @@ private struct Sparkline: View {
                 line(samples.map(\.downloadMbps), max: maxValue, in: geo.size).stroke(.blue, lineWidth: 2)
                 line(samples.map(\.uploadMbps), max: maxValue, in: geo.size).stroke(.green, lineWidth: 2)
                 if samples.count < 2 {
-                    Text("Collecting speed samples…").font(.caption2).foregroundColor(.secondary)
+                    Text("Collecting speed samples…").font(.caption2).linkWaveText(.secondary)
                 }
             }
         }
@@ -112,7 +112,7 @@ struct FibreCard: View {
                     .contentTransition(.numericText())
                 Text("dBm")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
                 Spacer()
             }
 
@@ -208,7 +208,7 @@ private struct OpticalRxRangeBar: View {
                 Text("> -8 Strong")
             }
             .font(.caption2)
-            .foregroundColor(.secondary)
+            .linkWaveText(.secondary)
         }
     }
 }
@@ -230,7 +230,7 @@ struct MetricTile: View {
                     .accessibilityHidden(true)
                 Text(title)
                     .font(.caption2.weight(.bold))
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let pill {
@@ -246,7 +246,7 @@ struct MetricTile: View {
             if let subtitle, !subtitle.isEmpty {
                 Text(subtitle)
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
             }
@@ -266,7 +266,7 @@ struct SystemLoadCard: View {
                 if !health.model.isEmpty {
                     Text(health.model)
                         .font(.caption2.weight(.semibold))
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                 }
             }
 
@@ -304,11 +304,11 @@ private struct LoadBarRow: View {
             HStack {
                 Text(label)
                     .font(.caption.weight(.semibold))
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
                 Spacer()
                 Text("\(clamped)%")
                     .font(.caption.monospacedDigit().weight(.bold))
-                    .foregroundColor(.primary)
+                    .linkWaveText(.primary)
             }
             ProgressView(value: Double(clamped), total: 100)
                 .tint(tint)
@@ -392,7 +392,7 @@ struct Readout: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(.caption2.weight(.semibold))
-                .foregroundColor(.secondary)
+                .linkWaveText(.secondary)
             Text(value.isEmpty ? "—" : value)
                 .font(.footnote.monospaced().weight(.medium))
                 .lineLimit(2)
@@ -400,7 +400,7 @@ struct Readout: View {
             if let footnote {
                 Text(footnote)
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

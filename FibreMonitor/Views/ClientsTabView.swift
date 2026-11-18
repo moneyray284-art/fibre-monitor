@@ -553,12 +553,12 @@ private struct ClientDeviceSectionCard: View {
                         .accessibilityHidden(true)
                     Text(title)
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.primary)
+                        .linkWaveText(.primary)
                     Spacer()
                     Pill(text: "\(count)", color: tint)
                     Image(systemName: "chevron.down")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .linkWaveText(.secondary)
                         .rotationEffect(.degrees(isExpanded ? 0 : -90))
                         .frame(width: 18, height: 24)
                         .accessibilityHidden(true)
@@ -602,7 +602,7 @@ private struct BlockedClientRow: View {
                             .lineLimit(1)
                         Text("\(device.mac) · \(device.ssidName)")
                             .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
+                            .linkWaveText(.secondary)
                             .lineLimit(1)
                     }
                     Spacer(minLength: 8)
@@ -679,7 +679,7 @@ private struct ClientRow: View {
                 HStack(spacing: 6) {
                     Text(isThisPhone && isGenericHost ? "This Phone" : displayName)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.primary)
+                        .linkWaveText(.primary)
                         .lineLimit(1)
                     if isThisPhone {
                         Text("This Device")
@@ -700,11 +700,11 @@ private struct ClientRow: View {
                     }
                 }
                 .font(.caption.monospaced())
-                .foregroundColor(.secondary)
+                .linkWaveText(.secondary)
                 if let rateSummary = rateText {
                     Text(rateSummary)
                         .font(.caption2.monospacedDigit())
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                 }
             }
 
@@ -717,7 +717,7 @@ private struct ClientRow: View {
                         if let rssi = device.rssiDbm, device.port.isWifi {
                             Text("\(Int(rssi.rounded())) dBm")
                                 .font(.caption2.monospacedDigit())
-                                .foregroundColor(.secondary)
+                                .linkWaveText(.secondary)
                         }
                     }
                     if let bandLabel {
@@ -727,7 +727,7 @@ private struct ClientRow: View {
             } else {
                 Text(offlineCaption)
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
                     .multilineTextAlignment(.trailing)
                     .lineLimit(2)
             }
@@ -1049,14 +1049,14 @@ private struct ClientsEmptyCard: View {
             } else {
                 Image(systemName: icon)
                     .font(.system(size: 32))
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
                     .accessibilityHidden(true)
             }
             Text(title)
                 .font(.headline)
             Text(message)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .linkWaveText(.secondary)
                 .multilineTextAlignment(.center)
             if let actionTitle, let action {
                 Button(actionTitle, action: action)

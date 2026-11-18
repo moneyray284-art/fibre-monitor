@@ -1361,13 +1361,16 @@ public final class MonitorViewModel: ObservableObject {
 @MainActor
 public enum Haptics {
     public static func notify(_ type: UINotificationFeedbackGenerator.FeedbackType) {
+        guard SettingsStore.shared.hapticLevel != .off else { return }
         let generator = UINotificationFeedbackGenerator()
         generator.prepare()
         generator.notificationOccurred(type)
     }
 
     public static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
-        let generator = UIImpactFeedbackGenerator(style: style)
+        let level = SettingsStore.shared.hapticLevel
+        guard level != .off else { return }
+        let generator = UIImpactFeedbackGenerator(style: level.impactStyle ?? style)
         generator.prepare()
         generator.impactOccurred()
     }

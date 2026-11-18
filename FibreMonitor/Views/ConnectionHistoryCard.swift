@@ -17,7 +17,7 @@ struct ConnectionHistoryCard: View {
                     .foregroundColor(.green)
                 Text("The app records router connection changes while it is open and checking.")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
             } else {
                 ForEach(visibleEvents) { event in
                     interruptionRow(event)
@@ -25,7 +25,7 @@ struct ConnectionHistoryCard: View {
                 }
                 Text("History reflects checks made while the app was polling. Time away from the app may be unknown.")
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
             }
         }
         .linkWaveGlassCard()
@@ -39,25 +39,25 @@ struct ConnectionHistoryCard: View {
                 .foregroundColor(.orange)
             Text("First detected \(event.startedAt.formatted(date: .abbreviated, time: .shortened))")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .linkWaveText(.secondary)
 
             if let restoredAt = event.restoredAt {
                 Text("Router responded again \(restoredAt.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption)
-                    .foregroundColor(.primary)
+                    .linkWaveText(.primary)
                 if let duration = event.observedDurationSeconds {
                     Text("Observed interruption: about \(Self.durationText(duration))")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                 } else {
                     Text("Duration unknown because the app missed part of the interval.")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                 }
             } else {
                 Text("No recovery has been observed yet.")
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

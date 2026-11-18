@@ -142,7 +142,7 @@ private struct RouterHeaderCard: View {
                         .lineLimit(1)
                     Text(viewModel.displayModelName)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                         .lineLimit(1)
                 }
 
@@ -169,7 +169,7 @@ private struct RouterHeaderCard: View {
                 if let lastUpdate = viewModel.lastUpdate {
                     Text("• Updated \(lastUpdate, style: .relative)")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .linkWaveText(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
@@ -355,7 +355,7 @@ private struct RouterConnectivityFallback: View {
                 .foregroundStyle(isOnline ? Color.green : Color.red)
             Text(isOnline ? responseLabel : "Router unreachable")
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .linkWaveText(.secondary)
                 .lineLimit(1)
         }
         .accessibilityElement(children: .combine)
@@ -410,7 +410,7 @@ private struct CompactSpeedCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .linkWaveText(.secondary)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(value >= 1 ? String(format: value >= 100 ? "%.0f" : "%.1f", value) : String(format: "%.0f", value * 1_000))
                         .font(.system(.title3, design: .rounded).weight(.bold))
@@ -418,7 +418,7 @@ private struct CompactSpeedCard: View {
                         .contentTransition(.numericText())
                     Text(value >= 1 ? "Mbps" : "Kbps")
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
+                        .linkWaveText(.secondary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -447,7 +447,7 @@ private struct SpeedTestCard: View {
                     .foregroundStyle(.cyan)
                 Text("Speed Test")
                     .font(.headline.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .linkWaveText(.primary)
                 Spacer()
                 if isRunning {
                     Text(progress.phase.rawValue.uppercased())
@@ -472,10 +472,10 @@ private struct SpeedTestCard: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(progress.phase == .ping ? "Latency" : (progress.phase == .download ? "Download" : "Upload"))
                                 .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .linkWaveText(.secondary)
                             Text(progress.detail)
                                 .font(.system(.caption, design: .rounded).weight(.semibold))
-                                .foregroundStyle(.primary)
+                                .linkWaveText(.primary)
                                 .lineLimit(1)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -499,11 +499,11 @@ private struct SpeedTestCard: View {
                     ProgressView().tint(.cyan)
                     Text(progress.phase.rawValue)
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
+                        .linkWaveText(.secondary)
                     Spacer()
                     Text("\(Int(progress.fraction * 100))%")
                         .font(.caption.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .linkWaveText(.secondary)
                 }
             } else {
                 Button(action: startTest) {
@@ -544,7 +544,7 @@ private struct SpeedTestCard: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .linkWaveText(.secondary)
                 .lineLimit(1)
             Text(value)
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
@@ -608,7 +608,7 @@ private struct HomeSummaryRow: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Today’s Usage")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .linkWaveText(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                     Text(Self.format(todayTotalBytes))
@@ -636,7 +636,7 @@ private struct HomeSummaryRow: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Connected Devices")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .linkWaveText(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                     HStack(spacing: 6) {
@@ -652,7 +652,7 @@ private struct HomeSummaryRow: View {
                     }
                     Text("\(offlineCount) offline")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .linkWaveText(.secondary)
                     Spacer(minLength: 0)
                     Label("View clients", systemImage: "chevron.right")
                         .font(.caption2.weight(.medium))
@@ -797,7 +797,7 @@ private struct NoRouterCard: View {
                 .font(.headline)
             Text("Add a Huawei OptiXstar router profile in Settings to start live fibre monitoring.")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .linkWaveText(.secondary)
                 .multilineTextAlignment(.center)
             Button("Open Settings", action: openSettings)
                 .liquidGlassActionButton()

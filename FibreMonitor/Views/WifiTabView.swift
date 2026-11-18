@@ -145,7 +145,7 @@ public struct WifiTabView: View {
                         let names = viewModel.wifi.networks(on: radio).map(\.name).filter { !$0.isEmpty }
                         Text(radio.enabled ? (names.isEmpty ? "On" : names.joined(separator: " · ")) : "Off")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .linkWaveText(.secondary)
                             .lineLimit(2)
                     }
 
@@ -237,7 +237,7 @@ private struct WifiNetworkRow: View {
                     }
                     Text("SSID \(network.ssidIndex) · \(MonitorViewModel.bandName(network.band))")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                 }
 
                 Spacer(minLength: 8)
@@ -324,7 +324,7 @@ private struct WifiQrSheet: View {
                                 .foregroundColor(.orange)
                             Text(errorText)
                                 .font(.subheadline)
-                                .foregroundColor(.secondary)
+                                .linkWaveText(.secondary)
                                 .multilineTextAlignment(.center)
                             Button("Retry") {
                                 Task { await loadConfig() }
@@ -377,7 +377,7 @@ private struct WifiQrSheet: View {
                     HStack {
                         Label("Hidden network", systemImage: "eye.slash")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .linkWaveText(.secondary)
                         Spacer()
                     }
                 }
@@ -397,7 +397,7 @@ private struct WifiQrSheet: View {
 
                     Text("Scan with iPhone or Android Camera to join \(cfg.ssid).")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                         .multilineTextAlignment(.center)
 
                     let shareImage = Image(uiImage: uiImage)
@@ -415,10 +415,10 @@ private struct WifiQrSheet: View {
                 VStack(spacing: 8) {
                     Image(systemName: "qrcode")
                         .font(.largeTitle)
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                     Text(qrUnavailableReason(for: cfg))
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
@@ -429,7 +429,7 @@ private struct WifiQrSheet: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Passphrase")
                         .font(.caption.weight(.semibold))
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
 
                     HStack(spacing: 10) {
                         Text(showPassword ? cfg.psk : String(repeating: "•", count: max(8, min(cfg.psk.count, 16))))
@@ -458,7 +458,7 @@ private struct WifiQrSheet: View {
 
                     Text("Fetched live from the router and never saved on this iPhone.")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                 }
                 .linkWaveGlassCard()
             }
@@ -546,7 +546,7 @@ private struct WifiEditSheet: View {
                                 .foregroundColor(.orange)
                             Text(loadError)
                                 .font(.subheadline)
-                                .foregroundColor(.secondary)
+                                .linkWaveText(.secondary)
                                 .multilineTextAlignment(.center)
                             Button("Retry") {
                                 Task { await loadConfig() }
@@ -645,7 +645,7 @@ private struct WifiEditSheet: View {
                         showPassword.toggle()
                     } label: {
                         Image(systemName: showPassword ? "eye.slash" : "eye")
-                            .foregroundColor(.secondary)
+                            .linkWaveText(.secondary)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(showPassword ? "Hide password" : "Reveal password")
@@ -682,7 +682,7 @@ private struct WifiEditSheet: View {
                     .font(.headline)
                 Text(message)
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
                     .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity)
@@ -764,7 +764,7 @@ private struct WifiEditConfirmSheet: View {
                                 : "When the router applies these settings, every device on \(MonitorViewModel.bandName(band)) will disconnect and must rejoin \"\(newSsid)\" with the new password."
                         )
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                     }
                     .padding(.vertical, 4)
                 }
@@ -837,12 +837,12 @@ private struct WifiEmptyCard: View {
             } else {
                 Image(systemName: "wifi")
                     .font(.system(size: 32))
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
                     .accessibilityHidden(true)
             }
             Text(message)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .linkWaveText(.secondary)
                 .multilineTextAlignment(.center)
             if let actionTitle, let action {
                 Button(actionTitle, action: action)

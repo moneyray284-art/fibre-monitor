@@ -3,6 +3,7 @@ import SwiftUI
 public struct SettingsTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
+    @Environment(\.colorScheme) private var colorScheme
     @State private var editorMode: RouterProfileEditorView.Mode?
     @State private var pendingDelete: RouterProfile?
     @State private var showRebootAlert = false
@@ -26,6 +27,10 @@ public struct SettingsTabView: View {
             }
             aboutSection
         }
+        .scrollContentBackground(.hidden)
+        .background(palette.bgPrimary.color)
+        .environment(\.linkWaveThemePalette, palette)
+        .linkWaveText(.primary)
         .liquidGlassScrollEdges()
         .toolbar(.hidden, for: .tabBar)
         .navigationTitle("Settings")
@@ -76,7 +81,7 @@ public struct SettingsTabView: View {
             if settings.profiles.isEmpty {
                 Text("No routers saved yet. Add your router to connect.")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
             } else {
                 ForEach(settings.profiles) { profile in
                     HStack(spacing: 10) {
@@ -93,7 +98,7 @@ public struct SettingsTabView: View {
                         } label: {
                             Image(systemName: "pencil.circle")
                                 .font(.title3)
-                                .foregroundColor(.secondary)
+                                .linkWaveText(.secondary)
                         }
                         .buttonStyle(.borderless)
                         .accessibilityLabel("Edit \(profile.name)")
@@ -129,13 +134,20 @@ public struct SettingsTabView: View {
         Section("Updates") {
             Label("Syncs on launch, when the app returns, and when a tab is more than 10 seconds out of date.", systemImage: "arrow.triangle.2.circlepath")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .linkWaveText(.secondary)
         }
     }
 
     private var appearanceSection: some View {
         Section("Appearance") {
-            Picker("Theme", selection: $settings.theme) {
+            Picker("Theme", selection: Binding(
+                get: { settings.theme },
+                set: { newTheme in
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        settings.theme = newTheme
+                    }
+                }
+            )) {
                 ForEach(AppTheme.allCases) { theme in
                     Text(theme.title).tag(theme)
                 }
@@ -165,7 +177,17 @@ public struct SettingsTabView: View {
 
             Toggle("Auto-Match Accent Theme", isOn: $settings.autoMatchAppIconToAccentColor)
                 .accessibilityHint("Automatically uses the app icon that matches the selected accent color.")
+
+            NavigationLink {
+                ThemeSettingsView(settings: settings)
+            } label: {
+                Label("Theme Colors & Haptics", systemImage: "paintpalette")
+            }
         }
+    }
+
+    private var palette: ThemePalette {
+        settings.themePalette(for: colorScheme)
     }
 
     private var networkDetailsSection: some View {
@@ -211,7 +233,7 @@ public struct SettingsTabView: View {
                !viewModel.health.hasCpuOrMemory {
                 Text("Connect to the router to view available diagnostics.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .linkWaveText(.secondary)
             }
         }
     }
@@ -326,7 +348,7 @@ private struct LanScreen: View {
                 if !viewModel.settings.isConfigured {
                     Text("Add a router in Settings to inspect LAN & DHCP configuration.")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .linkWaveText(.secondary)
                         .frame(maxWidth: .infinity)
                         .multilineTextAlignment(.center)
                         .linkWaveGlassCard()
@@ -337,7 +359,7 @@ private struct LanScreen: View {
                              ? "Session logged out. Reconnect and pull down to load LAN settings."
                              : "Pull down to refresh LAN & DHCP settings.")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .linkWaveText(.secondary)
                             .frame(maxWidth: .infinity)
                             .multilineTextAlignment(.center)
                             .linkWaveGlassCard()

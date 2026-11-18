@@ -64,7 +64,7 @@ public struct UsageTabView: View {
                 .font(.headline)
             Text("Add a router in Settings to see downloaded and uploaded data.")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .linkWaveText(.secondary)
                 .multilineTextAlignment(.center)
             Button("Open Settings") { showSettings = true }
                 .liquidGlassActionButton()
@@ -84,11 +84,11 @@ private struct SyncStatusCard: View {
             if let syncDate = summary.lastSuccessfulSyncAt {
                 Text("Last successful check: \(syncDate.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
             } else {
                 Text("No successful router check has been recorded yet.")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
             }
 
             if summary.missingHistoryDayCount > 0 {
@@ -115,7 +115,7 @@ private struct SyncStatusCard: View {
 
             Text("The iPhone checks the router while LinkWave is active. A long gap can leave the daily split incomplete.")
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .linkWaveText(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .linkWaveGlassCard()
@@ -147,7 +147,7 @@ private struct UsageTotalsCard: View {
                 Spacer()
                 Text("UNLIMITED PLAN")
                     .font(.caption2.weight(.bold))
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 5) {
@@ -156,7 +156,7 @@ private struct UsageTotalsCard: View {
                     .monospacedDigit()
                 Text("this month")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .linkWaveText(.secondary)
                 Spacer(minLength: 0)
             }
 
@@ -169,7 +169,7 @@ private struct UsageTotalsCard: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .font(.caption2.weight(.medium))
-            .foregroundColor(.secondary)
+            .linkWaveText(.secondary)
 
             usageRow("Today", download: summary.todayDownloadBytes, upload: summary.todayUploadBytes)
             usageRow("This month", download: summary.monthDownloadBytes, upload: summary.monthUploadBytes)
@@ -177,7 +177,7 @@ private struct UsageTotalsCard: View {
 
             Text("Totals start from the first counter check. Long sync gaps or router counter resets can affect date allocation.")
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .linkWaveText(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .linkWaveGlassCard()
@@ -395,7 +395,7 @@ private struct DailyUsageHistoryCard: View {
                 }
                 .font(.system(size: 9, weight: .medium))
                 .monospacedDigit()
-                .foregroundStyle(.secondary)
+                .linkWaveText(.secondary)
                 .frame(width: labelWidth, height: plotHeight)
             }
         }
@@ -419,7 +419,7 @@ private struct DailyUsageHistoryCard: View {
         }
         .font(.system(size: 9, weight: .medium))
         .monospacedDigit()
-        .foregroundStyle(.secondary)
+        .linkWaveText(.secondary)
         .accessibilityHidden(true)
     }
 
@@ -469,7 +469,7 @@ private struct DailyUsageHistoryCard: View {
                 if selectedPoint?.isPartial == true && selectedPoint?.totalBytes != nil {
                     Text("Partial")
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
+                        .linkWaveText(.secondary)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
                         .background(Color.secondary.opacity(0.12), in: Capsule())
@@ -490,7 +490,7 @@ private struct DailyUsageHistoryCard: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .linkWaveText(.secondary)
             Text(bytes.map(Self.format) ?? "—")
                 .font(.caption.weight(.semibold).monospacedDigit())
                 .lineLimit(1)
