@@ -171,8 +171,8 @@ public extension View {
     }
 
     /// Inset chip inside a glass card.
-    func liquidGlassPill(cornerRadius: CGFloat = 12) -> some View {
-        modifier(LiquidGlassPillModifier(cornerRadius: cornerRadius))
+    func liquidGlassPill() -> some View {
+        modifier(LiquidGlassPillModifier())
     }
 
     func liquidGlassActionButton(tint: Color = .accentColor) -> some View {

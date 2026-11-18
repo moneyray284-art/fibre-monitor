@@ -6,6 +6,7 @@ public struct WifiTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @State private var pendingRadio: (radio: WifiRadio, enable: Bool)?
     @State private var activeSheet: WifiSheetRoute?
+    @State private var showSettings = false
 
     public init(viewModel: MonitorViewModel) {
         self.viewModel = viewModel
@@ -60,6 +61,10 @@ public struct WifiTabView: View {
                                         setEnabled: { enabled in Task { await viewModel.setWifiNetwork(network, enabled: enabled) } },
                                         delete: { Task { await viewModel.deleteWifiNetwork(network) } }
                                     )
+                                    if network.id != group.networks.last?.id {
+                                        Divider()
+                                            .padding(.leading, 4)
+                                    }
                                 }
                             }
                             .linkWaveGlassCard()
@@ -77,12 +82,33 @@ public struct WifiTabView: View {
                 await viewModel.refreshAll(forceReauthIfNeeded: true)
             }
             .navigationTitle("Wi-Fi")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: 5) {
+                        ProfileAvatarPickerButton(size: 38)
+                            .frame(width: 44, height: 44)
+                        RouterSwitcherMenu(viewModel: viewModel, settings: viewModel.settings) {
+                            showSettings = true
+                        }
+                    }
+                }
                 StandaloneTopBarTrailingItem(
                     content: AnyView(RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured))
                 )
+                StandaloneTopBarTrailingItem(content: AnyView(
+                    LinkWaveToolbarIconButton(symbol: "gearshape", accessibilityLabel: "Settings") {
+                        showSettings = true
+                    }
+                ))
             }
+            .navigationDestination(isPresented: $showSettings) {
+                SettingsTabView(viewModel: viewModel)
+                    .toolbar(.hidden, for: .tabBar)
+            }
+        }
+        .onChange(of: showSettings) { isPresented in
+            if !isPresented { viewModel.settingsDidDismiss() }
         }
         .alert(
             pendingRadio.map { "Turn \(MonitorViewModel.bandName($0.radio.band)) Wi-Fi \($0.enable ? "on" : "off")?" } ?? "",
@@ -132,7 +158,8 @@ public struct WifiTabView: View {
             CardHeader(icon: "wifi", title: "Radios") {
                 if viewModel.isWifiSaving { ProgressView() }
             }
-            ForEach(viewModel.wifi.radios) { radio in
+            ForEach(Array(viewModel.wifi.radios.enumerated()), id: \.offset) { entry in
+                let radio = entry.element
                 HStack(spacing: 12) {
                     Image(systemName: radio.enabled ? "wifi" : "wifi.slash")
                         .foregroundColor(radio.enabled ? .accentColor : .secondary)
@@ -159,8 +186,10 @@ public struct WifiTabView: View {
                     .accessibilityLabel("Toggle \(MonitorViewModel.bandName(radio.band)) Wi-Fi")
                     .disabled(viewModel.isWifiSaving || !viewModel.isConnected)
                 }
-                .padding(10)
-                .liquidGlassPill()
+                .padding(.vertical, 8)
+                if entry.offset < viewModel.wifi.radios.count - 1 {
+                    Divider().padding(.leading, 40)
+                }
             }
         }
         .linkWaveGlassCard()
@@ -226,7 +255,7 @@ private struct WifiNetworkRow: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 9) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
@@ -242,49 +271,59 @@ private struct WifiNetworkRow: View {
 
                 Spacer(minLength: 8)
 
-                HStack(spacing: 8) {
-                    Button(action: openEdit) {
-                        Label("Edit", systemImage: "pencil")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .liquidGlassSmallButton()
-                    .disabled(isEditDisabled)
-                    .accessibilityLabel("Edit Wi-Fi name and password for \(network.name)")
-
-                    Button(action: openQr) {
-                        Label("QR", systemImage: "qrcode")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .liquidGlassSmallButton()
-                    .accessibilityLabel("Show QR code and password for \(network.name)")
-                }
             }
 
-            if isSecondary {
-                HStack(spacing: 10) {
-                    Label(enabledBinding.wrappedValue ? "On" : "Off", systemImage: "power")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(enabledBinding.wrappedValue ? Color.accentColor : Color.secondary)
-                    Toggle("Enable SSID \(network.ssidIndex)", isOn: enabledBinding)
-                        .labelsHidden()
-                        .scaleEffect(0.86, anchor: .trailing)
-                        .disabled(isEditDisabled)
-                        .accessibilityLabel("Enable \(network.name)")
-                    Spacer(minLength: 0)
+            HStack(spacing: 14) {
+                if isSecondary {
+                    HStack(spacing: 5) {
+                        Text(enabledBinding.wrappedValue ? "On" : "Off")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(enabledBinding.wrappedValue ? Color.accentColor : Color.secondary)
+                        Toggle("SSID \(network.ssidIndex)", isOn: enabledBinding)
+                            .labelsHidden()
+                            .scaleEffect(0.86, anchor: .leading)
+                            .disabled(isEditDisabled)
+                            .accessibilityLabel("Turn \(network.name) \(enabledBinding.wrappedValue ? "off" : "on")")
+                    }
+                }
+                Spacer(minLength: 0)
+                Button(action: openEdit) {
+                    Image(systemName: "pencil")
+                        .font(.subheadline.weight(.medium))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isEditDisabled)
+                .accessibilityLabel("Edit Wi-Fi name and password for \(network.name)")
+
+                Button(action: openQr) {
+                    Image(systemName: "qrcode")
+                        .font(.subheadline.weight(.medium))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show QR code and password for \(network.name)")
+
+                if isSecondary {
                     Button(role: .destructive) {
                         showDeleteConfirmation = true
                     } label: {
-                        Label("Delete", systemImage: "trash")
-                            .font(.caption.weight(.semibold))
+                        Image(systemName: "trash")
+                            .font(.subheadline.weight(.medium))
+                            .frame(width: 32, height: 32)
+                            .contentShape(Circle())
                     }
-                    .liquidGlassSmallButton()
+                    .buttonStyle(.plain)
                     .disabled(isEditDisabled)
+                    .accessibilityLabel("Delete \(network.name)")
                 }
-                .padding(.top, 2)
             }
+            .foregroundStyle(Color.accentColor)
         }
-        .padding(10)
-        .liquidGlassPill()
+        .padding(.horizontal, 4)
+        .padding(.vertical, 9)
         .onChange(of: network.enabled) { _ in optimisticEnabled = nil }
         .alert("Delete extra Wi-Fi network?", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -453,8 +492,7 @@ private struct WifiQrSheet: View {
                         }
                         .liquidGlassSmallButton()
                     }
-                    .padding(12)
-                    .liquidGlassPill()
+                    .padding(.vertical, 8)
 
                     Text("Fetched live from the router and never saved on this iPhone.")
                         .font(.caption2)
