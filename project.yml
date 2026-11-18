@@ -49,6 +49,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mattdev0.fibremonitor.tests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   FibreMonitor:
     build:
