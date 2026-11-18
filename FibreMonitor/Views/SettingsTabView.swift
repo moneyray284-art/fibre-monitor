@@ -4,6 +4,7 @@ public struct SettingsTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("linkwave.surfaceStyle") private var surfaceStyleRawValue = LinkWaveSurfaceStyle.liquidGlass.rawValue
     @State private var editorMode: RouterProfileEditorView.Mode?
     @State private var pendingDelete: RouterProfile?
     @State private var showRebootAlert = false
@@ -28,8 +29,9 @@ public struct SettingsTabView: View {
             aboutSection
         }
         .scrollContentBackground(.hidden)
-        .background(palette.bgPrimary.color)
+        .background { LiquidGlassBackground() }
         .environment(\.linkWaveThemePalette, palette)
+        .environment(\.linkWaveSurfaceStyle, surfaceStyle)
         .linkWaveText(.primary)
         .liquidGlassScrollEdges()
         .toolbar(.hidden, for: .tabBar)
@@ -154,6 +156,13 @@ public struct SettingsTabView: View {
             }
             .pickerStyle(.segmented)
 
+            Picker("Surface Style", selection: $surfaceStyleRawValue) {
+                ForEach(LinkWaveSurfaceStyle.allCases) { style in
+                    Text(style.title).tag(style.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+
             Picker("Accent Color", selection: $settings.accentColor) {
                 ForEach(AppAccentColor.allCases) { accent in
                     HStack(spacing: 8) {
@@ -188,6 +197,10 @@ public struct SettingsTabView: View {
 
     private var palette: ThemePalette {
         settings.themePalette(for: colorScheme)
+    }
+
+    private var surfaceStyle: LinkWaveSurfaceStyle {
+        LinkWaveSurfaceStyle(rawValue: surfaceStyleRawValue) ?? .liquidGlass
     }
 
     private var networkDetailsSection: some View {

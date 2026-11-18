@@ -36,21 +36,33 @@ public struct UsageTabView: View {
             .alwaysScrollBounce()
             .refreshable { await viewModel.refreshAll(forceReauthIfNeeded: true) }
             .navigationTitle("Usage")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    RouterSwitcherMenu(viewModel: viewModel, settings: settings) {
-                        showSettings = true
+                    HStack(spacing: 5) {
+                        ProfileAvatarPickerButton(size: 38)
+                            .frame(width: 44, height: 44)
+                        RouterSwitcherMenu(viewModel: viewModel, settings: settings) {
+                            showSettings = true
+                        }
                     }
                 }
                 StandaloneTopBarTrailingItem(
                     content: AnyView(RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: settings.isConfigured))
                 )
+                StandaloneTopBarTrailingItem(content: AnyView(
+                    LinkWaveToolbarIconButton(symbol: "gearshape", accessibilityLabel: "Settings") {
+                        showSettings = true
+                    }
+                ))
             }
             .navigationDestination(isPresented: $showSettings) {
                 SettingsTabView(viewModel: viewModel)
                     .toolbar(.hidden, for: .tabBar)
             }
+        }
+        .onChange(of: showSettings) { isPresented in
+            if !isPresented { viewModel.settingsDidDismiss() }
         }
     }
 
@@ -110,7 +122,7 @@ private struct SyncStatusCard: View {
             } else {
                 Label("Daily history has readings for the last 7 days", systemImage: "checkmark.circle.fill")
                     .font(.caption.weight(.medium))
-                    .foregroundColor(.green)
+                    .foregroundColor(.accentColor)
             }
 
             Text("The iPhone checks the router while LinkWave is active. A long gap can leave the daily split incomplete.")

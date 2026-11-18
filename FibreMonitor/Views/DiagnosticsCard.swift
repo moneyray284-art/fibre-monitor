@@ -61,13 +61,13 @@ struct DiagnosticsCard: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(viewModel.diagnosticOutput.text)
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.green)
+                                .foregroundColor(.accentColor)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .textSelection(.enabled)
                             if let status = viewModel.diagnosticOutput.status {
                                 Text(status == "Complete" ? "Done" : status.replacingOccurrences(of: "_", with: " "))
                                     .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                    .foregroundColor(status == "Complete" ? .green : .orange)
+                                    .foregroundColor(status == "Complete" ? .accentColor : .orange)
                             }
                             Color.clear.frame(height: 1).id("end")
                         }

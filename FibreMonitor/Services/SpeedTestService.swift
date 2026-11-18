@@ -17,6 +17,24 @@ struct SpeedTestProgress: Equatable, Sendable {
     let phase: Phase
     let fraction: Double
     let detail: String
+    var currentMbps: Double? = nil
+}
+
+private final class TransferByteCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytes: Int64 = 0
+
+    func add(_ value: Int64) {
+        lock.lock()
+        bytes += value
+        lock.unlock()
+    }
+
+    var total: Int64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return bytes
+    }
 }
 
 private struct RTTMeasurement: Sendable {
@@ -280,6 +298,7 @@ enum SpeedTestService {
         guard !urls.isEmpty else { return 0 }
         let beganAt = Date()
         let deadline = beganAt.addingTimeInterval(transferWindow)
+        let progressBytes = TransferByteCounter()
         let totalBytes = await withTaskGroup(of: Int64.self) { group in
             for url in urls.prefix(5) {
                 group.addTask {
@@ -306,8 +325,14 @@ enum SpeedTestService {
                             guard let http = response as? HTTPURLResponse,
                                   (200..<300).contains(http.statusCode) else { break }
                             switch mode {
-                            case .download: bytes += Int64(data.count)
-                            case .upload(let body): bytes += Int64(body.count)
+                            case .download:
+                                let transferred = Int64(data.count)
+                                bytes += transferred
+                                progressBytes.add(transferred)
+                            case .upload(let body):
+                                let transferred = Int64(body.count)
+                                bytes += transferred
+                                progressBytes.add(transferred)
                             }
                         } catch {
                             break
@@ -317,10 +342,25 @@ enum SpeedTestService {
                 }
             }
 
+            var priorBytes: Int64 = 0
+            var priorSampleTime = beganAt
             while Date() < deadline && !Task.isCancelled {
-                let fraction = min(1, max(0, Date().timeIntervalSince(beganAt) / transferWindow))
+                let now = Date()
+                let fraction = min(1, max(0, now.timeIntervalSince(beganAt) / transferWindow))
                 let secondsLeft = max(0, Int(ceil(deadline.timeIntervalSinceNow)))
-                await onProgress(.init(phase: phase, fraction: fraction, detail: "\(secondsLeft)s remaining"))
+                let currentBytes = progressBytes.total
+                let sampleDuration = now.timeIntervalSince(priorSampleTime)
+                let currentMbps = sampleDuration > 0
+                    ? Double(max(Int64.zero, currentBytes - priorBytes)) * 8 / (sampleDuration * 1_000_000)
+                    : 0
+                await onProgress(.init(
+                    phase: phase,
+                    fraction: fraction,
+                    detail: "\(secondsLeft)s remaining",
+                    currentMbps: currentMbps
+                ))
+                priorBytes = currentBytes
+                priorSampleTime = now
                 try? await Task.sleep(nanoseconds: 250_000_000)
             }
             group.cancelAll()

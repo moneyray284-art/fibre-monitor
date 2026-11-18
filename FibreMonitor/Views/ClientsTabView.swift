@@ -76,17 +76,24 @@ private enum ClientSignal {
         if device.port.isLan { return 4 }
         guard device.port.isWifi, let rssi = device.rssiDbm else { return 3 }
         if rssi >= -55 { return 4 }
-        if rssi >= -66 { return 3 }
-        if rssi >= -74 { return 2 }
+        if rssi >= -65 { return 3 }
+        if rssi >= -79 { return 2 }
         return 1
     }
 
     static func color(for device: OntDevice) -> Color {
         guard device.isOnline else { return .secondary }
-        guard device.port.isWifi, let rssi = device.rssiDbm else { return .green }
-        if rssi >= -66 { return .green }
-        if rssi >= -74 { return .orange }
-        return .red
+        guard device.port.isWifi, let rssi = device.rssiDbm else { return .accentColor }
+        if rssi >= -65 { return .green }
+        if rssi >= -79 { return .orange }
+        return Color(red: 0.88, green: 0.24, blue: 0.35)
+    }
+
+    static func quality(for device: OntDevice) -> String? {
+        guard device.isOnline, device.port.isWifi, let rssi = device.rssiDbm else { return nil }
+        if rssi >= -65 { return "Strong" }
+        if rssi >= -79 { return "Fair" }
+        return "Weak"
     }
 
     static func detail(for device: OntDevice) -> String? {
@@ -135,6 +142,7 @@ private enum ClientDeviceFilter: String, CaseIterable {
 
 public struct ClientsTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
+    @State private var showSettings = false
     @State private var searchText = ""
     @State private var selectedDevice: OntDevice?
     @State private var selectedBlockedDevice: BlockedRouterDevice?
@@ -153,6 +161,18 @@ public struct ClientsTabView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
+                    if viewModel.settings.isConfigured {
+                        HStack {
+                            Text("\(filteredOnline.count) online · \(filteredOffline.count) offline · \(viewModel.blockedDevices.count) blocked")
+                                .font(.caption.weight(.medium))
+                                .linkWaveText(.secondary)
+                                .monospacedDigit()
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 4)
+                        clientFilterTabs
+                    }
+
                     if !viewModel.settings.isConfigured {
                         ClientsEmptyCard(
                             icon: "wifi.router",
@@ -228,18 +248,38 @@ public struct ClientsTabView: View {
             .refreshable { await viewModel.refreshAll(forceReauthIfNeeded: true) }
             .searchable(text: $searchText, prompt: "Search name, IP, MAC, or vendor")
             .navigationTitle("Clients")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                StandaloneTopBarTrailingItem(content: AnyView(filterMenu))
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: 5) {
+                        ProfileAvatarPickerButton(size: 38)
+                            .frame(width: 44, height: 44)
+                        RouterSwitcherMenu(viewModel: viewModel, settings: viewModel.settings) {
+                            showSettings = true
+                        }
+                    }
+                }
                 StandaloneTopBarTrailingItem(
                     content: AnyView(RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured))
                 )
+                StandaloneTopBarTrailingItem(content: AnyView(
+                    LinkWaveToolbarIconButton(symbol: "gearshape", accessibilityLabel: "Settings") {
+                        showSettings = true
+                    }
+                ))
+            }
+            .navigationDestination(isPresented: $showSettings) {
+                SettingsTabView(viewModel: viewModel)
+                    .toolbar(.hidden, for: .tabBar)
             }
         }
         .onAppear(perform: refreshLocalWiFiAddress)
         .onChange(of: viewModel.isConnected) { _ in refreshLocalWiFiAddress() }
         .onChange(of: viewModel.selectedTab) { tab in
             if tab == .clients { refreshLocalWiFiAddress() }
+        }
+        .onChange(of: showSettings) { isPresented in
+            if !isPresented { viewModel.settingsDidDismiss() }
         }
         .sheet(item: $selectedDevice) { device in
             ClientDetailSheet(
@@ -338,6 +378,43 @@ public struct ClientsTabView: View {
     private var filteredOnline: [OntDevice] {
         let devices = filter(unblockedDeviceRecords.filter(\.isOnline))
         return devices.sorted { isThisPhone($0) && !isThisPhone($1) }
+    }
+
+    private var clientFilterTabs: some View {
+        HStack(spacing: 3) {
+            ForEach(ClientDeviceFilter.allCases, id: \.self) { filter in
+                Button {
+                    selectFilter(filter)
+                } label: {
+                    Text("\(filter.menuTitle) \(count(for: filter))")
+                        .font(.caption2.weight(.semibold))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                        .foregroundStyle(selectedFilter == filter ? Color.accentColor : Color.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 34)
+                        .background {
+                            if selectedFilter == filter {
+                                Capsule().fill(Color.accentColor.opacity(0.13))
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selectedFilter == filter ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .liquidGlassCapsule()
+    }
+
+    private func count(for filter: ClientDeviceFilter) -> Int {
+        switch filter {
+        case .all: allCount
+        case .online: filteredOnline.count
+        case .offline: filteredOffline.count
+        case .blocked: filteredBlockedDevices.count
+        }
     }
 
     private var filteredOffline: [OntDevice] {
@@ -718,6 +795,11 @@ private struct ClientRow: View {
                             Text("\(Int(rssi.rounded())) dBm")
                                 .font(.caption2.monospacedDigit())
                                 .linkWaveText(.secondary)
+                            if let quality = ClientSignal.quality(for: device) {
+                                Text("· \(quality)")
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(ClientSignal.color(for: device))
+                            }
                         }
                     }
                     if let bandLabel {

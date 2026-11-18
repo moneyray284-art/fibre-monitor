@@ -4,6 +4,9 @@ public struct DashboardView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
     @State private var showSettings = false
+    @State private var speedTestDownloadMbps: Double?
+    @State private var speedTestUploadMbps: Double?
+    @Environment(\.colorScheme) private var colorScheme
 
     public init(viewModel: MonitorViewModel) {
         self.viewModel = viewModel
@@ -19,7 +22,12 @@ public struct DashboardView: View {
                             showSettings = true
                         }
                     } else {
-                        RouterHeaderCard(viewModel: viewModel, settings: settings)
+                        RouterHeaderCard(
+                            viewModel: viewModel,
+                            settings: settings,
+                            testDownloadMbps: speedTestDownloadMbps,
+                            testUploadMbps: speedTestUploadMbps
+                        )
 
                         if !viewModel.isConnectedToWiFi {
                             NetworkStatusBanner(
@@ -42,7 +50,6 @@ public struct DashboardView: View {
                             )
                         }
 
-                        CompactSpeedCard(traffic: viewModel.traffic)
                         HomeSummaryRow(
                             summary: settings.dataUsageSummary,
                             onlineCount: viewModel.homeOnlineDeviceCount,
@@ -50,7 +57,11 @@ public struct DashboardView: View {
                             openUsage: { viewModel.selectedTab = .usage },
                             openClients: { viewModel.selectedTab = .clients }
                         )
-                        SpeedTestCard(viewModel: viewModel)
+                        SpeedTestCard(
+                            viewModel: viewModel,
+                            testDownloadMbps: $speedTestDownloadMbps,
+                            testUploadMbps: $speedTestUploadMbps
+                        )
                     }
                 }
                 .padding(.horizontal)
@@ -61,18 +72,21 @@ public struct DashboardView: View {
             .liquidGlassScrollEdges()
             .alwaysScrollBounce()
             .refreshable { await viewModel.refreshAll(forceReauthIfNeeded: true) }
-            .navigationTitle("LinkWave")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     ProfileAvatarPickerButton(size: 38)
-                        .frame(width: 38, height: 38)
+                        .frame(width: 44, height: 44)
                 }
-                StandaloneTopBarTrailingItem(
-                    content: AnyView(homeToolbarButton(symbol: "gearshape", label: "Settings") {
-                        showSettings = true
-                    })
-                )
+                ToolbarItem(placement: .principal) {
+                    LinkWaveWordmark(
+                        nodesArePulsing: false,
+                        white: settings.themePalette(for: colorScheme).textPrimary.color,
+                        cyan: settings.themePalette(for: colorScheme).accent.color,
+                        fontSize: 18
+                    )
+                }
                 StandaloneTopBarTrailingItem(
                     content: AnyView(homeToolbarButton(
                         symbol: "arrow.clockwise",
@@ -81,6 +95,11 @@ public struct DashboardView: View {
                         isRefreshing: viewModel.isRefreshing
                     ) {
                         Task { await viewModel.refreshAll(forceReauthIfNeeded: true) }
+                    })
+                )
+                StandaloneTopBarTrailingItem(
+                    content: AnyView(homeToolbarButton(symbol: "gearshape", label: "Settings") {
+                        showSettings = true
                     })
                 )
             }
@@ -115,7 +134,7 @@ public struct DashboardView: View {
         }
         .buttonStyle(.plain)
         .modifier(LiquidGlassToolbarCircleModifier())
-        .frame(width: 38, height: 38)
+        .frame(width: 44, height: 44)
         .accessibilityLabel(label)
         .disabled(isDisabled)
     }
@@ -124,13 +143,15 @@ public struct DashboardView: View {
 private struct RouterHeaderCard: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
+    let testDownloadMbps: Double?
+    let testUploadMbps: Double?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.green.opacity(0.16))
+                        .fill(Color.accentColor.opacity(0.12))
                         .frame(width: 66, height: 54)
                     HuaweiOptiXstarIllustration(isOnline: viewModel.isConnected, wifiOnline: wifiOnline)
                 }
@@ -182,6 +203,11 @@ private struct RouterHeaderCard: View {
                     .liquidGlassSmallButton()
                 }
             }
+            CompactSpeedCard(
+                traffic: viewModel.traffic,
+                downloadOverrideMbps: testDownloadMbps,
+                uploadOverrideMbps: testUploadMbps
+            )
         }
         .linkWaveGlassCard()
         .accessibilityElement(children: .combine)
@@ -369,14 +395,16 @@ private struct RouterConnectivityFallback: View {
 
 private struct CompactSpeedCard: View {
     let traffic: TrafficState
+    var downloadOverrideMbps: Double? = nil
+    var uploadOverrideMbps: Double? = nil
 
     var body: some View {
         HStack(spacing: 13) {
             speedMetric(
                 title: "Download",
-                value: traffic.downloadMbps,
+                value: downloadOverrideMbps ?? traffic.downloadMbps,
                 icon: "arrow.down",
-                tint: .blue
+                tint: .accentColor
             )
 
             Rectangle()
@@ -385,13 +413,12 @@ private struct CompactSpeedCard: View {
 
             speedMetric(
                 title: "Upload",
-                value: traffic.uploadMbps,
+                value: uploadOverrideMbps ?? traffic.uploadMbps,
                 icon: "arrow.up",
-                tint: .green
+                tint: Color.accentColor.opacity(0.72)
             )
         }
         .padding(.vertical, 2)
-        .linkWaveGlassCard()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Live speed")
         .accessibilityValue(
@@ -433,6 +460,8 @@ private struct CompactSpeedCard: View {
 
 private struct SpeedTestCard: View {
     @ObservedObject var viewModel: MonitorViewModel
+    @Binding var testDownloadMbps: Double?
+    @Binding var testUploadMbps: Double?
     @State private var result: SpeedTestResult?
     @State private var progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
     @State private var errorMessage: String?
@@ -444,7 +473,7 @@ private struct SpeedTestCard: View {
             HStack(spacing: 9) {
                 Image(systemName: "speedometer")
                     .font(.headline.weight(.semibold))
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(Color.accentColor)
                 Text("Speed Test")
                     .font(.headline.weight(.semibold))
                     .linkWaveText(.primary)
@@ -452,7 +481,7 @@ private struct SpeedTestCard: View {
                 if isRunning {
                     Text(progress.phase.rawValue.uppercased())
                         .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .foregroundStyle(.cyan)
+                        .foregroundStyle(Color.accentColor)
                         .lineLimit(1)
                 }
             }
@@ -461,8 +490,8 @@ private struct SpeedTestCard: View {
                 HStack(spacing: 0) {
                     resultMetric("Ping", value: String(format: "%.0f ms", result.pingMs), tint: .primary)
                     resultMetric("Jitter", value: String(format: "%.0f ms", result.jitterMs), tint: .primary)
-                    resultMetric("Download", value: Self.speed(result.downloadMbps), tint: .cyan)
-                    resultMetric("Upload", value: Self.speed(result.uploadMbps), tint: .mint)
+                    resultMetric("Downlink", value: Self.speed(result.downloadMbps), tint: .accentColor)
+                    resultMetric("Uplink", value: Self.speed(result.uploadMbps), tint: Color.accentColor.opacity(0.72))
                 }
             } else {
                 HStack(spacing: 0) {
@@ -485,7 +514,7 @@ private struct SpeedTestCard: View {
 
             if isRunning {
                 ProgressView(value: progress.fraction)
-                    .tint(.cyan)
+                    .tint(.accentColor)
                     .accessibilityLabel("Speed test progress")
             } else if let errorMessage {
                 Text(errorMessage)
@@ -496,20 +525,24 @@ private struct SpeedTestCard: View {
 
             if isRunning {
                 HStack(spacing: 8) {
-                    ProgressView().tint(.cyan)
-                    Text(progress.phase.rawValue)
+                    ProgressView().tint(.accentColor)
+                    Text(phaseStatus)
                         .font(.caption.weight(.medium))
                         .linkWaveText(.secondary)
                     Spacer()
                     Text("\(Int(progress.fraction * 100))%")
                         .font(.caption.monospacedDigit().weight(.semibold))
                         .linkWaveText(.secondary)
+                    Button("Stop", action: stopTest)
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered)
+                        .tint(.accentColor)
                 }
             } else {
                 Button(action: startTest) {
                     Label(startButtonTitle, systemImage: startButtonSymbol)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(viewModel.canRunSpeedTest ? Color.cyan : Color.secondary)
+                        .foregroundStyle(viewModel.canRunSpeedTest ? Color.accentColor : Color.secondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                 }
@@ -533,11 +566,24 @@ private struct SpeedTestCard: View {
     private var startButtonTitle: String {
         if !viewModel.isConnectedToWiFi { return "Connect to Wi-Fi to run Speed Test" }
         if !viewModel.hasInternetPath { return "No Internet for Speed Test" }
-        return result == nil ? "Start Test" : "Test Again"
+        return result == nil ? "Start Test" : "Run Again"
     }
 
     private var startButtonSymbol: String {
         viewModel.canRunSpeedTest ? (result == nil ? "play.fill" : "arrow.clockwise") : "wifi.slash"
+    }
+
+    private var phaseStatus: String {
+        switch progress.phase {
+        case .ping: "Measuring ping & jitter…"
+        case .download: "Testing download…"
+        case .upload: "Testing upload…"
+        }
+    }
+
+    private func stopTest() {
+        errorMessage = "Speed test stopped."
+        testTask?.cancel()
     }
 
     private func resultMetric(_ title: String, value: String, tint: Color) -> some View {
@@ -559,6 +605,8 @@ private struct SpeedTestCard: View {
     private func startTest() {
         guard !isRunning, viewModel.canRunSpeedTest else { return }
         isRunning = true
+        testDownloadMbps = 0
+        testUploadMbps = 0
         result = nil
         errorMessage = nil
         progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
@@ -569,10 +617,29 @@ private struct SpeedTestCard: View {
                 isRunning = false
                 viewModel.setSpeedTestRunning(false)
                 testTask = nil
+                testDownloadMbps = 0
+                testUploadMbps = 0
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_100_000_000)
+                    guard !isRunning else { return }
+                    testDownloadMbps = nil
+                    testUploadMbps = nil
+                }
             }
             do {
                 result = try await SpeedTestService.run { update in
                     progress = update
+                    switch update.phase {
+                    case .ping:
+                        testDownloadMbps = 0
+                        testUploadMbps = 0
+                    case .download:
+                        testDownloadMbps = update.currentMbps ?? 0
+                        testUploadMbps = 0
+                    case .upload:
+                        testDownloadMbps = 0
+                        testUploadMbps = update.currentMbps ?? 0
+                    }
                 }
             } catch is CancellationError {
                 if errorMessage == nil { errorMessage = "Speed test stopped." }
@@ -619,9 +686,9 @@ private struct HomeSummaryRow: View {
                         .contentTransition(.numericText())
                     HStack(spacing: 7) {
                         Label(Self.format(summary.todayDownloadBytes), systemImage: "arrow.down")
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(Color.accentColor)
                         Label(Self.format(summary.todayUploadBytes), systemImage: "arrow.up")
-                            .foregroundStyle(.green)
+                            .foregroundStyle(Color.secondary)
                     }
                     .font(.system(size: 9, weight: .medium, design: .rounded))
                     .lineLimit(1)
@@ -699,7 +766,7 @@ private struct MetricsTileGrid: View {
 
             MetricTile(
                 icon: "clock.arrow.circlepath",
-                iconTint: .blue,
+                iconTint: .accentColor,
                 title: wan.connectionType == "IPoE" ? "WAN Uptime" : "PPPoE Uptime",
                 value: InternetCard.uptime(wan.uptimeSeconds),
                 subtitle: wan.connectionStatus.isEmpty ? nil : wan.connectionStatus
@@ -708,7 +775,7 @@ private struct MetricsTileGrid: View {
             if let ontUptime = health.uptimeSeconds, ontUptime > 0 {
                 MetricTile(
                     icon: "timer",
-                    iconTint: .teal,
+                    iconTint: .accentColor.opacity(0.72),
                     title: "ONT Uptime",
                     value: InternetCard.uptime(ontUptime),
                     subtitle: health.model.isEmpty ? nil : health.model

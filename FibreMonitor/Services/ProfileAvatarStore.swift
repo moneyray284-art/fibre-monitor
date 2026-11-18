@@ -71,6 +71,7 @@ public enum ProfileAvatarStoreError: LocalizedError {
 
 public struct ProfileAvatarView: View {
     @ObservedObject private var store: ProfileAvatarStore
+    @Environment(\.linkWaveThemePalette) private var palette
     private let size: CGFloat
 
     public init(size: CGFloat = 52) {
@@ -91,7 +92,7 @@ public struct ProfileAvatarView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(
                         LinearGradient(
-                            colors: [.teal, .blue],
+                            colors: [palette.accent.color, palette.accent.color.opacity(0.72)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -140,6 +141,9 @@ public struct ProfileAvatarPickerButton: View {
         } label: {
             ProfileAvatarView(size: size)
                 .frame(width: size, height: size)
+                .padding(3)
+                .modifier(LiquidGlassToolbarCircleModifier())
+                .frame(width: size + 6, height: size + 6)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

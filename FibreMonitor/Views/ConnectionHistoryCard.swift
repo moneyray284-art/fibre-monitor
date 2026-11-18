@@ -14,7 +14,7 @@ struct ConnectionHistoryCard: View {
             if visibleEvents.isEmpty {
                 Label("No interruptions observed", systemImage: "checkmark.circle.fill")
                     .font(.subheadline.weight(.medium))
-                    .foregroundColor(.green)
+                    .foregroundColor(.accentColor)
                 Text("The app records router connection changes while it is open and checking.")
                     .font(.caption)
                     .linkWaveText(.secondary)

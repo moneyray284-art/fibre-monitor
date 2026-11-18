@@ -3,6 +3,7 @@ import SwiftUI
 public struct MainTabView: View {
     @StateObject private var viewModel = MonitorViewModel()
     @ObservedObject private var settings = SettingsStore.shared
+    @AppStorage("linkwave.surfaceStyle") private var surfaceStyleRawValue = LinkWaveSurfaceStyle.liquidGlass.rawValue
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -46,6 +47,7 @@ public struct MainTabView: View {
                     }
                     .tag(AppTab.wifi)
             }
+            .linkWaveTabBarSurface()
 
             if isLaunchAnimationVisible {
                 LinkWaveLaunchAnimation(onFinished: finishLaunchAnimation)
@@ -54,6 +56,7 @@ public struct MainTabView: View {
             }
         }
         .environment(\.linkWaveThemePalette, activeThemePalette)
+        .environment(\.linkWaveSurfaceStyle, surfaceStyle)
         .foregroundStyle(activeThemePalette.textPrimary.color)
         .statusBarHidden(isLaunchAnimationVisible)
         .sheet(isPresented: routerPickerBinding) {
@@ -133,6 +136,10 @@ public struct MainTabView: View {
 
     private var activeThemePalette: ThemePalette {
         settings.themePalette(for: effectiveColorScheme)
+    }
+
+    private var surfaceStyle: LinkWaveSurfaceStyle {
+        LinkWaveSurfaceStyle(rawValue: surfaceStyleRawValue) ?? .liquidGlass
     }
 
     private var routerPickerBinding: Binding<Bool> {

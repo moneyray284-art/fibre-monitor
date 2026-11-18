@@ -293,10 +293,10 @@ public final class SettingsStore: ObservableObject {
         )
         var lightPalette = savedLightPalette ?? preset.lightPalette
         var darkPalette = savedDarkPalette ?? preset.darkPalette
-        if savedPresetKey == nil && savedLightPalette == nil {
+        if oldAccentWasSaved && savedPresetKey == nil && savedLightPalette == nil {
             lightPalette.accent = CodableColor(color: accentColor.color)
         }
-        if savedPresetKey == nil && savedDarkPalette == nil {
+        if oldAccentWasSaved && savedPresetKey == nil && savedDarkPalette == nil {
             darkPalette.accent = CodableColor(color: accentColor.color)
         }
         self.lightThemePalette = lightPalette

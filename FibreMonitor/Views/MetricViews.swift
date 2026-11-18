@@ -7,9 +7,9 @@ struct SpeedSection: View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
                 SpeedCard(title: "DOWNLOAD", mbps: traffic.downloadMbps, peak: traffic.peakDownloadMbps,
-                          icon: "arrow.down.circle.fill", tint: .blue)
+                          icon: "arrow.down.circle.fill", tint: .accentColor)
                 SpeedCard(title: "UPLOAD", mbps: traffic.uploadMbps, peak: traffic.peakUploadMbps,
-                          icon: "arrow.up.circle.fill", tint: .green)
+                          icon: "arrow.up.circle.fill", tint: Color.accentColor.opacity(0.72))
             }
             Sparkline(samples: traffic.history)
                 .frame(height: 70)
@@ -44,6 +44,7 @@ private struct SpeedCard: View {
             HStack(alignment: .lastTextBaseline, spacing: 4) {
                 Text(mbps >= 100 ? String(format: "%.0f", mbps) : String(format: "%.2f", mbps))
                     .font(.system(.title, design: .rounded).weight(.bold))
+                    .monospacedDigit()
                     .contentTransition(.numericText())
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -51,6 +52,7 @@ private struct SpeedCard: View {
             }
             Text(peak > 0 ? "Peak \(String(format: "%.1f", peak)) Mbps" : "Peak —")
                 .font(.caption2)
+                .monospacedDigit()
                 .linkWaveText(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -59,7 +61,7 @@ private struct SpeedCard: View {
     }
 }
 
-/// Last minute of download (blue) and upload (green).
+/// Last minute of download and upload in the active LinkWave accent.
 private struct Sparkline: View {
     let samples: [ThroughputSample]
 
@@ -67,8 +69,8 @@ private struct Sparkline: View {
         GeometryReader { geo in
             let maxValue = max(1, samples.map { max($0.downloadMbps, $0.uploadMbps) }.max() ?? 1)
             ZStack {
-                line(samples.map(\.downloadMbps), max: maxValue, in: geo.size).stroke(.blue, lineWidth: 2)
-                line(samples.map(\.uploadMbps), max: maxValue, in: geo.size).stroke(.green, lineWidth: 2)
+                line(samples.map(\.downloadMbps), max: maxValue, in: geo.size).stroke(Color.accentColor, lineWidth: 2)
+                line(samples.map(\.uploadMbps), max: maxValue, in: geo.size).stroke(Color.accentColor.opacity(0.55), lineWidth: 2)
                 if samples.count < 2 {
                     Text("Collecting speed samples…").font(.caption2).linkWaveText(.secondary)
                 }
@@ -100,7 +102,7 @@ struct FibreCard: View {
                 } else {
                     Pill(
                         text: optical.isRegistered ? "Registered" : (optical.registrationState.isEmpty ? "—" : "Not registered"),
-                        color: optical.isRegistered ? .green : .orange
+                        color: optical.isRegistered ? .accentColor : .orange
                     )
                 }
             }
@@ -108,6 +110,7 @@ struct FibreCard: View {
             HStack(alignment: .lastTextBaseline, spacing: 6) {
                 Text(optical.rxPowerDbm.map { String(format: "%.2f", $0) } ?? "—")
                     .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                    .monospacedDigit()
                     .foregroundColor(optical.rxPowerDbm == nil ? .secondary : .primary)
                     .contentTransition(.numericText())
                 Text("dBm")
@@ -240,6 +243,7 @@ struct MetricTile: View {
 
             Text(value.isEmpty ? "—" : value)
                 .font(.system(.callout, design: .rounded).weight(.bold))
+                .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
@@ -296,7 +300,7 @@ private struct LoadBarRow: View {
     private var tint: Color {
         if clamped >= 85 { return .red }
         if clamped >= 65 { return .orange }
-        return .green
+        return .accentColor
     }
 
     var body: some View {
@@ -374,12 +378,16 @@ struct Pill: View {
     let color: Color
 
     var body: some View {
-        Text(text)
-            .font(.caption2.weight(.bold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .foregroundColor(color)
-            .background(color.opacity(0.15), in: Capsule())
+        HStack(spacing: 5) {
+            Text("·")
+                .font(.caption.weight(.bold))
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.caption2.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(color)
+        }
+        .fixedSize()
     }
 }
 
@@ -404,8 +412,6 @@ struct Readout: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .liquidGlassPill()
         .accessibilityElement(children: .combine)
     }
 }

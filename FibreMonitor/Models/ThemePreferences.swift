@@ -101,7 +101,7 @@ public enum AppThemePreset: String, CaseIterable, Identifiable, Codable {
     public var lightPalette: ThemePalette {
         switch self {
         case .linkWaveDefault:
-            ThemePalette(bgPrimary: .init(red: 0.965, green: 0.969, blue: 0.976), bgSecondary: .init(red: 1, green: 1, blue: 1), bgTertiary: .init(red: 0.935, green: 0.942, blue: 0.955), bgElevated: .init(red: 0.985, green: 0.988, blue: 0.994), textPrimary: .init(red: 0.08, green: 0.09, blue: 0.11), textSecondary: .init(red: 0.36, green: 0.39, blue: 0.44), textTertiary: .init(red: 0.55, green: 0.58, blue: 0.63), accent: .init(red: 0.055, green: 0.647, blue: 0.78))
+            ThemePalette(bgPrimary: .init(red: 0.965, green: 0.969, blue: 0.976), bgSecondary: .init(red: 1, green: 1, blue: 1), bgTertiary: .init(red: 0.935, green: 0.942, blue: 0.955), bgElevated: .init(red: 0.985, green: 0.988, blue: 0.994), textPrimary: .init(red: 0.08, green: 0.09, blue: 0.11), textSecondary: .init(red: 0.36, green: 0.39, blue: 0.44), textTertiary: .init(red: 0.55, green: 0.58, blue: 0.63), accent: .init(red: 0.008, green: 0.518, blue: 0.78))
         case .midnight:
             ThemePalette(bgPrimary: .init(red: 0.948, green: 0.962, blue: 0.986), bgSecondary: .init(red: 0.985, green: 0.991, blue: 1), bgTertiary: .init(red: 0.912, green: 0.934, blue: 0.972), bgElevated: .init(red: 0.968, green: 0.978, blue: 0.996), textPrimary: .init(red: 0.075, green: 0.095, blue: 0.14), textSecondary: .init(red: 0.34, green: 0.385, blue: 0.47), textTertiary: .init(red: 0.53, green: 0.575, blue: 0.655), accent: .init(red: 0.145, green: 0.388, blue: 0.922))
         case .emerald:
