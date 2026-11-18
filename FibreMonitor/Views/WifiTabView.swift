@@ -344,6 +344,7 @@ private struct WifiQrSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.linkWaveThemePalette) private var palette
 
     @State private var config: WifiSsidConfig?
     @State private var isLoading = false
