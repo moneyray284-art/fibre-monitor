@@ -32,9 +32,9 @@ public struct UsageTabView: View {
                             history: settings.dataUsageSummary.historicalDailyHistory,
                             todayDownloadBytes: settings.dataUsageSummary.todayDownloadBytes,
                             todayUploadBytes: settings.dataUsageSummary.todayUploadBytes,
+                            onLocalDayRollover: { settings.refreshUsageSummaryForCurrentLocalDay() },
                             selectedDate: $selectedUsageDay,
-                            selectedMonth: $selectedUsageMonth,
-                            onLocalDayRollover: { settings.refreshUsageSummaryForCurrentLocalDay() }
+                            selectedMonth: $selectedUsageMonth
                         )
                     } else {
                         noRouterCard

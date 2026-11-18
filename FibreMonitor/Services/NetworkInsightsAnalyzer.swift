@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
+
 enum InsightSeverity: String, Equatable, Sendable {
     case optimal
     case warning
