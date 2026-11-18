@@ -415,26 +415,12 @@ private struct DailyUsageHistoryCard: View {
             }
             .chartOverlay { proxy in
                 GeometryReader { geometry in
-                    if let plotFrame = proxy.plotFrame {
-                        let plotRect = geometry[plotFrame]
-                        Rectangle()
-                            .fill(Color.clear)
-                            .contentShape(Rectangle())
-                            .frame(width: plotRect.width, height: plotRect.height)
-                            .position(x: plotRect.midX, y: plotRect.midY)
-                            .simultaneousGesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { value in
-                                        let distance = hypot(value.translation.width, value.translation.height)
-                                        if distance > 5 && abs(value.translation.width) < abs(value.translation.height) {
-                                            return
-                                        }
-                                        let plotX = min(max(value.location.x, 0), plotRect.width)
-                                        guard let date = proxy.value(atX: plotX, as: Date.self) else { return }
-                                        selectNearestDay(to: date)
-                                    }
-                            )
-                            .accessibilityLabel("Daily usage chart. Touch or drag horizontally to select a day.")
+                    if #available(iOS 17.0, *) {
+                        if let plotFrame = proxy.plotFrame {
+                            chartScrubOverlay(proxy: proxy, geometry: geometry, frame: plotFrame)
+                        }
+                    } else {
+                        chartScrubOverlay(proxy: proxy, geometry: geometry, frame: proxy.plotAreaFrame)
                     }
                 }
             }
@@ -443,6 +429,32 @@ private struct DailyUsageHistoryCard: View {
             monthAxisLabels
         }
         .padding(.bottom, 4)
+    }
+
+    private func chartScrubOverlay(
+        proxy: ChartProxy,
+        geometry: GeometryProxy,
+        frame: Anchor<CGRect>
+    ) -> some View {
+        let plotRect = geometry[frame]
+        return Rectangle()
+            .fill(Color.clear)
+            .contentShape(Rectangle())
+            .frame(width: plotRect.width, height: plotRect.height)
+            .position(x: plotRect.midX, y: plotRect.midY)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let distance = hypot(value.translation.width, value.translation.height)
+                        if distance > 5 && abs(value.translation.width) < abs(value.translation.height) {
+                            return
+                        }
+                        let plotX = min(max(value.location.x, 0), plotRect.width)
+                        guard let date = proxy.value(atX: plotX, as: Date.self) else { return }
+                        selectNearestDay(to: date)
+                    }
+            )
+            .accessibilityLabel("Daily usage chart. Touch or drag horizontally to select a day.")
     }
 
     private var monthEnd: Date {
