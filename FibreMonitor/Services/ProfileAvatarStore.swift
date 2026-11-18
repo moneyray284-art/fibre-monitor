@@ -11,6 +11,11 @@ public final class ProfileAvatarStore: ObservableObject {
     private let storageKey = "linkwave_profile_avatar_path"
     private let filename = "LinkWaveProfileAvatar.jpg"
 
+    public var savedPhotoData: Data? {
+        guard let path = defaults.string(forKey: storageKey) else { return nil }
+        return try? Data(contentsOf: URL(fileURLWithPath: path))
+    }
+
     private init() {
         guard let path = defaults.string(forKey: storageKey),
               let savedImage = UIImage(contentsOfFile: path) else {
@@ -26,11 +31,23 @@ public final class ProfileAvatarStore: ObservableObject {
             throw ProfileAvatarStoreError.couldNotEncodeImage
         }
 
+        try saveJPEGData(jpegData)
+    }
+
+    public func saveJPEGData(_ jpegData: Data?) throws {
+        guard let jpegData else {
+            remove()
+            return
+        }
+        guard let savedImage = UIImage(data: jpegData) else {
+            throw ProfileAvatarStoreError.couldNotEncodeImage
+        }
+
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let destination = documents.appendingPathComponent(filename)
         try jpegData.write(to: destination, options: .atomic)
         defaults.set(destination.path, forKey: storageKey)
-        image = UIImage(data: jpegData)
+        image = savedImage
     }
 
     public func remove() {
@@ -70,9 +87,13 @@ public enum ProfileAvatarStoreError: LocalizedError {
 public struct ProfileAvatarView: View {
     @ObservedObject private var store: ProfileAvatarStore
     private let size: CGFloat
+    private let silhouetteSize: CGFloat
+    private let cornerRadius: CGFloat
 
-    public init(size: CGFloat = 52) {
+    public init(size: CGFloat = 38, silhouetteSize: CGFloat = 25, cornerRadius: CGFloat = 11) {
         self.size = size
+        self.silhouetteSize = silhouetteSize
+        self.cornerRadius = cornerRadius
         self._store = ObservedObject(wrappedValue: .shared)
     }
 
@@ -83,10 +104,10 @@ public struct ProfileAvatarView: View {
                     .resizable()
                     .scaledToFill()
                     .frame(width: size, height: size)
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             } else {
                 Image(systemName: "person.fill")
-                    .font(.system(size: 20, weight: .medium))
+                    .font(.system(size: silhouetteSize, weight: .medium))
                     .frame(width: size, height: size)
             }
         }
@@ -99,7 +120,7 @@ public struct ProfileAvatarPickerButton: View {
     private let size: CGFloat
     @State private var isShowingProfile = false
 
-    public init(viewModel: MonitorViewModel, size: CGFloat = 32) {
+    public init(viewModel: MonitorViewModel, size: CGFloat = 38) {
         self.viewModel = viewModel
         self.size = size
     }
@@ -112,7 +133,7 @@ public struct ProfileAvatarPickerButton: View {
         }
         .buttonStyle(.plain)
         .frame(width: size, height: size)
-        .contentShape(Rectangle())
+        .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
         .accessibilityLabel("Open Profile")
         .sheet(isPresented: $isShowingProfile) {
             ProfileSheetView(viewModel: viewModel)

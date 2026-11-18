@@ -5,32 +5,48 @@ import UIKit
 
 struct ProfileSheetView: View {
     @ObservedObject var viewModel: MonitorViewModel
-    @ObservedObject private var avatarStore = ProfileAvatarStore.shared
+    @ObservedObject private var avatarStore: ProfileAvatarStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var profileName: String
-    @State private var routerName: String
+    @State private var editingProfileID: UUID?
+    @State private var draftProfileName: String
+    @State private var draftRouterName: String
+    @State private var draftProfilePhotoData: Data?
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var cropSourceImage: UIImage?
     @State private var isShowingPhotos = false
     @State private var isImportingFile = false
+    @State private var isShowingCropper = false
+    @State private var isConfirmingRemoveProfile = false
     @State private var errorMessage: String?
+    @State private var presentationDetent: PresentationDetent = .large
 
     init(viewModel: MonitorViewModel) {
         self.viewModel = viewModel
         let profile = viewModel.settings.activeProfile
-        _profileName = State(initialValue: profile?.name ?? "")
-        _routerName = State(initialValue: profile?.routerDisplayName ?? "")
+        let avatarStore = ProfileAvatarStore.shared
+        _avatarStore = ObservedObject(wrappedValue: avatarStore)
+        _editingProfileID = State(initialValue: profile?.id)
+        _draftProfileName = State(initialValue: profile?.name ?? "")
+        _draftRouterName = State(initialValue: profile?.routerDisplayName ?? "")
+        _draftProfilePhotoData = State(initialValue: avatarStore.savedPhotoData)
     }
 
     private var settings: SettingsStore { viewModel.settings }
-    private var canSave: Bool { settings.activeProfile != nil && !profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var editingProfile: RouterProfile? {
+        guard let editingProfileID else { return nil }
+        return settings.profiles.first { $0.id == editingProfileID }
+    }
+    private var canSave: Bool {
+        editingProfile != nil && !draftProfileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     HStack(spacing: 14) {
-                        ProfileAvatarView(size: 32)
+                        draftAvatarPreview
                         Menu {
                             Button {
                                 isShowingPhotos = true
@@ -42,35 +58,59 @@ struct ProfileSheetView: View {
                             } label: {
                                 Label("Choose from Files", systemImage: "folder")
                             }
-                            if avatarStore.image != nil {
+                            if draftProfilePhotoData != nil {
                                 Button(role: .destructive) {
-                                    avatarStore.remove()
+                                    draftProfilePhotoData = nil
                                 } label: {
                                     Label("Remove Photo", systemImage: "person.crop.circle.badge.xmark")
                                 }
                             }
                         } label: {
-                            Label(avatarStore.image == nil ? "Set Profile Picture" : "Change Profile Picture", systemImage: "photo")
+                            Label(draftProfilePhotoData == nil ? "Set Profile Picture" : "Change Profile Picture", systemImage: "photo")
                         }
                     }
 
-                    TextField("Profile name", text: $profileName)
-                        .textContentType(.name)
-                        .textInputAutocapitalization(.words)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Profile Name")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        TextField("Saved router connection name", text: $draftProfileName)
+                            .textContentType(.name)
+                            .textInputAutocapitalization(.words)
+                    }
 
-                    TextField("Router name", text: $routerName)
-                        .textInputAutocapitalization(.words)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Router Name")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        TextField("Name displayed on Home", text: $draftRouterName)
+                            .textInputAutocapitalization(.words)
+                    }
                 } header: {
                     Text("Profile")
                 } footer: {
-                    Text("The profile name identifies this saved router connection. The router name appears on Home.")
+                    Text("Profile Name identifies this saved connection. Router Name appears on the Home gateway card.")
                 }
 
-                Section("Router Details") {
-                    LabeledContent("ONT Model", value: viewModel.displayModelName)
-                    LabeledContent("Gateway IP", value: settings.activeProfile?.host ?? "—")
-                    LabeledContent("Optical RX", value: opticalRxText)
-                    LabeledContent("Last Sync", value: lastSyncText)
+                if editingProfile != nil {
+                    Section("Router Details") {
+                        LabeledContent("ONT Model", value: viewModel.displayModelName)
+                        LabeledContent("Gateway IP", value: editingProfile?.host ?? "—")
+                        LabeledContent("Optical RX", value: opticalRxText)
+                        LabeledContent("Last Sync", value: lastSyncText)
+                    }
+
+                    Section {
+                        Button(role: .destructive) {
+                            isConfirmingRemoveProfile = true
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Text("Remove Profile")
+                                Spacer()
+                            }
+                        }
+                    }
                 }
             }
             .linkWaveThemedListSurface()
@@ -85,8 +125,19 @@ struct ProfileSheetView: View {
                         .disabled(!canSave)
                 }
             }
+            .confirmationDialog(
+                "Remove Profile?",
+                isPresented: $isConfirmingRemoveProfile,
+                titleVisibility: .visible
+            ) {
+                Button("Remove Profile", role: .destructive, action: removeProfile)
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This removes the saved router connection and its local history from LinkWave.")
+            }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium, .large], selection: $presentationDetent)
+        .presentationDragIndicator(.visible)
         .photosPicker(isPresented: $isShowingPhotos, selection: $selectedPhoto, matching: .images)
         .fileImporter(
             isPresented: $isImportingFile,
@@ -100,13 +151,21 @@ struct ProfileSheetView: View {
                 }
             }
         )
+        .sheet(isPresented: $isShowingCropper, onDismiss: { cropSourceImage = nil }) {
+            if let cropSourceImage {
+                ProfilePhotoCropper(
+                    image: cropSourceImage,
+                    onCancel: { isShowingCropper = false },
+                    onUsePhoto: { data in
+                        draftProfilePhotoData = data
+                        isShowingCropper = false
+                    }
+                )
+            }
+        }
         .onChange(of: selectedPhoto) { item in
             guard let item else { return }
             Task { await loadImage(from: item) }
-        }
-        .onChange(of: settings.activeProfileId) { _ in
-            profileName = settings.activeProfile?.name ?? ""
-            routerName = settings.activeProfile?.routerDisplayName ?? ""
         }
         .alert(
             "Couldn’t Update Profile Photo",
@@ -121,6 +180,23 @@ struct ProfileSheetView: View {
         }
     }
 
+    private var draftAvatarPreview: some View {
+        Group {
+            if let data = draftProfilePhotoData, let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 64, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else {
+                Image(systemName: "person.fill")
+                    .font(.system(size: 28, weight: .medium))
+                    .frame(width: 64, height: 64)
+            }
+        }
+        .accessibilityLabel(draftProfilePhotoData == nil ? "Default profile silhouette" : "Profile picture preview")
+    }
+
     private var opticalRxText: String {
         guard let rxPower = viewModel.optical.rxPowerDbm else { return "—" }
         return String(format: "%.2f dBm", rxPower)
@@ -132,11 +208,22 @@ struct ProfileSheetView: View {
     }
 
     private func save() {
-        guard let profile = settings.activeProfile else { return }
-        let cleanProfileName = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let profile = editingProfile else { return }
+        let cleanProfileName = draftProfileName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanProfileName.isEmpty else { return }
-        let cleanRouterName = routerName.trimmingCharacters(in: .whitespacesAndNewlines)
-        settings.updateProfileNames(id: profile.id, profileName: cleanProfileName, routerName: cleanRouterName)
+        let cleanRouterName = draftRouterName.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            try avatarStore.saveJPEGData(draftProfilePhotoData)
+            settings.updateProfileNames(id: profile.id, profileName: cleanProfileName, routerName: cleanRouterName)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func removeProfile() {
+        guard let profileID = editingProfileID else { return }
+        settings.deleteProfile(profileID)
         dismiss()
     }
 
@@ -149,7 +236,7 @@ struct ProfileSheetView: View {
                 errorMessage = "The selected photo couldn’t be opened."
                 return
             }
-            try avatarStore.save(image)
+            presentCropper(for: image)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -166,9 +253,21 @@ struct ProfileSheetView: View {
                 errorMessage = "The selected file doesn’t contain a supported image."
                 return
             }
-            try avatarStore.save(image)
+            presentCropper(for: image)
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func presentCropper(for image: UIImage) {
+        if image.imageOrientation == .up {
+            cropSourceImage = image
+        } else {
+            let renderer = UIGraphicsImageRenderer(size: image.size)
+            cropSourceImage = renderer.image { _ in
+                image.draw(in: CGRect(origin: .zero, size: image.size))
+            }
+        }
+        isShowingCropper = true
     }
 }
