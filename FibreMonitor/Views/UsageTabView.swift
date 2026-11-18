@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 
 public struct UsageTabView: View {
@@ -39,23 +40,9 @@ public struct UsageTabView: View {
             .navigationTitle("Usage")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 5) {
-                        ProfileAvatarPickerButton(size: 38)
-                            .frame(width: 44, height: 44)
-                        RouterSwitcherMenu(viewModel: viewModel, settings: settings) {
-                            showSettings = true
-                        }
-                    }
-                }
                 StandaloneTopBarTrailingItem(
                     content: AnyView(RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: settings.isConfigured))
                 )
-                StandaloneTopBarTrailingItem(content: AnyView(
-                    LinkWaveToolbarIconButton(symbol: "gearshape", accessibilityLabel: "Settings") {
-                        showSettings = true
-                    }
-                ))
             }
             .navigationDestination(isPresented: $showSettings) {
                 SettingsTabView(viewModel: viewModel)
@@ -274,10 +261,8 @@ private struct DailyUsageHistoryCard: View {
 
     private var chartTopGB: Double {
         let maximumGB = Double(monthPoints.compactMap(\.totalBytes).max() ?? 0) / 1_000_000_000
-        return max(50, ceil(maximumGB / 50) * 50)
+        return max(20, ceil((maximumGB * 1.15) / 10) * 10)
     }
-
-    private var chartTopBytes: Double { chartTopGB * 1_000_000_000 }
 
     private var axisLabels: (String, String, String) {
         let month = selectedMonthStart.formatted(.dateTime.month(.abbreviated))
@@ -324,34 +309,50 @@ private struct DailyUsageHistoryCard: View {
     }
 
     private var monthMenu: some View {
-        Menu {
-            ForEach(monthOptions, id: \.self) { month in
-                Button {
-                    selectMonth(month)
-                } label: {
-                    HStack {
-                        Text(month.formatted(.dateTime.month(.wide).year()))
-                        if calendar.isDate(month, equalTo: selectedMonthStart, toGranularity: .month) {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
+        let index = monthOptions.firstIndex(where: {
+            calendar.isDate($0, equalTo: selectedMonthStart, toGranularity: .month)
+        }) ?? 0
+        let earlierMonth = monthOptions.indices.contains(index + 1) ? monthOptions[index + 1] : nil
+        let laterMonth = index > 0 ? monthOptions[index - 1] : nil
+
+        return HStack(spacing: 8) {
+            Button {
+                if let earlierMonth { selectMonth(earlierMonth) }
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
-        } label: {
-            HStack(spacing: 6) {
-                Text(selectedMonthStart.formatted(.dateTime.month(.wide).year()))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
+            .disabled(earlierMonth == nil)
+            .accessibilityLabel("Previous month")
+
+            Text(selectedMonthStart.formatted(.dateTime.month(.wide).year()))
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .fixedSize(horizontal: true, vertical: false)
+
+            Button {
+                if let laterMonth { selectMonth(laterMonth) }
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(palette.textAccent)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .liquidGlassCapsule()
+            .disabled(laterMonth == nil)
+            .accessibilityLabel("Next month")
         }
-        .accessibilityLabel("Select usage month")
+        .buttonStyle(.plain)
+        .foregroundStyle(palette.textSecondary.color)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .background(
+            palette.backgroundTertiary.opacity(0.42),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+        .accessibilityElement(children: .contain)
     }
 
     private func selectMonth(_ month: Date) {
@@ -367,70 +368,93 @@ private struct DailyUsageHistoryCard: View {
     }
 
     private var monthlyChart: some View {
-        GeometryReader { geometry in
-            let labelWidth: CGFloat = 38
-            let plotWidth = max(1, geometry.size.width - labelWidth - 5)
-            let plotHeight = geometry.size.height
-            let dayCount = max(1, monthPoints.count)
-            let barWidth = min(9, max(2, (plotWidth - CGFloat(dayCount - 1) * 2) / CGFloat(dayCount)))
-            let barSpacing = dayCount > 1 ? max(2, (plotWidth - barWidth * CGFloat(dayCount)) / CGFloat(dayCount - 1)) : 0
+        VStack(spacing: 2) {
+            Chart {
+                ForEach(monthPoints) { point in
+                    let totalGB = Double(point.totalBytes ?? 0) / 1_000_000_000
+                    let baselineCapGB = chartTopGB * 0.018
+                    let isRecorded = point.totalBytes != nil
+                    let plottedValue = isRecorded ? max(totalGB, baselineCapGB) : baselineCapGB
+                    let isSelected = calendar.isDate(point.date, inSameDayAs: selectedDate)
+                    let dayCenter = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: point.date) ?? point.date
 
-            HStack(spacing: 5) {
-                ZStack(alignment: .bottomLeading) {
-                    HStack(alignment: .bottom, spacing: barSpacing) {
-                        ForEach(monthPoints) { point in
-                            monthBar(point, width: barWidth, height: plotHeight)
+                    BarMark(
+                        x: .value("Day", dayCenter, unit: .day),
+                        yStart: .value("Baseline", 0),
+                        yEnd: .value("Usage", plottedValue),
+                        width: .fixed(7)
+                    )
+                    .foregroundStyle(
+                        isRecorded
+                            ? palette.textAccent.opacity(isSelected ? 1 : 0.62)
+                            : palette.textTertiary.color.opacity(0.38)
+                    )
+                }
+
+                let selectedDayCenter = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: selectedDate) ?? selectedDate
+                RuleMark(x: .value("Selected day", selectedDayCenter, unit: .day))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    .foregroundStyle(palette.textAccent.opacity(0.8))
+            }
+            .chartXScale(domain: selectedMonthStart...monthEnd)
+            .chartYScale(domain: 0...chartTopGB)
+            .chartXAxis(.hidden)
+            .chartYAxis {
+                AxisMarks(position: .trailing, values: [0, chartTopGB / 2, chartTopGB]) { value in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.75, dash: [2, 3]))
+                        .foregroundStyle(palette.textSecondary.color.opacity(0.28))
+                    AxisValueLabel {
+                        if let amount = value.as(Double.self) {
+                            Text("\(Int(amount.rounded())) GB")
+                                .font(.system(size: 9, weight: .medium))
+                                .monospacedDigit()
+                                .foregroundStyle(palette.textSecondary.color)
                         }
                     }
-
-                    Path { path in
-                        path.move(to: CGPoint(x: 0, y: 1))
-                        path.addLine(to: CGPoint(x: plotWidth, y: 1))
-                        path.move(to: CGPoint(x: 0, y: plotHeight / 2))
-                        path.addLine(to: CGPoint(x: plotWidth, y: plotHeight / 2))
-                    }
-                    .stroke(palette.textSecondary.color.opacity(0.34), style: StrokeStyle(lineWidth: 0.8, dash: [2, 3]))
-                    .allowsHitTesting(false)
                 }
-                .frame(width: plotWidth, height: plotHeight, alignment: .bottomLeading)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in selectDay(at: value.location.x, plotWidth: plotWidth) }
-                )
-                .accessibilityElement(children: .contain)
-
-                VStack(spacing: 0) {
-                    Text("\(Int(chartTopGB)) GB")
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                    Spacer(minLength: 0)
-                    Text("\(Int(chartTopGB / 2)) GB")
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                    Spacer(minLength: 0)
-                }
-                .font(.system(size: 9, weight: .medium))
-                .monospacedDigit()
-                .linkWaveText(.secondary)
-                .frame(width: labelWidth, height: plotHeight)
             }
-        }
-        .frame(height: 132)
-        .overlay(alignment: .bottom) {
+            .chartOverlay { proxy in
+                GeometryReader { geometry in
+                    if let plotFrame = proxy.plotFrame {
+                        let plotRect = geometry[plotFrame]
+                        Rectangle()
+                            .fill(Color.clear)
+                            .contentShape(Rectangle())
+                            .frame(width: plotRect.width, height: plotRect.height)
+                            .position(x: plotRect.midX, y: plotRect.midY)
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        let distance = hypot(value.translation.width, value.translation.height)
+                                        if distance > 5 && abs(value.translation.width) < abs(value.translation.height) {
+                                            return
+                                        }
+                                        let plotX = min(max(value.location.x, 0), plotRect.width)
+                                        guard let date = proxy.value(atX: plotX, as: Date.self) else { return }
+                                        selectNearestDay(to: date)
+                                    }
+                            )
+                            .accessibilityLabel("Daily usage chart. Touch or drag horizontally to select a day.")
+                    }
+                }
+            }
+            .frame(height: 138)
+            .modifier(UsageChartSelectionFeedback(selectedDay: selectedDate))
             monthAxisLabels
-                .offset(y: 17)
         }
-        .padding(.bottom, 16)
+        .padding(.bottom, 4)
+    }
+
+    private var monthEnd: Date {
+        calendar.date(byAdding: .day, value: max(1, monthPoints.count), to: selectedMonthStart) ?? selectedMonthStart
     }
 
     private var monthAxisLabels: some View {
         HStack(spacing: 5) {
-            HStack {
-                Text(axisLabels.0).frame(maxWidth: .infinity, alignment: .leading)
-                Text(axisLabels.1).frame(maxWidth: .infinity, alignment: .center)
-                Text(axisLabels.2).frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .frame(maxWidth: .infinity)
-            Color.clear.frame(width: 38)
+            Text(axisLabels.0).frame(maxWidth: .infinity, alignment: .leading)
+            Text(axisLabels.1).frame(maxWidth: .infinity, alignment: .center)
+            Text(axisLabels.2).frame(maxWidth: .infinity, alignment: .trailing)
+            Color.clear.frame(width: 42)
         }
         .font(.system(size: 9, weight: .medium))
         .monospacedDigit()
@@ -438,41 +462,11 @@ private struct DailyUsageHistoryCard: View {
         .accessibilityHidden(true)
     }
 
-    private func monthBar(_ point: DailyUsagePoint, width: CGFloat, height: CGFloat) -> some View {
-        let isSelected = calendar.isDate(point.date, inSameDayAs: selectedDate)
-        let total = Double(point.totalBytes ?? 0)
-        let usageHeight = total > 0 ? max(2, height * CGFloat(min(1, total / chartTopBytes))) : 0
-
-        return Button {
-            selectedDate = point.date
-        } label: {
-            Capsule(style: .continuous)
-                .fill(palette.textAccent.opacity(isSelected ? 0.16 : 0.10))
-                .overlay(alignment: .bottom) {
-                    if total > 0 {
-                        Capsule(style: .continuous)
-                            .fill(palette.textAccent.opacity(isSelected ? 1 : 0.58))
-                            .frame(height: usageHeight)
-                    }
-                }
-                .overlay {
-                    if isSelected {
-                        Capsule(style: .continuous)
-                            .stroke(palette.textAccent.opacity(0.9), lineWidth: 1)
-                    }
-                }
-                .frame(width: width, height: height)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(point.date.formatted(date: .complete, time: .omitted))
-        .accessibilityValue(accessibilityValue(for: point))
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-
-    private func selectDay(at x: CGFloat, plotWidth: CGFloat) {
+    private func selectNearestDay(to date: Date) {
         guard !monthPoints.isEmpty else { return }
-        let index = min(monthPoints.count - 1, max(0, Int((x / plotWidth) * CGFloat(monthPoints.count))))
+        let index = monthPoints.indices.min { lhs, rhs in
+            abs(monthPoints[lhs].date.timeIntervalSince(date)) < abs(monthPoints[rhs].date.timeIntervalSince(date))
+        } ?? 0
         selectedDate = monthPoints[index].date
     }
 
@@ -491,6 +485,11 @@ private struct DailyUsageHistoryCard: View {
                 }
             }
 
+            Text(hasSelectedReading ? " " : "No reading recorded")
+                .font(.caption)
+                .linkWaveText(.secondary)
+                .frame(height: 14, alignment: .leading)
+
             HStack(spacing: 8) {
                 usageValue("Download", bytes: selectedPoint?.downloadBytes)
                 usageValue("Upload", bytes: selectedPoint?.uploadBytes)
@@ -506,7 +505,7 @@ private struct DailyUsageHistoryCard: View {
             Text(title)
                 .font(.caption2)
                 .linkWaveText(.secondary)
-            Text(bytes.map(Self.format) ?? "—")
+            Text(bytes.map(Self.format) ?? "0.00 GB")
                 .font(.caption.weight(.semibold).monospacedDigit())
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -514,13 +513,22 @@ private struct DailyUsageHistoryCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func accessibilityValue(for point: DailyUsagePoint) -> String {
-        guard let total = point.totalBytes else { return "No recorded usage" }
-        let value = Self.format(total)
-        return point.isPartial ? "\(value), partial day" : value
-    }
+    private var hasSelectedReading: Bool { selectedPoint?.totalBytes != nil }
 
     private static func format(_ bytes: UInt64) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
+    }
+}
+
+private struct UsageChartSelectionFeedback: ViewModifier {
+    let selectedDay: Date
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *) {
+            content.sensoryFeedback(.selection, trigger: selectedDay)
+        } else {
+            content
+        }
     }
 }

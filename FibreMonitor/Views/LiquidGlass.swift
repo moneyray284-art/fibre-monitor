@@ -284,6 +284,28 @@ struct StandaloneTopBarTrailingItem: ToolbarContent {
     }
 }
 
+struct StandaloneTopBarLeadingItem: ToolbarContent {
+    private let content: AnyView
+
+    init(content: AnyView) {
+        self.content = content
+    }
+
+    @ToolbarContentBuilder
+    var body: some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            ToolbarItem(placement: .topBarLeading) {
+                content
+            }
+            .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .topBarLeading) {
+                content
+            }
+        }
+    }
+}
+
 private struct AlwaysScrollBounceModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {

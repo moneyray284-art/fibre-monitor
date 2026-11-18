@@ -1,6 +1,4 @@
 import SwiftUI
-import PhotosUI
-import UniformTypeIdentifiers
 import UIKit
 
 @MainActor
@@ -71,7 +69,6 @@ public enum ProfileAvatarStoreError: LocalizedError {
 
 public struct ProfileAvatarView: View {
     @ObservedObject private var store: ProfileAvatarStore
-    @Environment(\.linkWaveLogoColor) private var logoColor
     private let size: CGFloat
 
     public init(size: CGFloat = 52) {
@@ -85,129 +82,40 @@ public struct ProfileAvatarView: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             } else {
-                Text("LW")
-                    .font(.system(size: size * 0.28, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(
-                        LinearGradient(
-                            colors: [logoColor, logoColor.opacity(0.72)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                Image(systemName: "person.fill")
+                    .font(.system(size: 20, weight: .medium))
+                    .frame(width: size, height: size)
             }
         }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-        .overlay(Circle().stroke(Color.white.opacity(0.28), lineWidth: 1))
-        .accessibilityLabel(store.image == nil ? "LinkWave profile picture, default LW initials" : "LinkWave profile picture")
+        .accessibilityLabel(store.image == nil ? "Profile, no photo selected" : "Profile photo")
     }
 }
 
 public struct ProfileAvatarPickerButton: View {
-    @ObservedObject private var store = ProfileAvatarStore.shared
-    @State private var selectedPhoto: PhotosPickerItem?
-    @State private var isShowingPhotos = false
-    @State private var isImportingFile = false
-    @State private var errorMessage: String?
-
+    let viewModel: MonitorViewModel
     private let size: CGFloat
+    @State private var isShowingProfile = false
 
-    public init(size: CGFloat = 38) {
+    public init(viewModel: MonitorViewModel, size: CGFloat = 32) {
+        self.viewModel = viewModel
         self.size = size
     }
 
     public var body: some View {
-        Menu {
-            Button {
-                isShowingPhotos = true
-            } label: {
-                Label("Choose from Photos", systemImage: "photo")
-            }
-            Button {
-                isImportingFile = true
-            } label: {
-                Label("Choose from Files", systemImage: "folder")
-            }
-            if store.image != nil {
-                Button(role: .destructive) {
-                    store.remove()
-                } label: {
-                    Label("Remove Photo", systemImage: "person.crop.circle.badge.xmark")
-                }
-            }
+        Button {
+            isShowingProfile = true
         } label: {
             ProfileAvatarView(size: size)
-                .frame(width: size, height: size)
-                .padding(3)
-                .modifier(LiquidGlassToolbarCircleModifier())
-                .frame(width: size + 6, height: size + 6)
-                .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .contentShape(Circle())
-        .accessibilityLabel("Profile photo options")
-        .photosPicker(isPresented: $isShowingPhotos, selection: $selectedPhoto, matching: .images)
-        .fileImporter(
-            isPresented: $isImportingFile,
-            allowedContentTypes: [.image],
-            allowsMultipleSelection: false,
-            onCompletion: { result in
-                if case .success(let urls) = result, let url = urls.first {
-                    importImage(from: url)
-                } else if case .failure(let error) = result {
-                    errorMessage = error.localizedDescription
-                }
-            }
-        )
-        .onChange(of: selectedPhoto) { item in
-            guard let item else { return }
-            Task { await loadImage(from: item) }
-        }
-        .alert(
-            "Couldn’t Update Profile Photo",
-            isPresented: Binding(
-                get: { errorMessage != nil },
-                set: { if !$0 { errorMessage = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "Please choose another image.")
-        }
-    }
-
-    @MainActor
-    private func loadImage(from item: PhotosPickerItem) async {
-        defer { selectedPhoto = nil }
-        do {
-            guard let data = try await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data) else {
-                errorMessage = "The selected photo couldn’t be opened."
-                return
-            }
-            try store.save(image)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func importImage(from url: URL) {
-        let didStartAccessing = url.startAccessingSecurityScopedResource()
-        defer {
-            if didStartAccessing { url.stopAccessingSecurityScopedResource() }
-        }
-        do {
-            let data = try Data(contentsOf: url)
-            guard let image = UIImage(data: data) else {
-                errorMessage = "The selected file doesn’t contain a supported image."
-                return
-            }
-            try store.save(image)
-        } catch {
-            errorMessage = error.localizedDescription
+        .frame(width: size, height: size)
+        .contentShape(Rectangle())
+        .accessibilityLabel("Open Profile")
+        .sheet(isPresented: $isShowingProfile) {
+            ProfileSheetView(viewModel: viewModel)
         }
     }
 }

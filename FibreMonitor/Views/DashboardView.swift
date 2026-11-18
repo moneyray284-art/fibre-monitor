@@ -75,10 +75,10 @@ public struct DashboardView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    ProfileAvatarPickerButton(size: 38)
+                StandaloneTopBarLeadingItem(content: AnyView(
+                    ProfileAvatarPickerButton(viewModel: viewModel)
                         .frame(width: 44, height: 44)
-                }
+                ))
                 ToolbarItem(placement: .principal) {
                     LinkWaveWordmark(
                         nodesArePulsing: false,
@@ -159,7 +159,7 @@ private struct RouterHeaderCard: View {
                 .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(settings.activeProfile?.name ?? "Fibre Router")
+                    Text(settings.activeProfile?.routerDisplayName ?? "Fibre Router")
                         .font(.headline)
                         .lineLimit(1)
                     Text(viewModel.displayModelName)

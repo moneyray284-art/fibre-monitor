@@ -7,7 +7,6 @@ public struct WifiTabView: View {
     @Environment(\.linkWaveThemePalette) private var palette
     @State private var pendingRadio: (radio: WifiRadio, enable: Bool)?
     @State private var activeSheet: WifiSheetRoute?
-    @State private var showSettings = false
 
     public init(viewModel: MonitorViewModel) {
         self.viewModel = viewModel
@@ -85,31 +84,10 @@ public struct WifiTabView: View {
             .navigationTitle("Wi-Fi")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 5) {
-                        ProfileAvatarPickerButton(size: 38)
-                            .frame(width: 44, height: 44)
-                        RouterSwitcherMenu(viewModel: viewModel, settings: viewModel.settings) {
-                            showSettings = true
-                        }
-                    }
-                }
                 StandaloneTopBarTrailingItem(
                     content: AnyView(RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured))
                 )
-                StandaloneTopBarTrailingItem(content: AnyView(
-                    LinkWaveToolbarIconButton(symbol: "gearshape", accessibilityLabel: "Settings") {
-                        showSettings = true
-                    }
-                ))
             }
-            .navigationDestination(isPresented: $showSettings) {
-                SettingsTabView(viewModel: viewModel)
-                    .toolbar(.hidden, for: .tabBar)
-            }
-        }
-        .onChange(of: showSettings) { isPresented in
-            if !isPresented { viewModel.settingsDidDismiss() }
         }
         .alert(
             pendingRadio.map { "Turn \(MonitorViewModel.bandName($0.radio.band)) Wi-Fi \($0.enable ? "on" : "off")?" } ?? "",

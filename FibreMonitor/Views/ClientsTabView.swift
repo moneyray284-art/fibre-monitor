@@ -144,7 +144,6 @@ private enum ClientDeviceFilter: String, CaseIterable {
 public struct ClientsTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @Environment(\.linkWaveThemePalette) private var palette
-    @State private var showSettings = false
     @State private var searchText = ""
     @State private var selectedDevice: OntDevice?
     @State private var selectedBlockedDevice: BlockedRouterDevice?
@@ -252,36 +251,15 @@ public struct ClientsTabView: View {
             .navigationTitle("Clients")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 5) {
-                        ProfileAvatarPickerButton(size: 38)
-                            .frame(width: 44, height: 44)
-                        RouterSwitcherMenu(viewModel: viewModel, settings: viewModel.settings) {
-                            showSettings = true
-                        }
-                    }
-                }
                 StandaloneTopBarTrailingItem(
                     content: AnyView(RouterRefreshToolbarButton(viewModel: viewModel, isEnabled: viewModel.settings.isConfigured))
                 )
-                StandaloneTopBarTrailingItem(content: AnyView(
-                    LinkWaveToolbarIconButton(symbol: "gearshape", accessibilityLabel: "Settings") {
-                        showSettings = true
-                    }
-                ))
-            }
-            .navigationDestination(isPresented: $showSettings) {
-                SettingsTabView(viewModel: viewModel)
-                    .toolbar(.hidden, for: .tabBar)
             }
         }
         .onAppear(perform: refreshLocalWiFiAddress)
         .onChange(of: viewModel.isConnected) { _ in refreshLocalWiFiAddress() }
         .onChange(of: viewModel.selectedTab) { tab in
             if tab == .clients { refreshLocalWiFiAddress() }
-        }
-        .onChange(of: showSettings) { isPresented in
-            if !isPresented { viewModel.settingsDidDismiss() }
         }
         .sheet(item: $selectedDevice) { device in
             ClientDetailSheet(

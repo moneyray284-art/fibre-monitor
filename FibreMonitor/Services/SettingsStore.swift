@@ -623,6 +623,8 @@ public final class SettingsStore: ObservableObject {
         guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
         var updated = profile
         updated.name = Self.cleanName(updated.name, fallbackHost: updated.host)
+        let routerName = updated.routerName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        updated.routerName = routerName.isEmpty ? nil : routerName
         updated.host = updated.host.trimmingCharacters(in: .whitespaces)
         updated.username = Self.cleanUsername(updated.username)
         profiles[index] = updated
@@ -631,6 +633,14 @@ public final class SettingsStore: ObservableObject {
         } else if activeProfileId == updated.id {
             routerCredentialsRevision &+= 1
         }
+        saveProfiles()
+    }
+
+    public func updateProfileNames(id: UUID, profileName: String, routerName: String) {
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else { return }
+        profiles[index].name = Self.cleanName(profileName, fallbackHost: profiles[index].host)
+        let trimmedRouterName = routerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        profiles[index].routerName = trimmedRouterName.isEmpty ? nil : trimmedRouterName
         saveProfiles()
     }
 

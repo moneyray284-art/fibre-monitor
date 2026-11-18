@@ -17,6 +17,8 @@ public enum RouterType: String, Codable, CaseIterable, Identifiable, Sendable {
 public struct RouterProfile: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
     public var name: String
+    /// Optional per-router display name; older profiles fall back to `name`.
+    public var routerName: String?
     public var host: String
     public var username: String
     public var lastUsed: Date?
@@ -26,10 +28,15 @@ public struct RouterProfile: Identifiable, Codable, Equatable, Sendable {
     public var routerType: RouterType?
 
     public var resolvedRouterType: RouterType { routerType ?? .huaweiONT }
+    public var routerDisplayName: String {
+        let trimmed = routerName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? name : trimmed
+    }
 
     public init(
         id: UUID = UUID(),
         name: String,
+        routerName: String? = nil,
         host: String,
         username: String = "root",
         lastUsed: Date? = nil,
@@ -39,6 +46,7 @@ public struct RouterProfile: Identifiable, Codable, Equatable, Sendable {
     ) {
         self.id = id
         self.name = name
+        self.routerName = routerName
         self.host = host
         self.username = username
         self.lastUsed = lastUsed
