@@ -27,6 +27,14 @@ extension EnvironmentValues {
     }
 }
 
+private func linkWaveSolidSurfaceColor(_ palette: ThemePalette) -> Color {
+    palette.backgroundElevated
+}
+
+private func linkWaveSolidBorderColor(_ palette: ThemePalette) -> Color {
+    palette.backgroundTertiary
+}
+
 // Liquid Glass styling.
 //
 // On iOS 26+ everything here uses the system Liquid Glass material (`glassEffect`,
@@ -368,8 +376,8 @@ struct LiquidGlassToolbarCircleModifier: ViewModifier {
                 .overlay(Circle().stroke(palette.textSecondary.color.opacity(colorScheme == .dark ? 0.30 : 0.23), lineWidth: 1))
         case .cleanSolid:
             content
-                .background(linkWaveSolidSurfaceColor(colorScheme), in: Circle())
-                .overlay(Circle().stroke(linkWaveSolidBorderColor(colorScheme), lineWidth: 1))
+                .background(linkWaveSolidSurfaceColor(palette), in: Circle())
+                .overlay(Circle().stroke(linkWaveSolidBorderColor(palette), lineWidth: 1))
         }
     }
 }
@@ -394,8 +402,8 @@ private struct LiquidGlassToolbarCapsuleModifier: ViewModifier {
             }
                 .overlay(Capsule().stroke(palette.textSecondary.color.opacity(colorScheme == .dark ? 0.30 : 0.23), lineWidth: 1))
         case .cleanSolid:
-            content.background(linkWaveSolidSurfaceColor(colorScheme), in: Capsule())
-                .overlay(Capsule().stroke(linkWaveSolidBorderColor(colorScheme), lineWidth: 1))
+            content.background(linkWaveSolidSurfaceColor(palette), in: Capsule())
+                .overlay(Capsule().stroke(linkWaveSolidBorderColor(palette), lineWidth: 1))
         }
     }
 }
@@ -420,8 +428,8 @@ private struct LinkWaveInteractiveGlassCapsuleModifier: ViewModifier {
             }
                 .overlay(Capsule().stroke(palette.textSecondary.color.opacity(colorScheme == .dark ? 0.30 : 0.23), lineWidth: 1))
         case .cleanSolid:
-            content.background(linkWaveSolidSurfaceColor(colorScheme), in: Capsule())
-                .overlay(Capsule().stroke(linkWaveSolidBorderColor(colorScheme), lineWidth: 1))
+            content.background(linkWaveSolidSurfaceColor(palette), in: Capsule())
+                .overlay(Capsule().stroke(linkWaveSolidBorderColor(palette), lineWidth: 1))
         }
     }
 }
@@ -429,6 +437,7 @@ private struct LinkWaveInteractiveGlassCapsuleModifier: ViewModifier {
 private struct LinkWaveTabBarSurfaceModifier: ViewModifier {
     @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.linkWaveThemePalette) private var palette
 
     func body(content: Content) -> some View {
         content
@@ -440,7 +449,7 @@ private struct LinkWaveTabBarSurfaceModifier: ViewModifier {
         switch surfaceStyle {
         case .liquidGlass: AnyShapeStyle(.bar)
         case .frosted: AnyShapeStyle(.thinMaterial)
-        case .cleanSolid: AnyShapeStyle(linkWaveSolidSurfaceColor(colorScheme))
+        case .cleanSolid: AnyShapeStyle(linkWaveSolidSurfaceColor(palette))
         }
     }
 }
@@ -478,8 +487,8 @@ private struct LiquidGlassCapsuleModifier: ViewModifier {
             }
                 .overlay(Capsule().stroke(palette.textSecondary.color.opacity(colorScheme == .dark ? 0.30 : 0.23), lineWidth: 1))
         case .cleanSolid:
-            content.background(linkWaveSolidSurfaceColor(colorScheme), in: Capsule())
-                .overlay(Capsule().stroke(linkWaveSolidBorderColor(colorScheme), lineWidth: 1))
+            content.background(linkWaveSolidSurfaceColor(palette), in: Capsule())
+                .overlay(Capsule().stroke(linkWaveSolidBorderColor(palette), lineWidth: 1))
         }
     }
 }

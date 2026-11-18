@@ -269,6 +269,7 @@ private struct NetworkStatusBanner: View {
 private struct HuaweiOptiXstarIllustration: View {
     let isOnline: Bool
     let wifiOnline: Bool
+    @Environment(\.linkWaveThemePalette) private var palette
 
     private var ponLight: Color { isOnline ? .green : .red }
     private var wlanLight: Color { isOnline && wifiOnline ? .green : .orange }
