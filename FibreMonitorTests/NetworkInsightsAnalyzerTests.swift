@@ -74,7 +74,7 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
             point(2026, 6, 2, gb: 4, calendar: calendar),
             point(2026, 6, 3, gb: 4, calendar: calendar),
             point(2026, 6, 4, gb: 4, calendar: calendar),
-            point(2026, 6, 5, gb: 6, calendar: calendar)
+            point(2026, 6, 5, gb: 7, calendar: calendar)
         ]
 
         let forecast = NetworkInsightsAnalyzer.forecast(
@@ -88,12 +88,12 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
 
         XCTAssertEqual(forecast.completedDayCount, 5)
         XCTAssertEqual(forecast.activeReadingDayCount, 6)
-        XCTAssertEqual(forecast.dailyAverageGb ?? 0, 4, accuracy: 0.001)
+        XCTAssertEqual(forecast.dailyAverageGb ?? 0, 4.6, accuracy: 0.001)
         XCTAssertEqual(forecast.remainingDays, 24)
-        XCTAssertEqual(forecast.projectedMonthGb ?? 0, 120, accuracy: 0.001)
+        XCTAssertEqual(forecast.projectedMonthGb ?? 0, 135.4, accuracy: 0.001)
         XCTAssertEqual(forecast.spikeDays.count, 1)
-        XCTAssertEqual(forecast.spikeDays.first?.totalGb ?? 0, 6, accuracy: 0.001)
-        XCTAssertEqual(forecast.spikeDays.first?.multiplier ?? 0, 1.5, accuracy: 0.001)
+        XCTAssertEqual(forecast.spikeDays.first?.totalGb ?? 0, 7, accuracy: 0.001)
+        XCTAssertEqual(forecast.spikeDays.first?.multiplier ?? 0, 7 / 4.6, accuracy: 0.001)
         XCTAssertEqual(forecast.peakDay?.date, history[4].date)
     }
 
