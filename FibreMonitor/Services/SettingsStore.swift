@@ -127,7 +127,10 @@ public final class SettingsStore: ObservableObject {
         static let profileAliases = "profile_device_aliases"
         static let theme = "app_theme"
         static let accentColor = "app_accent_color"
+        // Legacy shared key; retained for migration to per-appearance preset keys.
         static let themePreset = "app_theme_palette_preset_v1"
+        static let lightPreset = "app_theme_palette_light_preset_v1"
+        static let darkPreset = "app_theme_palette_dark_preset_v1"
         static let lightThemePalette = "app_theme_palette_light_v1"
         static let darkThemePalette = "app_theme_palette_dark_v1"
         static let hapticLevel = "app_haptic_level_v1"
@@ -149,6 +152,7 @@ public final class SettingsStore: ObservableObject {
     private let passwordStore: PasswordStore
     private var usageByProfile: [String: ProfileUsage] = [:]
     private var isSyncingAccentFromPalette = false
+    private var isApplyingBatchUpdate = false
 
     @Published public private(set) var profiles: [RouterProfile] = []
     /// Publishes in-app credential writes, including Keychain updates, to the shared router model.
@@ -177,13 +181,17 @@ public final class SettingsStore: ObservableObject {
                     var dark = darkThemePalette
                     dark.accent = CodableColor(color: accentColor.color)
                     darkThemePalette = dark
-                    if selectedThemePreset != nil { selectedThemePreset = nil }
+                    lightPreset = nil
+                    darkPreset = nil
                 }
             }
         }
     }
-    @Published public var selectedThemePreset: AppThemePreset? {
-        didSet { defaults.set(selectedThemePreset?.rawValue ?? "custom", forKey: Keys.themePreset) }
+    @Published public var lightPreset: AppThemePreset? {
+        didSet { defaults.set(lightPreset?.rawValue ?? "custom", forKey: Keys.lightPreset) }
+    }
+    @Published public var darkPreset: AppThemePreset? {
+        didSet { defaults.set(darkPreset?.rawValue ?? "custom", forKey: Keys.darkPreset) }
     }
     @Published public var lightThemePalette: ThemePalette {
         didSet { saveThemePalette(lightThemePalette, forKey: Keys.lightThemePalette) }
@@ -270,9 +278,19 @@ public final class SettingsStore: ObservableObject {
         let savedLightPalette = Self.loadThemePalette(forKey: Keys.lightThemePalette, from: defaults)
         let savedDarkPalette = Self.loadThemePalette(forKey: Keys.darkThemePalette, from: defaults)
         let oldAccentWasSaved = defaults.string(forKey: Keys.accentColor) != nil
-        let isCustomPalette = savedPresetKey == "custom"
+        let isLegacyCustomPalette = savedPresetKey == "custom"
             || (savedPresetKey == nil && (savedLightPalette != nil || savedDarkPalette != nil || oldAccentWasSaved))
-        self.selectedThemePreset = isCustomPalette ? nil : preset
+        let legacyFallbackPreset = isLegacyCustomPalette ? nil : preset
+        self.lightPreset = Self.loadThemePreset(
+            forKey: Keys.lightPreset,
+            from: defaults,
+            legacyFallback: legacyFallbackPreset
+        )
+        self.darkPreset = Self.loadThemePreset(
+            forKey: Keys.darkPreset,
+            from: defaults,
+            legacyFallback: legacyFallbackPreset
+        )
         var lightPalette = savedLightPalette ?? preset.lightPalette
         var darkPalette = savedDarkPalette ?? preset.darkPalette
         if savedPresetKey == nil && savedLightPalette == nil {
@@ -346,11 +364,16 @@ public final class SettingsStore: ObservableObject {
         scheme == .dark ? darkThemePalette : lightThemePalette
     }
 
+    public func activePreset(for scheme: ColorScheme) -> AppThemePreset? {
+        scheme == .dark ? darkPreset : lightPreset
+    }
+
     public func setThemeColor(
         _ color: Color,
         for keyPath: WritableKeyPath<ThemePalette, CodableColor>,
         scheme: ColorScheme
     ) {
+        guard !isApplyingBatchUpdate else { return }
         var palette = themePalette(for: scheme)
         palette[keyPath: keyPath] = CodableColor(color: color)
         if scheme == .dark {
@@ -359,7 +382,11 @@ public final class SettingsStore: ObservableObject {
             lightThemePalette = palette
         }
 
-        if selectedThemePreset != nil { selectedThemePreset = nil }
+        if scheme == .dark {
+            darkPreset = nil
+        } else {
+            lightPreset = nil
+        }
         if keyPath == \ThemePalette.accent {
             isSyncingAccentFromPalette = true
             accentColor = AppAccentColor.closest(to: color)
@@ -367,47 +394,55 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
-    public func applyThemePreset(_ preset: AppThemePreset) {
+    public func applyThemePreset(_ preset: AppThemePreset, for scheme: ColorScheme) {
+        isApplyingBatchUpdate = true
         withAnimation(.easeInOut(duration: 0.25)) {
-            selectedThemePreset = preset
-            lightThemePalette = preset.lightPalette
-            darkThemePalette = preset.darkPalette
+            let activePalette = scheme == .dark ? preset.darkPalette : preset.lightPalette
+            if scheme == .dark {
+                darkThemePalette = activePalette
+                darkPreset = preset
+            } else {
+                lightThemePalette = activePalette
+                lightPreset = preset
+            }
             isSyncingAccentFromPalette = true
-            accentColor = AppAccentColor.closest(to: preset.lightPalette.accent.color)
+            accentColor = AppAccentColor.closest(to: activePalette.accent.color)
             isSyncingAccentFromPalette = false
         }
+        isApplyingBatchUpdate = false
     }
 
     public func resetLightTheme() {
+        isApplyingBatchUpdate = true
         withAnimation(.easeInOut(duration: 0.25)) {
             lightThemePalette = AppThemePreset.linkWaveDefault.lightPalette
-            updateSelectedPresetIfMatching()
+            lightPreset = .linkWaveDefault
         }
+        isApplyingBatchUpdate = false
     }
 
     public func resetDarkTheme() {
+        isApplyingBatchUpdate = true
         withAnimation(.easeInOut(duration: 0.25)) {
             darkThemePalette = AppThemePreset.linkWaveDefault.darkPalette
-            updateSelectedPresetIfMatching()
+            darkPreset = .linkWaveDefault
         }
+        isApplyingBatchUpdate = false
     }
 
-    public func resetThemeAndHaptics() {
+    public func resetEverything() {
+        isApplyingBatchUpdate = true
         withAnimation(.easeInOut(duration: 0.25)) {
-            selectedThemePreset = .linkWaveDefault
             lightThemePalette = AppThemePreset.linkWaveDefault.lightPalette
             darkThemePalette = AppThemePreset.linkWaveDefault.darkPalette
+            lightPreset = .linkWaveDefault
+            darkPreset = .linkWaveDefault
             isSyncingAccentFromPalette = true
             accentColor = AppAccentColor.closest(to: AppThemePreset.linkWaveDefault.lightPalette.accent.color)
             isSyncingAccentFromPalette = false
             hapticLevel = .light
         }
-    }
-
-    private func updateSelectedPresetIfMatching() {
-        selectedThemePreset = AppThemePreset.allCases.first {
-            $0.lightPalette == lightThemePalette && $0.darkPalette == darkThemePalette
-        }
+        isApplyingBatchUpdate = false
     }
 
     private func saveThemePalette(_ palette: ThemePalette, forKey key: String) {
@@ -418,6 +453,16 @@ public final class SettingsStore: ObservableObject {
     private static func loadThemePalette(forKey key: String, from defaults: UserDefaults) -> ThemePalette? {
         guard let data = defaults.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(ThemePalette.self, from: data)
+    }
+
+    private static func loadThemePreset(
+        forKey key: String,
+        from defaults: UserDefaults,
+        legacyFallback: AppThemePreset?
+    ) -> AppThemePreset? {
+        guard let savedValue = defaults.string(forKey: key) else { return legacyFallback }
+        guard savedValue != "custom" else { return nil }
+        return AppThemePreset(rawValue: savedValue)
     }
 
     public func password(for profileId: UUID) -> String {

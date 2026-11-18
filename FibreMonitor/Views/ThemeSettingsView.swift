@@ -60,7 +60,7 @@ struct ThemeSettingsView: View {
                 switch alertType {
                 case .light: settings.resetLightTheme()
                 case .dark: settings.resetDarkTheme()
-                case .everything: settings.resetThemeAndHaptics()
+                case .everything: settings.resetEverything()
                 }
                 activeResetAlert = nil
             }
@@ -105,9 +105,10 @@ struct ThemeSettingsView: View {
             sectionHeader("PRESET THEMES")
             cardContainer {
                 ForEach(Array(AppThemePreset.allCases.enumerated()), id: \.element.id) { index, preset in
+                    let isActivePreset = settings.activePreset(for: colorScheme) == preset
                     Button {
                         Haptics.impact(.light)
-                        settings.applyThemePreset(preset)
+                        settings.applyThemePreset(preset, for: colorScheme)
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: preset.symbolName)
@@ -120,17 +121,18 @@ struct ThemeSettingsView: View {
                                     Circle()
                                         .fill(color)
                                         .frame(width: 16, height: 16)
-                                        .overlay(Circle().strokeBorder(palette.bgSecondary.color, lineWidth: 1.5))
+                                        .overlay(Circle().strokeBorder(Color.primary.opacity(0.18), lineWidth: 1))
                                 }
                             }
+                            .id("\(preset.id)-\(colorScheme == .dark ? "dark" : "light")")
 
                             Text(preset.title)
-                                .font(.system(size: 16, weight: settings.selectedThemePreset == preset ? .semibold : .regular))
+                                .font(.system(size: 16, weight: isActivePreset ? .semibold : .regular))
                                 .foregroundStyle(palette.textPrimary.color)
 
                             Spacer()
 
-                            if settings.selectedThemePreset == preset {
+                            if isActivePreset {
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 14, weight: .bold))
                                     .foregroundStyle(palette.accent.color)
@@ -138,7 +140,7 @@ struct ThemeSettingsView: View {
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 13)
-                        .background(settings.selectedThemePreset == preset ? palette.accent.color.opacity(0.08) : .clear)
+                        .background(isActivePreset ? palette.accent.color.opacity(0.08) : .clear)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
