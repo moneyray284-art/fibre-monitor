@@ -89,7 +89,7 @@ struct ProfilePhotoCropper: View {
                     .simultaneousGesture(
                         MagnificationGesture()
                             .onChanged { value in
-                                steadyScale = min(max(scaleAtGestureStart * value, 1), 4)
+                                steadyScale = min(max(scaleAtGestureStart * value, 1), 3)
                                 let scaledWidth = image.size.width * baseScale * steadyScale
                                 let scaledHeight = image.size.height * baseScale * steadyScale
                                 steadyOffset = clampedOffset(

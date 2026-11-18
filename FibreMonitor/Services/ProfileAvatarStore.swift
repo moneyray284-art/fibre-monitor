@@ -110,7 +110,7 @@ public struct ProfileAvatarView: View {
     private let silhouetteSize: CGFloat
     private let cornerRadius: CGFloat
 
-    public init(size: CGFloat = 38, silhouetteSize: CGFloat = 25, cornerRadius: CGFloat = 11) {
+    public init(size: CGFloat = 38, silhouetteSize: CGFloat = 25, cornerRadius: CGFloat = 12) {
         self.size = size
         self.silhouetteSize = silhouetteSize
         self.cornerRadius = cornerRadius

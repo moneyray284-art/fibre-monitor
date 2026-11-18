@@ -1277,14 +1277,17 @@ public actor HuaweiOntClient {
 
     static let userDeviceParams = ["Domain", "IpAddr", "MacAddr", "Port", "IpType", "DevType", "DevStatus", "PortType",
                                    "Time", "HostName", "IPv4Enabled", "IPv6Enabled", "DeviceType", "UserDevAlias",
-                                   "UserSpecifiedDeviceType", "LeaseTimeRemaining", "TrafficSendRate", "TrafficRecvRate"]
+                                   "UserSpecifiedDeviceType", "LeaseTimeRemaining", "TrafficSendRate", "TrafficRecvRate",
+                                   "VendorClassId", "Alias", "MACAddress", "IPAddress", "Name"]
 
     static let userDeviceNewParams = ["Domain", "IpAddr", "MacAddr", "Port", "IpType", "DevType", "DevStatus", "PortType",
                                       "Time", "HostName", "IPv4Enabled", "IPv6Enabled", "DeviceType", "UserDevAlias",
-                                      "UserSpecifiedDeviceType", "LeaseTimeRemaining", "RealMacAddr"]
+                                      "UserSpecifiedDeviceType", "LeaseTimeRemaining", "RealMacAddr",
+                                      "VendorClassId", "Alias", "MACAddress", "IPAddress", "Name"]
 
     static let dhcpInfoParams = ["domain", "name", "ip", "mac", "remaintime", "devtype", "interfacetype",
-                                 "AddressSource", "ConnectedTime"]
+                                 "AddressSource", "ConnectedTime", "hostname", "HostName", "Alias",
+                                 "VendorClassId", "MACAddress", "IPAddress"]
 
     private static func cleanPlaceholder(_ raw: String?) -> String {
         let trimmed = (raw ?? "").trimmingCharacters(in: .whitespaces)
@@ -1299,6 +1302,20 @@ public actor HuaweiOntClient {
 
     private static func normalizedMac(_ raw: String?) -> String {
         (raw ?? "").lowercased().filter { "0123456789abcdef".contains($0) }
+    }
+
+    private static func clientField(_ record: [String: String], names: [String]) -> String {
+        for name in names {
+            guard let pair = record.first(where: { $0.key.caseInsensitiveCompare(name) == .orderedSame }) else { continue }
+            let value = cleanPlaceholder(pair.value).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty && value != "*" { return value }
+        }
+        return ""
+    }
+
+    private static func clientNameField(_ record: [String: String], names: [String]) -> String {
+        let values = names.map { clientField(record, names: [$0]) }.filter { !$0.isEmpty }
+        return values.first(where: DeviceNameResolver.isUsefulName) ?? values.first ?? ""
     }
 
     /// Reads RSSI fields from any router record that also identifies a client MAC. Huawei firmware
@@ -1349,42 +1366,46 @@ public actor HuaweiOntClient {
     /// Supports both 18-arg `USERDevice` (checked first so traffic rates are kept) and 17-arg `USERDeviceNew`.
     /// `ssidBands` maps SSID index to band from the Wi-Fi list; without it bands are guessed.
     static func parseDevices(_ text: String, ssidBands: [Int: String] = [:]) -> [OntDevice] {
-        var seen = Set<String>()
+        var deviceIndexByMAC: [String: Int] = [:]
         var devices: [OntDevice] = []
         let signalByMac = wifiSignalByMac(in: text)
         let candidates = HuaweiJs.records(of: "USERDevice", in: text, fallbackParams: userDeviceParams)
             + HuaweiJs.records(of: "USERDeviceNew", in: text, fallbackParams: userDeviceNewParams)
 
         for r in candidates {
-            let primaryMac = cleanPlaceholder(r["MacAddr"]).lowercased()
-            let fallbackMac = cleanPlaceholder(r["RealMacAddr"]).lowercased()
+            let primaryMac = clientField(r, names: ["MacAddr", "MACAddress"])
+            let fallbackMac = clientField(r, names: ["RealMacAddr"])
             let mac = primaryMac.isEmpty ? fallbackMac : primaryMac
-            guard !mac.isEmpty, seen.insert(mac).inserted else { continue }
+            let macKey = normalizedMac(mac)
+            guard !macKey.isEmpty else { continue }
 
-            let rawType = cleanPlaceholder(r["UserSpecifiedDeviceType"])
-            let lease = Int(r["LeaseTimeRemaining"] ?? "").flatMap { $0 > 0 ? $0 : nil }
-            let rawPort = cleanPlaceholder(r["Port"])
-            let interfaceType = [r["PortType"], r["InterfaceType"], r["interfacetype"]]
-                .compactMap { $0 }
-                .map { cleanPlaceholder($0) }
-                .first(where: { !$0.isEmpty }) ?? ""
-
-            devices.append(OntDevice(
-                domain: r["Domain"] ?? "",
-                mac: mac,
-                ip: cleanPlaceholder(r["IpAddr"]),
-                hostName: cleanPlaceholder(r["HostName"]),
-                routerAlias: cleanPlaceholder(r["UserDevAlias"]),
-                dhcpVendor: cleanPlaceholder(r["DevType"]),
+            let rawType = clientField(r, names: ["UserSpecifiedDeviceType"])
+            let lease = Int(clientField(r, names: ["LeaseTimeRemaining"])).flatMap { $0 > 0 ? $0 : nil }
+            let rawPort = clientField(r, names: ["Port"])
+            let interfaceType = clientField(r, names: ["PortType", "InterfaceType"])
+            let device = OntDevice(
+                domain: clientField(r, names: ["Domain"]),
+                mac: mac.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                ip: clientField(r, names: ["IpAddr", "IPAddress"]),
+                hostName: clientNameField(r, names: ["HostName", "Hostname", "Name", "DeviceName"]),
+                routerAlias: clientNameField(r, names: ["UserDevAlias", "Alias", "UserDevName"]),
+                dhcpVendor: clientField(r, names: ["DevType", "VendorClassId", "DeviceType"]),
                 port: ConnectionPort(raw: rawPort, ssidBands: ssidBands, fallbackRaw: interfaceType),
-                isOnline: (r["DevStatus"] ?? "").lowercased() == "online",
-                connectedTime: r["Time"] ?? "",
+                isOnline: clientField(r, names: ["DevStatus"]).lowercased() == "online",
+                connectedTime: clientField(r, names: ["Time"]),
                 userSpecifiedDeviceType: rawType.isEmpty ? "0" : rawType,
-                trafficSendRate: parseNonZeroRate(r["TrafficSendRate"]),
-                trafficRecvRate: parseNonZeroRate(r["TrafficRecvRate"]),
+                trafficSendRate: parseNonZeroRate(clientField(r, names: ["TrafficSendRate"])),
+                trafficRecvRate: parseNonZeroRate(clientField(r, names: ["TrafficRecvRate"])),
                 leaseSecondsRemaining: lease,
-                rssiDbm: parseRssiDbm(in: r) ?? signalByMac[normalizedMac(mac)]
-            ))
+                rssiDbm: parseRssiDbm(in: r) ?? signalByMac[macKey]
+            )
+
+            if let existingIndex = deviceIndexByMAC[macKey] {
+                devices[existingIndex] = mergeDevice(devices[existingIndex], with: device)
+            } else {
+                deviceIndexByMAC[macKey] = devices.count
+                devices.append(device)
+            }
         }
         return devices.sorted { a, b in
             if a.isOnline != b.isOnline { return a.isOnline }
@@ -1396,23 +1417,66 @@ public actor HuaweiOntClient {
     static func enrichDevices(_ devices: [OntDevice], withDhcpInfo text: String) -> [OntDevice] {
         var byMac: [String: [String: String]] = [:]
         for r in HuaweiJs.records(of: "DHCPInfo", in: text, fallbackParams: dhcpInfoParams) {
-            let mac = cleanPlaceholder(r["mac"]).lowercased()
-            guard !mac.isEmpty, byMac[mac] == nil else { continue }
-            byMac[mac] = r
+            let mac = normalizedMac(clientField(r, names: ["mac", "MACAddress", "MacAddr"]))
+            guard !mac.isEmpty else { continue }
+            if byMac[mac] == nil {
+                byMac[mac] = r
+            } else {
+                for (key, value) in r where !cleanPlaceholder(value).isEmpty && cleanPlaceholder(value) != "*" {
+                    let oldValue = byMac[mac]?[key] ?? ""
+                    if oldValue.isEmpty || !DeviceNameResolver.isUsefulName(oldValue) {
+                        byMac[mac]?[key] = value
+                    }
+                }
+            }
         }
         guard !byMac.isEmpty else { return devices }
         return devices.map { device in
-            guard let lease = byMac[device.mac] else { return device }
+            guard let lease = byMac[normalizedMac(device.mac)] else { return device }
             var copy = device
-            if copy.hostName.isEmpty { copy.hostName = cleanPlaceholder(lease["name"]) }
-            if copy.dhcpVendor.isEmpty { copy.dhcpVendor = cleanPlaceholder(lease["devtype"]) }
-            if copy.ip.isEmpty { copy.ip = cleanPlaceholder(lease["ip"]) }
+            let leaseName = clientNameField(lease, names: ["hostname", "HostName", "name", "Alias"])
+            if !DeviceNameResolver.isUsefulName(copy.hostName), DeviceNameResolver.isUsefulName(leaseName) {
+                copy.hostName = leaseName
+            }
+            let leaseAlias = clientNameField(lease, names: ["Alias"])
+            if !DeviceNameResolver.isUsefulName(copy.routerAlias), DeviceNameResolver.isUsefulName(leaseAlias) {
+                copy.routerAlias = leaseAlias
+            }
+            if copy.dhcpVendor.isEmpty {
+                copy.dhcpVendor = clientField(lease, names: ["devtype", "VendorClassId"])
+            }
+            if copy.ip.isEmpty { copy.ip = clientField(lease, names: ["ip", "IPAddress"]) }
             if copy.leaseSecondsRemaining == nil,
-               let rem = Int(lease["remaintime"] ?? ""), rem > 0 {
+               let rem = Int(clientField(lease, names: ["remaintime"])), rem > 0 {
                 copy.leaseSecondsRemaining = rem
             }
             return copy
         }
+    }
+
+    private static func mergeDevice(_ current: OntDevice, with incoming: OntDevice) -> OntDevice {
+        var merged = current
+        if merged.domain.isEmpty { merged.domain = incoming.domain }
+        if merged.ip.isEmpty { merged.ip = incoming.ip }
+        if !DeviceNameResolver.isUsefulName(merged.hostName), DeviceNameResolver.isUsefulName(incoming.hostName) {
+            merged.hostName = incoming.hostName
+        }
+        if !DeviceNameResolver.isUsefulName(merged.routerAlias), DeviceNameResolver.isUsefulName(incoming.routerAlias) {
+            merged.routerAlias = incoming.routerAlias
+        }
+        if merged.dhcpVendor.isEmpty { merged.dhcpVendor = incoming.dhcpVendor }
+        if merged.port == .other(""), incoming.port != .other("") { merged.port = incoming.port }
+        if incoming.isOnline && !merged.isOnline {
+            merged.isOnline = true
+            merged.connectedTime = incoming.connectedTime
+            if incoming.port != .other("") { merged.port = incoming.port }
+        }
+        if merged.userSpecifiedDeviceType == "0" { merged.userSpecifiedDeviceType = incoming.userSpecifiedDeviceType }
+        merged.trafficSendRate = merged.trafficSendRate ?? incoming.trafficSendRate
+        merged.trafficRecvRate = merged.trafficRecvRate ?? incoming.trafficRecvRate
+        merged.leaseSecondsRemaining = merged.leaseSecondsRemaining ?? incoming.leaseSecondsRemaining
+        merged.rssiDbm = merged.rssiDbm ?? incoming.rssiDbm
+        return merged
     }
 
     // MARK: Actions

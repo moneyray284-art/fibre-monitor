@@ -35,6 +35,16 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>LinkWave connects to your fibre router on the local network to show its speed, signal and connected devices.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_companion-link._tcp</string>
+		<string>_airplay._tcp</string>
+		<string>_hap._tcp</string>
+		<string>_googlecast._tcp</string>
+		<string>_smb._tcp</string>
+		<string>_ipp._tcp</string>
+		<string>_http._tcp</string>
+	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.linkwave.refresh</string>

@@ -28,6 +28,7 @@ struct ProfileSheetView: View {
     @StateObject private var draft: ProfileDraftStore
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var cropSourceImage: UIImage?
+    @State private var cropSessionID = UUID()
     @State private var isShowingPhotos = false
     @State private var isImportingFile = false
     @State private var isShowingCropper = false
@@ -178,12 +179,13 @@ struct ProfileSheetView: View {
             if let cropSourceImage {
                 ProfilePhotoCropper(
                     image: cropSourceImage,
-                    onCancel: { isShowingCropper = false },
+                    onCancel: {},
                     onUsePhoto: { data in
                         // Commit only to this sheet's draft before Adjust Photo dismisses.
                         draft.profilePhotoData = data
                     }
                 )
+                .id(cropSessionID)
             }
         }
         .onChange(of: selectedPhoto) { item in
@@ -292,6 +294,7 @@ struct ProfileSheetView: View {
                 image.draw(in: CGRect(origin: .zero, size: image.size))
             }
         }
+        cropSessionID = UUID()
         isShowingCropper = true
     }
 }

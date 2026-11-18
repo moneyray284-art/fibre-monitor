@@ -276,7 +276,11 @@ public final class MonitorViewModel: ObservableObject {
     }
 
     public func name(for device: OntDevice) -> String {
-        settings.alias(for: device.mac) ?? device.displayName
+        DeviceNameResolver.name(
+            for: device,
+            userAlias: settings.alias(for: device.mac),
+            discoveredName: DiscoveredDeviceNameStore.shared.name(for: device.mac)
+        )
     }
 
     private var currentRouterConfiguration: RouterConfigurationFingerprint {

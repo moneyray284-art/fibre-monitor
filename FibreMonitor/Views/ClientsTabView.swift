@@ -143,6 +143,7 @@ private enum ClientDeviceFilter: String, CaseIterable {
 
 public struct ClientsTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
+    @ObservedObject private var discoveredNameStore: DiscoveredDeviceNameStore
     @Environment(\.linkWaveThemePalette) private var palette
     @State private var searchText = ""
     @State private var selectedDevice: OntDevice?
@@ -156,6 +157,7 @@ public struct ClientsTabView: View {
 
     public init(viewModel: MonitorViewModel) {
         self.viewModel = viewModel
+        _discoveredNameStore = ObservedObject(wrappedValue: .shared)
     }
 
     public var body: some View {
@@ -246,7 +248,14 @@ public struct ClientsTabView: View {
             .background { LiquidGlassBackground() }
             .liquidGlassScrollEdges()
             .alwaysScrollBounce()
-            .refreshable { await viewModel.refreshAll(forceReauthIfNeeded: true) }
+            .refreshable {
+                await viewModel.refreshAll(forceReauthIfNeeded: true)
+                LocalDeviceNameDiscovery.shared.scan(
+                    devices: viewModel.devices,
+                    gatewayHost: viewModel.settings.activeProfile?.host,
+                    force: true
+                )
+            }
             .searchable(text: $searchText, prompt: "Search name, IP, MAC, or vendor")
             .navigationTitle("Clients")
             .navigationBarTitleDisplayMode(.inline)
@@ -256,10 +265,23 @@ public struct ClientsTabView: View {
                 )
             }
         }
-        .onAppear(perform: refreshLocalWiFiAddress)
+        .onAppear {
+            refreshLocalWiFiAddress()
+            startLocalNameDiscoveryIfVisible()
+        }
+        .onChange(of: viewModel.devices) { devices in
+            guard viewModel.selectedTab == .clients else { return }
+            LocalDeviceNameDiscovery.shared.scan(
+                devices: devices,
+                gatewayHost: viewModel.settings.activeProfile?.host
+            )
+        }
         .onChange(of: viewModel.isConnected) { _ in refreshLocalWiFiAddress() }
         .onChange(of: viewModel.selectedTab) { tab in
-            if tab == .clients { refreshLocalWiFiAddress() }
+            if tab == .clients {
+                refreshLocalWiFiAddress()
+                startLocalNameDiscoveryIfVisible()
+            }
         }
         .sheet(item: $selectedDevice) { device in
             ClientDetailSheet(
@@ -291,6 +313,14 @@ public struct ClientsTabView: View {
         viewModel.devices.first(where: { $0.id == device.id }) ?? device
     }
 
+    private func startLocalNameDiscoveryIfVisible() {
+        guard viewModel.selectedTab == .clients else { return }
+        LocalDeviceNameDiscovery.shared.scan(
+            devices: viewModel.devices,
+            gatewayHost: viewModel.settings.activeProfile?.host
+        )
+    }
+
     private func requestBlock(_ device: OntDevice) {
         Task { @MainActor in
             if await viewModel.blockWifiDevice(device) {
@@ -307,7 +337,7 @@ public struct ClientsTabView: View {
         } label: {
             ClientRow(
                 device: device,
-                displayName: viewModel.name(for: device),
+                displayName: resolvedName(for: device),
                 isThisPhone: thisPhone
             )
         }
@@ -350,9 +380,17 @@ public struct ClientsTabView: View {
 
     private func displayName(for blocked: BlockedRouterDevice) -> String {
         if let device = viewModel.devices.first(where: { $0.mac.caseInsensitiveCompare(blocked.mac) == .orderedSame }) {
-            return viewModel.name(for: device)
+            return resolvedName(for: device)
         }
         return blocked.name.isEmpty ? blocked.mac : blocked.name
+    }
+
+    private func resolvedName(for device: OntDevice) -> String {
+        DeviceNameResolver.name(
+            for: device,
+            userAlias: viewModel.settings.alias(for: device.mac),
+            discoveredName: discoveredNameStore.name(for: device.mac)
+        )
     }
 
     private var filteredOnline: [OntDevice] {
@@ -558,7 +596,7 @@ public struct ClientsTabView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return items }
         return items.filter { d in
-            let local = viewModel.name(for: d).lowercased()
+            let local = resolvedName(for: d).lowercased()
             return local.contains(query)
                 || d.hostName.lowercased().contains(query)
                 || d.routerAlias.lowercased().contains(query)
@@ -819,7 +857,7 @@ private struct ClientRow: View {
     private var isGenericHost: Bool {
         guard isThisPhone else { return false }
         let normalized = displayName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return ["iphone", "unknown", "unknown device", "unknown_device", "--", ""].contains(normalized)
+        return ["iphone", "unknown", "unknown device", "unknown_device", "private wi-fi device", "--", ""].contains(normalized)
     }
 
     private var bandLabel: String? {
@@ -850,6 +888,7 @@ private struct ClientRow: View {
 }
 private struct ClientDetailSheet: View {
     @ObservedObject var viewModel: MonitorViewModel
+    @ObservedObject private var discoveredNameStore: DiscoveredDeviceNameStore
     let device: OntDevice
     let isThisPhone: Bool
     @Environment(\.dismiss) private var dismiss
@@ -859,6 +898,13 @@ private struct ClientDetailSheet: View {
     @State private var localAliasInput = ""
     @State private var confirmRemove = false
     @State private var showBlockConflictConfirmation = false
+
+    init(viewModel: MonitorViewModel, device: OntDevice, isThisPhone: Bool) {
+        self.viewModel = viewModel
+        self.device = device
+        self.isThisPhone = isThisPhone
+        _discoveredNameStore = ObservedObject(wrappedValue: .shared)
+    }
 
     private var currentDevice: OntDevice {
         viewModel.devices.first(where: { $0.mac == device.mac }) ?? device
@@ -879,6 +925,9 @@ private struct ClientDetailSheet: View {
                         LabeledContent("IP Address", value: currentDevice.ip)
                     }
                     LabeledContent("MAC Address", value: currentDevice.mac)
+                    if DeviceNameResolver.isLocallyAdministeredMAC(currentDevice.mac) {
+                        LabeledContent("MAC Type", value: "Randomized MAC")
+                    }
                 }
 
                 if currentDevice.hasTrafficRates {
