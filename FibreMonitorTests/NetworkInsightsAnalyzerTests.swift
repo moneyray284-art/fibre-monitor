@@ -68,12 +68,13 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
     func testUsageForecastProjectionAndSpikeDetection() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let now = date(2026, 6, 5, calendar: calendar)
+        let now = date(2026, 6, 6, calendar: calendar)
         let history = [
             point(2026, 6, 1, gb: 4, calendar: calendar),
             point(2026, 6, 2, gb: 4, calendar: calendar),
             point(2026, 6, 3, gb: 4, calendar: calendar),
-            point(2026, 6, 4, gb: 6, calendar: calendar)
+            point(2026, 6, 4, gb: 4, calendar: calendar),
+            point(2026, 6, 5, gb: 6, calendar: calendar)
         ]
 
         let forecast = NetworkInsightsAnalyzer.forecast(
@@ -85,15 +86,15 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
             calendar: calendar
         )
 
-        XCTAssertEqual(forecast.completedDayCount, 4)
-        XCTAssertEqual(forecast.activeReadingDayCount, 5)
+        XCTAssertEqual(forecast.completedDayCount, 5)
+        XCTAssertEqual(forecast.activeReadingDayCount, 6)
         XCTAssertEqual(forecast.dailyAverageGb ?? 0, 4, accuracy: 0.001)
-        XCTAssertEqual(forecast.remainingDays, 25)
+        XCTAssertEqual(forecast.remainingDays, 24)
         XCTAssertEqual(forecast.projectedMonthGb ?? 0, 120, accuracy: 0.001)
         XCTAssertEqual(forecast.spikeDays.count, 1)
         XCTAssertEqual(forecast.spikeDays.first?.totalGb ?? 0, 6, accuracy: 0.001)
         XCTAssertEqual(forecast.spikeDays.first?.multiplier ?? 0, 1.5, accuracy: 0.001)
-        XCTAssertEqual(forecast.peakDay?.date, history[3].date)
+        XCTAssertEqual(forecast.peakDay?.date, history[4].date)
     }
 
     func testUsageForecastGracefullyHidesProjectionBelowThreeCompletedDays() {
