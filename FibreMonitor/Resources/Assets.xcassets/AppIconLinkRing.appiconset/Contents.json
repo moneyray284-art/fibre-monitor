@@ -1,0 +1,38 @@
+{
+  "info": {
+    "author": "xcode",
+    "version": 1
+  },
+  "images": [
+    {
+      "size": "1024x1024",
+      "platform": "ios",
+      "filename": "AppIconLinkRing.png",
+      "idiom": "universal"
+    },
+    {
+      "size": "1024x1024",
+      "appearances": [
+        {
+          "appearance": "luminosity",
+          "value": "dark"
+        }
+      ],
+      "platform": "ios",
+      "filename": "AppIconLinkRing-Dark.png",
+      "idiom": "universal"
+    },
+    {
+      "size": "1024x1024",
+      "appearances": [
+        {
+          "appearance": "luminosity",
+          "value": "tinted"
+        }
+      ],
+      "platform": "ios",
+      "filename": "AppIconLinkRing-Tinted.png",
+      "idiom": "universal"
+    }
+  ]
+}

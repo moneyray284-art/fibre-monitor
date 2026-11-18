@@ -3,6 +3,7 @@ import SwiftUI
 /// Lightweight, one-shot LinkWave launch mark.
 /// MainTabView removes this view after its 1.8 second presentation and short fade.
 struct LinkWaveLaunchAnimation: View {
+    let brandColor: Color
     let onFinished: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -11,11 +12,6 @@ struct LinkWaveLaunchAnimation: View {
     @State private var nodesArePulsing = false
     @State private var didFinish = false
 
-    private let brandCyan = Color(
-        red: 34.0 / 255.0,
-        green: 211.0 / 255.0,
-        blue: 238.0 / 255.0
-    )
     private let backgroundColor = Color(
         red: 7.0 / 255.0,
         green: 9.0 / 255.0,
@@ -30,7 +26,7 @@ struct LinkWaveLaunchAnimation: View {
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [brandCyan.opacity(0.2), brandCyan.opacity(0.035), .clear],
+                    colors: [brandColor.opacity(0.2), brandColor.opacity(0.035), .clear],
                         center: .center,
                         startRadius: 0,
                         endRadius: 140
@@ -48,7 +44,7 @@ struct LinkWaveLaunchAnimation: View {
                 HarmonicWaveMark(
                     progress: waveProgress,
                     nodesArePulsing: nodesArePulsing,
-                    color: brandCyan
+                    color: brandColor
                 )
                 .frame(width: 58, height: 70)
                 .accessibilityHidden(true)
@@ -56,8 +52,8 @@ struct LinkWaveLaunchAnimation: View {
                 LinkWaveWordmark(
                     nodesArePulsing: nodesArePulsing,
                     white: .white,
-                    cyan: brandCyan,
-                    stemColor: brandCyan
+                    cyan: brandColor,
+                    stemColor: brandColor
                 )
             }
             .opacity(logoIsVisible ? 1 : 0)

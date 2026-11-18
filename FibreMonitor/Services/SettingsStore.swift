@@ -47,23 +47,100 @@ public enum AppAccentColor: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+public enum AppLogoColorChoice: String, CaseIterable, Identifiable, Hashable {
+    case cyan
+    case sky
+    case mint
+
+    public var id: String { rawValue }
+    public var title: String { rawValue.capitalized }
+
+    public func color(for scheme: ColorScheme) -> Color {
+        switch (self, scheme) {
+        case (.cyan, .dark): Color(red: 34.0 / 255.0, green: 211.0 / 255.0, blue: 238.0 / 255.0)
+        case (.cyan, _): Color(red: 14.0 / 255.0, green: 116.0 / 255.0, blue: 144.0 / 255.0)
+        case (.sky, .dark): Color(red: 56.0 / 255.0, green: 189.0 / 255.0, blue: 248.0 / 255.0)
+        case (.sky, _): Color(red: 2.0 / 255.0, green: 132.0 / 255.0, blue: 199.0 / 255.0)
+        case (.mint, .dark): Color(red: 45.0 / 255.0, green: 212.0 / 255.0, blue: 191.0 / 255.0)
+        case (.mint, _): Color(red: 15.0 / 255.0, green: 118.0 / 255.0, blue: 110.0 / 255.0)
+        }
+    }
+
+    public var accentColor: AppAccentColor {
+        switch self {
+        case .cyan: .cyan
+        case .sky: .blue
+        case .mint: .green
+        }
+    }
+}
+
 public enum AppIconChoice: String, CaseIterable, Identifiable, Hashable {
+    case launchArcs
+    case monogramI
+    case arcsI
+    case linkRing
+    case wavefrontW
+    case classic
+
+    // Keep old stored values available for migration and automatic theme matching.
     case orange
     case blue
     case purple
     case green
 
+    public static var allCases: [AppIconChoice] {
+        [.launchArcs, .monogramI, .arcsI, .linkRing, .wavefrontW, .classic]
+    }
+
     public var id: String { rawValue }
-    public var title: String { rawValue.capitalized }
-    public var alternateIconName: String { "AppIcon\(title)" }
+    public var title: String {
+        switch self {
+        case .launchArcs: "Arcs"
+        case .monogramI: "Link i"
+        case .arcsI: "Arcs + i"
+        case .linkRing: "Link Ring"
+        case .wavefrontW: "Wave W"
+        case .classic: "Classic"
+        case .orange: "Orange"
+        case .blue: "Blue"
+        case .purple: "Purple"
+        case .green: "Green"
+        }
+    }
+
+    public var alternateIconName: String? {
+        switch self {
+        case .launchArcs: "AppIconLaunchArcs"
+        case .monogramI: "AppIconMonogramI"
+        case .arcsI: "AppIconArcsI"
+        case .linkRing: "AppIconLinkRing"
+        case .wavefrontW: "AppIconWavefrontW"
+        case .classic: nil
+        case .orange: "AppIconOrange"
+        case .blue: "AppIconBlue"
+        case .purple: "AppIconPurple"
+        case .green: "AppIconGreen"
+        }
+    }
+
+    public var pickerEquivalent: AppIconChoice {
+        switch self {
+        case .orange: .monogramI
+        case .blue: .arcsI
+        case .purple: .linkRing
+        case .green: .wavefrontW
+        default: self
+        }
+    }
 
     public static func matching(_ accent: AppAccentColor) -> AppIconChoice {
         switch accent {
-        case .blue: .blue
-        case .cyan: .blue
-        case .green: .green
-        case .purple: .purple
-        case .orange: .orange
+        case .blue: .arcsI
+        case .cyan: .launchArcs
+        case .green: .wavefrontW
+        case .purple: .linkRing
+        case .orange: .monogramI
         }
     }
 }
@@ -127,6 +204,7 @@ public final class SettingsStore: ObservableObject {
         static let profileAliases = "profile_device_aliases"
         static let theme = "app_theme"
         static let accentColor = "app_accent_color"
+        static let logoColor = "app_logo_color_v1"
         // Legacy shared key; retained for migration to per-appearance preset keys.
         static let themePreset = "app_theme_palette_preset_v1"
         static let lightPreset = "app_theme_palette_light_preset_v1"
@@ -166,6 +244,15 @@ public final class SettingsStore: ObservableObject {
     @Published public var theme: AppTheme {
         didSet { defaults.set(theme.rawValue, forKey: Keys.theme) }
     }
+    @Published public var logoColor: AppLogoColorChoice? {
+        didSet {
+            if let logoColor {
+                defaults.set(logoColor.rawValue, forKey: Keys.logoColor)
+            } else {
+                defaults.removeObject(forKey: Keys.logoColor)
+            }
+        }
+    }
     @Published public var accentColor: AppAccentColor {
         didSet {
             defaults.set(accentColor.rawValue, forKey: Keys.accentColor)
@@ -173,6 +260,7 @@ public final class SettingsStore: ObservableObject {
                 appIconChoice = AppIconChoice.matching(accentColor)
             }
             if !isSyncingAccentFromPalette {
+                logoColor = nil
                 withAnimation(.easeInOut(duration: 0.25)) {
                     var light = lightThemePalette
                     light.accent = CodableColor(color: accentColor.color)
@@ -269,10 +357,11 @@ public final class SettingsStore: ObservableObject {
         self.theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .system
         let accentColor = AppAccentColor(rawValue: defaults.string(forKey: Keys.accentColor) ?? "") ?? .cyan
         self.accentColor = accentColor
+        self.logoColor = AppLogoColorChoice(rawValue: defaults.string(forKey: Keys.logoColor) ?? "")
         let autoMatchAppIcon = defaults.object(forKey: Keys.autoMatchAppIcon) as? Bool ?? true
         self.autoMatchAppIconToAccentColor = autoMatchAppIcon
-        let savedIcon = AppIconChoice(rawValue: defaults.string(forKey: Keys.appIconChoice) ?? "") ?? .orange
-        self.appIconChoice = autoMatchAppIcon ? AppIconChoice.matching(accentColor) : savedIcon
+        let savedIcon = AppIconChoice(rawValue: defaults.string(forKey: Keys.appIconChoice) ?? "") ?? .classic
+        self.appIconChoice = autoMatchAppIcon ? AppIconChoice.matching(accentColor) : savedIcon.pickerEquivalent
         let savedPresetKey = defaults.string(forKey: Keys.themePreset)
         let preset = savedPresetKey.flatMap(AppThemePreset.init(rawValue:)) ?? .linkWaveDefault
         let savedLightPalette = Self.loadThemePalette(forKey: Keys.lightThemePalette, from: defaults)
@@ -364,6 +453,28 @@ public final class SettingsStore: ObservableObject {
         scheme == .dark ? darkThemePalette : lightThemePalette
     }
 
+    public func setLogoColor(_ choice: AppLogoColorChoice) {
+        guard logoColor != choice else { return }
+        isApplyingBatchUpdate = true
+        withAnimation(.easeInOut(duration: 0.25)) {
+            var light = lightThemePalette
+            light.accent = CodableColor(color: choice.color(for: .light))
+            lightThemePalette = light
+
+            var dark = darkThemePalette
+            dark.accent = CodableColor(color: choice.color(for: .dark))
+            darkThemePalette = dark
+
+            lightPreset = nil
+            darkPreset = nil
+            logoColor = choice
+            isSyncingAccentFromPalette = true
+            accentColor = choice.accentColor
+            isSyncingAccentFromPalette = false
+        }
+        isApplyingBatchUpdate = false
+    }
+
     public func activePreset(for scheme: ColorScheme) -> AppThemePreset? {
         scheme == .dark ? darkPreset : lightPreset
     }
@@ -388,6 +499,7 @@ public final class SettingsStore: ObservableObject {
             lightPreset = nil
         }
         if keyPath == \ThemePalette.accent {
+            logoColor = nil
             isSyncingAccentFromPalette = true
             accentColor = AppAccentColor.closest(to: color)
             isSyncingAccentFromPalette = false
@@ -397,6 +509,7 @@ public final class SettingsStore: ObservableObject {
     public func applyThemePreset(_ preset: AppThemePreset, for scheme: ColorScheme) {
         isApplyingBatchUpdate = true
         withAnimation(.easeInOut(duration: 0.25)) {
+            logoColor = nil
             let activePalette = scheme == .dark ? preset.darkPalette : preset.lightPalette
             if scheme == .dark {
                 darkThemePalette = activePalette
@@ -415,6 +528,7 @@ public final class SettingsStore: ObservableObject {
     public func resetLightTheme() {
         isApplyingBatchUpdate = true
         withAnimation(.easeInOut(duration: 0.25)) {
+            logoColor = nil
             lightThemePalette = AppThemePreset.linkWaveDefault.lightPalette
             lightPreset = .linkWaveDefault
         }
@@ -424,6 +538,7 @@ public final class SettingsStore: ObservableObject {
     public func resetDarkTheme() {
         isApplyingBatchUpdate = true
         withAnimation(.easeInOut(duration: 0.25)) {
+            logoColor = nil
             darkThemePalette = AppThemePreset.linkWaveDefault.darkPalette
             darkPreset = .linkWaveDefault
         }
@@ -433,6 +548,7 @@ public final class SettingsStore: ObservableObject {
     public func resetEverything() {
         isApplyingBatchUpdate = true
         withAnimation(.easeInOut(duration: 0.25)) {
+            logoColor = nil
             lightThemePalette = AppThemePreset.linkWaveDefault.lightPalette
             darkThemePalette = AppThemePreset.linkWaveDefault.darkPalette
             lightPreset = .linkWaveDefault

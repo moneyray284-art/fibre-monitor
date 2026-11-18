@@ -3,6 +3,7 @@ import SwiftUI
 public struct SettingsTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
+    @ObservedObject private var appIconManager = AppIconManager.shared
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("linkwave.surfaceStyle") private var surfaceStyleRawValue = LinkWaveSurfaceStyle.liquidGlass.rawValue
     @State private var editorMode: RouterProfileEditorView.Mode?
@@ -176,13 +177,48 @@ public struct SettingsTabView: View {
             }
             .pickerStyle(.menu)
 
-            Picker("App Icon", selection: $settings.appIconChoice) {
-                ForEach(AppIconChoice.allCases) { choice in
-                    Text(choice.title).tag(choice)
+            Picker("Logo Color", selection: Binding(
+                get: { settings.logoColor },
+                set: { if let choice = $0 { settings.setLogoColor(choice) } }
+            )) {
+                ForEach(AppLogoColorChoice.allCases) { choice in
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(choice.color(for: colorScheme))
+                            .frame(width: 12, height: 12)
+                        Text(choice.title)
+                    }
+                    .tag(Optional(choice))
                 }
             }
             .pickerStyle(.menu)
-            .disabled(settings.autoMatchAppIconToAccentColor)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
+                ForEach(AppIconChoice.allCases) { choice in
+                    AppIconPickerTile(
+                        choice: choice,
+                        isSelected: appIconManager.activeIconName == choice.alternateIconName,
+                        accent: palette.accent.color
+                    ) {
+                        settings.autoMatchAppIconToAccentColor = false
+                        settings.appIconChoice = choice
+                        appIconManager.apply(choice)
+                    }
+                    .disabled(!appIconManager.supportsAlternateIcons && choice != .classic)
+                }
+            }
+
+            if !appIconManager.supportsAlternateIcons {
+                Text("Alternate app icons aren't supported on this device.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let error = appIconManager.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .accessibilityLabel("App icon error: \(error)")
+            }
 
             Toggle("Auto-Match Accent Theme", isOn: $settings.autoMatchAppIconToAccentColor)
                 .accessibilityHint("Automatically uses the app icon that matches the selected accent color.")

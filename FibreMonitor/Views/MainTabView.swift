@@ -50,7 +50,10 @@ public struct MainTabView: View {
             .linkWaveTabBarSurface()
 
             if isLaunchAnimationVisible {
-                LinkWaveLaunchAnimation(onFinished: finishLaunchAnimation)
+                LinkWaveLaunchAnimation(
+                    brandColor: activeThemePalette.accent.color,
+                    onFinished: finishLaunchAnimation
+                )
                     .transition(.opacity)
                     .zIndex(10)
             }
@@ -86,7 +89,7 @@ public struct MainTabView: View {
         .preferredColorScheme(settings.theme.colorScheme)
         .tint(activeThemePalette.accent.color)
         .onAppear {
-            AppIconManager.apply(settings.appIconChoice)
+            AppIconManager.shared.apply(settings.appIconChoice)
             presentInitialSettingsAfterLaunch =
                 !viewModel.awaitingRouterSelection && !viewModel.settings.isConfigured
             if launchAnimationFinished && presentInitialSettingsAfterLaunch {
@@ -122,7 +125,7 @@ public struct MainTabView: View {
             }
         }
         .onChange(of: settings.appIconChoice) { choice in
-            AppIconManager.apply(choice)
+            AppIconManager.shared.apply(choice)
         }
     }
 

@@ -27,6 +27,18 @@ extension EnvironmentValues {
     }
 }
 
+private func linkWaveSolidSurfaceColor(_ colorScheme: ColorScheme) -> Color {
+    colorScheme == .dark
+        ? Color(red: 18.0 / 255.0, green: 28.0 / 255.0, blue: 42.0 / 255.0)
+        : .white
+}
+
+private func linkWaveSolidBorderColor(_ colorScheme: ColorScheme) -> Color {
+    colorScheme == .dark
+        ? Color(red: 55.0 / 255.0, green: 70.0 / 255.0, blue: 92.0 / 255.0)
+        : Color(red: 207.0 / 255.0, green: 218.0 / 255.0, blue: 232.0 / 255.0)
+}
+
 // Liquid Glass styling.
 //
 // On iOS 26+ everything here uses the system Liquid Glass material (`glassEffect`,
@@ -65,16 +77,32 @@ public struct LinkWaveGlassCard: ViewModifier {
             frosted(padded, shape: shape)
         case .cleanSolid:
             padded
-                .background(colorScheme == .dark ? Color(red: 14.0 / 255.0, green: 19.0 / 255.0, blue: 29.0 / 255.0) : .white, in: shape)
-                .overlay(shape.stroke(palette.textSecondary.color.opacity(colorScheme == .dark ? 0.28 : 0.16), lineWidth: 1))
+                .background(solidSurfaceColor, in: shape)
+                .overlay(shape.stroke(solidBorderColor, lineWidth: 1))
         }
     }
 
     private func frosted(_ content: some View, shape: RoundedRectangle) -> some View {
         content
-            .background(.ultraThinMaterial, in: shape)
-            .overlay(shape.stroke(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.56), lineWidth: 1))
-            .overlay(shape.inset(by: 1).stroke(Color.white.opacity(colorScheme == .dark ? 0.045 : 0.20), lineWidth: 0.7))
+            .background {
+                ZStack {
+                    shape.fill(.thinMaterial)
+                    shape.fill(palette.accent.color.opacity(colorScheme == .dark ? 0.075 : 0.045))
+                }
+            }
+            .overlay(shape.stroke(palette.textSecondary.color.opacity(colorScheme == .dark ? 0.30 : 0.23), lineWidth: 1))
+    }
+
+    private var solidSurfaceColor: Color {
+        colorScheme == .dark
+            ? Color(red: 18.0 / 255.0, green: 28.0 / 255.0, blue: 42.0 / 255.0)
+            : Color(red: 1.0, green: 1.0, blue: 1.0)
+    }
+
+    private var solidBorderColor: Color {
+        colorScheme == .dark
+            ? Color(red: 55.0 / 255.0, green: 70.0 / 255.0, blue: 92.0 / 255.0)
+            : Color(red: 207.0 / 255.0, green: 218.0 / 255.0, blue: 232.0 / 255.0)
     }
 }
 
@@ -100,10 +128,11 @@ private struct LegacyGlassModifier: ViewModifier {
 /// Full-width action button: prominent Liquid Glass on iOS 26, bordered prominent before.
 public struct LiquidGlassActionButtonModifier: ViewModifier {
     let tint: Color
+    @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
 
     @ViewBuilder
     public func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *), surfaceStyle == .liquidGlass {
             content.buttonStyle(.glassProminent).tint(tint).controlSize(.large)
         } else {
             content.buttonStyle(.borderedProminent).tint(tint).controlSize(.large)
@@ -113,9 +142,11 @@ public struct LiquidGlassActionButtonModifier: ViewModifier {
 
 /// Small secondary button (presets, expand chevrons): glass on iOS 26, bordered before.
 public struct LiquidGlassSmallButtonModifier: ViewModifier {
+    @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
+
     @ViewBuilder
     public func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *), surfaceStyle == .liquidGlass {
             content.buttonStyle(.glass).controlSize(.small)
         } else {
             content.buttonStyle(.bordered).controlSize(.small)
@@ -317,12 +348,17 @@ struct LiquidGlassToolbarCircleModifier: ViewModifier {
             }
         case .frosted:
             content
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.55), lineWidth: 1))
+                .background {
+                    ZStack {
+                        Circle().fill(.thinMaterial)
+                        Circle().fill(palette.accent.color.opacity(colorScheme == .dark ? 0.08 : 0.05))
+                    }
+                }
+                .overlay(Circle().stroke(palette.textSecondary.color.opacity(colorScheme == .dark ? 0.30 : 0.23), lineWidth: 1))
         case .cleanSolid:
             content
-                .background(colorScheme == .dark ? Color(red: 14.0 / 255.0, green: 19.0 / 255.0, blue: 29.0 / 255.0) : .white, in: Circle())
-                .overlay(Circle().stroke(palette.textSecondary.color.opacity(0.2), lineWidth: 1))
+                .background(linkWaveSolidSurfaceColor(colorScheme), in: Circle())
+                .overlay(Circle().stroke(linkWaveSolidBorderColor(colorScheme), lineWidth: 1))
         }
     }
 }
@@ -339,11 +375,16 @@ private struct LiquidGlassToolbarCapsuleModifier: ViewModifier {
             if #available(iOS 26.0, *) { content.glassEffect(.regular.interactive(), in: Capsule()) }
             else { content.background(.regularMaterial, in: Capsule()) }
         case .frosted:
-            content.background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().stroke(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.55), lineWidth: 1))
+            content.background {
+                ZStack {
+                    Capsule().fill(.thinMaterial)
+                    Capsule().fill(palette.accent.color.opacity(colorScheme == .dark ? 0.08 : 0.05))
+                }
+            }
+                .overlay(Capsule().stroke(palette.textSecondary.color.opacity(colorScheme == .dark ? 0.30 : 0.23), lineWidth: 1))
         case .cleanSolid:
-            content.background(colorScheme == .dark ? Color(red: 14.0 / 255.0, green: 19.0 / 255.0, blue: 29.0 / 255.0) : .white, in: Capsule())
-                .overlay(Capsule().stroke(palette.textSecondary.color.opacity(0.2), lineWidth: 1))
+            content.background(linkWaveSolidSurfaceColor(colorScheme), in: Capsule())
+                .overlay(Capsule().stroke(linkWaveSolidBorderColor(colorScheme), lineWidth: 1))
         }
     }
 }
@@ -360,11 +401,16 @@ private struct LinkWaveInteractiveGlassCapsuleModifier: ViewModifier {
             if #available(iOS 26.0, *) { content.glassEffect(.regular.interactive(), in: Capsule()) }
             else { content.background(.regularMaterial, in: Capsule()) }
         case .frosted:
-            content.background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().stroke(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.55), lineWidth: 1))
+            content.background {
+                ZStack {
+                    Capsule().fill(.thinMaterial)
+                    Capsule().fill(palette.accent.color.opacity(colorScheme == .dark ? 0.08 : 0.05))
+                }
+            }
+                .overlay(Capsule().stroke(palette.textSecondary.color.opacity(colorScheme == .dark ? 0.30 : 0.23), lineWidth: 1))
         case .cleanSolid:
-            content.background(colorScheme == .dark ? Color(red: 14.0 / 255.0, green: 19.0 / 255.0, blue: 29.0 / 255.0) : .white, in: Capsule())
-                .overlay(Capsule().stroke(palette.textSecondary.color.opacity(0.2), lineWidth: 1))
+            content.background(linkWaveSolidSurfaceColor(colorScheme), in: Capsule())
+                .overlay(Capsule().stroke(linkWaveSolidBorderColor(colorScheme), lineWidth: 1))
         }
     }
 }
@@ -373,19 +419,17 @@ private struct LinkWaveTabBarSurfaceModifier: ViewModifier {
     @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
     @Environment(\.colorScheme) private var colorScheme
 
-    @ViewBuilder
     func body(content: Content) -> some View {
+        content
+            .toolbarBackground(AnyShapeStyle(tabBarBackground), for: .tabBar)
+            .toolbarBackground(surfaceStyle == .liquidGlass ? .automatic : .visible, for: .tabBar)
+    }
+
+    private var tabBarBackground: AnyShapeStyle {
         switch surfaceStyle {
-        case .liquidGlass:
-            content
-        case .frosted:
-            content
-                .toolbarBackground(.ultraThinMaterial, for: .tabBar)
-                .toolbarBackground(.visible, for: .tabBar)
-        case .cleanSolid:
-            content
-                .toolbarBackground(colorScheme == .dark ? Color(red: 14.0 / 255.0, green: 19.0 / 255.0, blue: 29.0 / 255.0) : .white, for: .tabBar)
-                .toolbarBackground(.visible, for: .tabBar)
+        case .liquidGlass: AnyShapeStyle(.bar)
+        case .frosted: AnyShapeStyle(.thinMaterial)
+        case .cleanSolid: AnyShapeStyle(linkWaveSolidSurfaceColor(colorScheme))
         }
     }
 }
@@ -415,11 +459,16 @@ private struct LiquidGlassCapsuleModifier: ViewModifier {
             if #available(iOS 26.0, *) { content.glassEffect(.regular.interactive(), in: Capsule()) }
             else { content.background(.regularMaterial, in: Capsule()) }
         case .frosted:
-            content.background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().stroke(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.55), lineWidth: 1))
+            content.background {
+                ZStack {
+                    Capsule().fill(.thinMaterial)
+                    Capsule().fill(palette.accent.color.opacity(colorScheme == .dark ? 0.08 : 0.05))
+                }
+            }
+                .overlay(Capsule().stroke(palette.textSecondary.color.opacity(colorScheme == .dark ? 0.30 : 0.23), lineWidth: 1))
         case .cleanSolid:
-            content.background(colorScheme == .dark ? Color(red: 14.0 / 255.0, green: 19.0 / 255.0, blue: 29.0 / 255.0) : .white, in: Capsule())
-                .overlay(Capsule().stroke(palette.textSecondary.color.opacity(0.2), lineWidth: 1))
+            content.background(linkWaveSolidSurfaceColor(colorScheme), in: Capsule())
+                .overlay(Capsule().stroke(linkWaveSolidBorderColor(colorScheme), lineWidth: 1))
         }
     }
 }
