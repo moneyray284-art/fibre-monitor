@@ -76,6 +76,8 @@ jobs:
             -project FibreMonitor.xcodeproj \
             -scheme FibreMonitor \
             -destination "id=$DEST" \
+            -destination-timeout 90 \
+            -parallel-testing-enabled NO \
             -derivedDataPath build_test
 
       - name: Build Application for Device

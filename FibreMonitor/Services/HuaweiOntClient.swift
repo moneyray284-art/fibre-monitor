@@ -1318,6 +1318,15 @@ public actor HuaweiOntClient {
         return values.first(where: DeviceNameResolver.isUsefulName) ?? values.first ?? ""
     }
 
+    private static func clientVendorField(_ record: [String: String], names: [String]) -> String {
+        for name in names {
+            let value = clientField(record, names: [name])
+            guard DeviceNameResolver.isUsefulName(value), value.contains(where: \.isLetter) else { continue }
+            return value
+        }
+        return ""
+    }
+
     /// Reads RSSI fields from any router record that also identifies a client MAC. Huawei firmware
     /// varies the associated-station record name, so inspect constructor field names instead of
     /// depending on one endpoint-specific class name.
@@ -1389,7 +1398,9 @@ public actor HuaweiOntClient {
                 ip: clientField(r, names: ["IpAddr", "IPAddress"]),
                 hostName: clientNameField(r, names: ["HostName", "Hostname", "Name", "DeviceName"]),
                 routerAlias: clientNameField(r, names: ["UserDevAlias", "Alias", "UserDevName"]),
-                dhcpVendor: clientField(r, names: ["DevType", "VendorClassId", "DeviceType"]),
+                // DevType is frequently just a numeric enum (for example, "0") on HG8145 firmware.
+                // Prefer vendor text and ignore enum values so DHCP lease details can enrich it later.
+                dhcpVendor: clientVendorField(r, names: ["VendorClassId", "DeviceType", "DevType"]),
                 port: ConnectionPort(raw: rawPort, ssidBands: ssidBands, fallbackRaw: interfaceType),
                 isOnline: clientField(r, names: ["DevStatus"]).lowercased() == "online",
                 connectedTime: clientField(r, names: ["Time"]),
@@ -1442,8 +1453,8 @@ public actor HuaweiOntClient {
             if !DeviceNameResolver.isUsefulName(copy.routerAlias), DeviceNameResolver.isUsefulName(leaseAlias) {
                 copy.routerAlias = leaseAlias
             }
-            if copy.dhcpVendor.isEmpty {
-                copy.dhcpVendor = clientField(lease, names: ["devtype", "VendorClassId"])
+            if !DeviceNameResolver.isUsefulName(copy.dhcpVendor) || !copy.dhcpVendor.contains(where: \.isLetter) {
+                copy.dhcpVendor = clientVendorField(lease, names: ["VendorClassId", "devtype", "DeviceType"])
             }
             if copy.ip.isEmpty { copy.ip = clientField(lease, names: ["ip", "IPAddress"]) }
             if copy.leaseSecondsRemaining == nil,
@@ -1464,7 +1475,9 @@ public actor HuaweiOntClient {
         if !DeviceNameResolver.isUsefulName(merged.routerAlias), DeviceNameResolver.isUsefulName(incoming.routerAlias) {
             merged.routerAlias = incoming.routerAlias
         }
-        if merged.dhcpVendor.isEmpty { merged.dhcpVendor = incoming.dhcpVendor }
+        if !DeviceNameResolver.isUsefulName(merged.dhcpVendor) || !merged.dhcpVendor.contains(where: \.isLetter) {
+            merged.dhcpVendor = incoming.dhcpVendor
+        }
         if merged.port == .other(""), incoming.port != .other("") { merged.port = incoming.port }
         if incoming.isOnline && !merged.isOnline {
             merged.isOnline = true
