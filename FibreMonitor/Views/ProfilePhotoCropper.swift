@@ -8,10 +8,16 @@ struct ProfilePhotoCropper: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var cropSide: CGFloat = 0
-    @State private var zoom: CGFloat = 1
-    @State private var zoomAtGestureStart: CGFloat = 1
-    @State private var panOffset: CGSize = .zero
-    @State private var panAtGestureStart: CGSize = .zero
+    @State private var steadyScale: CGFloat = 1
+    @State private var scaleAtGestureStart: CGFloat = 1
+    @State private var steadyOffset: CGSize = .zero
+    @State private var offsetAtGestureStart: CGSize = .zero
+
+    init(image: UIImage, onCancel: @escaping () -> Void, onUsePhoto: @escaping (Data) -> Void) {
+        self.image = Self.normalized(image)
+        self.onCancel = onCancel
+        self.onUsePhoto = onUsePhoto
+    }
 
     var body: some View {
         NavigationStack {
@@ -23,15 +29,15 @@ struct ProfilePhotoCropper: View {
                 GeometryReader { geometry in
                     let side = min(geometry.size.width, geometry.size.height)
                     let baseScale = max(side / max(image.size.width, 1), side / max(image.size.height, 1))
-                    let displayedWidth = image.size.width * baseScale * zoom
-                    let displayedHeight = image.size.height * baseScale * zoom
+                    let displayedWidth = image.size.width * baseScale * steadyScale
+                    let displayedHeight = image.size.height * baseScale * steadyScale
 
                     ZStack {
                         Color.black.opacity(0.85)
                         Image(uiImage: image)
                             .resizable()
                             .frame(width: displayedWidth, height: displayedHeight)
-                            .offset(panOffset)
+                            .offset(steadyOffset)
 
                         CropAlignmentGrid()
                             .stroke(.white.opacity(0.68), lineWidth: 0.8)
@@ -50,34 +56,34 @@ struct ProfilePhotoCropper: View {
                     .simultaneousGesture(
                         DragGesture(minimumDistance: 1)
                             .onChanged { value in
-                                panOffset = clampedOffset(
+                                steadyOffset = clampedOffset(
                                     CGSize(
-                                        width: panAtGestureStart.width + value.translation.width,
-                                        height: panAtGestureStart.height + value.translation.height
+                                        width: offsetAtGestureStart.width + value.translation.width,
+                                        height: offsetAtGestureStart.height + value.translation.height
                                     ),
                                     displayedWidth: displayedWidth,
                                     displayedHeight: displayedHeight,
                                     cropSide: side
                                 )
                             }
-                            .onEnded { _ in panAtGestureStart = panOffset }
+                            .onEnded { _ in offsetAtGestureStart = steadyOffset }
                     )
                     .simultaneousGesture(
                         MagnificationGesture()
                             .onChanged { value in
-                                zoom = min(max(zoomAtGestureStart * value, 1), 4)
-                                let scaledWidth = image.size.width * baseScale * zoom
-                                let scaledHeight = image.size.height * baseScale * zoom
-                                panOffset = clampedOffset(
-                                    panOffset,
+                                steadyScale = min(max(scaleAtGestureStart * value, 1), 4)
+                                let scaledWidth = image.size.width * baseScale * steadyScale
+                                let scaledHeight = image.size.height * baseScale * steadyScale
+                                steadyOffset = clampedOffset(
+                                    steadyOffset,
                                     displayedWidth: scaledWidth,
                                     displayedHeight: scaledHeight,
                                     cropSide: side
                                 )
                             }
                             .onEnded { _ in
-                                zoomAtGestureStart = zoom
-                                panAtGestureStart = panOffset
+                                scaleAtGestureStart = steadyScale
+                                offsetAtGestureStart = steadyOffset
                             }
                     )
                 }
@@ -85,7 +91,7 @@ struct ProfilePhotoCropper: View {
 
                 Button("Reset Position") { resetCrop() }
                     .font(.subheadline.weight(.medium))
-                    .disabled(zoom == 1 && panOffset == .zero)
+                    .disabled(steadyScale == 1 && steadyOffset == .zero)
 
                 Spacer(minLength: 0)
             }
@@ -102,7 +108,7 @@ struct ProfilePhotoCropper: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Use Photo") {
-                        guard let data = croppedJPEG(side: cropSide) else { return }
+                        let data = croppedJPEG(side: cropSide)
                         onUsePhoto(data)
                         dismiss()
                     }
@@ -129,21 +135,23 @@ struct ProfilePhotoCropper: View {
     }
 
     private func resetCrop() {
-        zoom = 1
-        zoomAtGestureStart = 1
-        panOffset = .zero
-        panAtGestureStart = .zero
+        steadyScale = 1
+        scaleAtGestureStart = 1
+        steadyOffset = .zero
+        offsetAtGestureStart = .zero
     }
 
-    private func croppedJPEG(side: CGFloat) -> Data? {
-        guard side > 0, image.size.width > 0, image.size.height > 0 else { return nil }
-        let baseScale = max(side / image.size.width, side / image.size.height)
-        let outputScale = 512 / side
-        let displayedWidth = image.size.width * baseScale * zoom
-        let displayedHeight = image.size.height * baseScale * zoom
+    private func croppedJPEG(side: CGFloat) -> Data {
+        let frameSide = max(side, 1)
+        let imageWidth = max(image.size.width, 1)
+        let imageHeight = max(image.size.height, 1)
+        let baseScale = max(frameSide / imageWidth, frameSide / imageHeight)
+        let outputScale = 512 / frameSide
+        let displayedWidth = imageWidth * baseScale * steadyScale
+        let displayedHeight = imageHeight * baseScale * steadyScale
         let imageOrigin = CGPoint(
-            x: (side - displayedWidth) / 2 + panOffset.width,
-            y: (side - displayedHeight) / 2 + panOffset.height
+            x: (frameSide - displayedWidth) / 2 + steadyOffset.width,
+            y: (frameSide - displayedHeight) / 2 + steadyOffset.height
         )
         let destination = CGRect(
             x: imageOrigin.x * outputScale,
@@ -155,7 +163,17 @@ struct ProfilePhotoCropper: View {
         format.scale = 1
         format.opaque = true
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 512, height: 512), format: format)
-        return renderer.image { _ in image.draw(in: destination) }.jpegData(compressionQuality: 0.9)
+        return renderer.jpegData(withCompressionQuality: 0.88) { _ in
+            image.draw(in: destination)
+        }
+    }
+
+    private static func normalized(_ image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up else { return image }
+        let renderer = UIGraphicsImageRenderer(size: image.size)
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }
     }
 }
 

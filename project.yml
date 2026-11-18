@@ -10,9 +10,6 @@ settings:
     GENERATE_INFOPLIST_FILE: false
     CURRENT_PROJECT_VERSION: 8
     MARKETING_VERSION: "2.3.0"
-    CODE_SIGN_IDENTITY: ""
-    CODE_SIGNING_REQUIRED: "NO"
-    CODE_SIGNING_ALLOWED: "NO"
 
 targets:
   FibreMonitor:
@@ -35,12 +32,15 @@ targets:
         ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIconOrange AppIconBlue AppIconPurple AppIconGreen AppIconLaunchArcs AppIconMonogramI AppIconArcsI AppIconLinkRing AppIconWavefrontW AppIconLaunchArcsCyan AppIconLaunchArcsSky AppIconLaunchArcsMint AppIconMonogramICyan AppIconMonogramISky AppIconMonogramIMint AppIconArcsICyan AppIconArcsISky AppIconArcsIMint AppIconLinkRingCyan AppIconLinkRingSky AppIconLinkRingMint AppIconWavefrontWCyan AppIconWavefrontWSky AppIconWavefrontWMint"
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        CODE_SIGN_ENTITLEMENTS: FibreMonitor/Resources/FibreMonitor.entitlements
+        CODE_SIGN_STYLE: Automatic
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         TARGETED_DEVICE_FAMILY: "1"
       configs:
         Release:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
+    dependencies:
+      - target: LinkWaveWidgetExtension
+        embed: true
   FibreMonitorTests:
     type: bundle.unit-test
     platform: iOS
@@ -52,3 +52,34 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mattdev0.fibremonitor.tests
+  LinkWaveWidgetExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: LinkWaveWidget/WidgetOntTransport.swift
+      - path: LinkWaveWidget/WidgetSnapshotStore.swift
+      - path: LinkWaveWidget/LinkWaveWidget.swift
+      - path: FibreMonitor/Models/OntModels.swift
+      - path: FibreMonitor/Services/HuaweiJs.swift
+      - path: FibreMonitor/Services/HuaweiOntClient.swift
+      - path: FibreMonitor/Services/RouterAuthCoordinator.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mattdev0.fibremonitor.Widget
+        INFOPLIST_FILE: LinkWaveWidget/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "1"
+
+schemes:
+  FibreMonitor:
+    build:
+      targets:
+        FibreMonitor: all
+        LinkWaveWidgetExtension: all
+  LinkWaveWidgetExtension:
+    build:
+      targets:
+        LinkWaveWidgetExtension: all

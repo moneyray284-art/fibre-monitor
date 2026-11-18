@@ -4,9 +4,12 @@ import UniformTypeIdentifiers
 import UIKit
 
 struct ProfileSheetView: View {
+    private enum ProfileField: Hashable { case profileName, routerName }
+
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject private var avatarStore: ProfileAvatarStore
     @Environment(\.dismiss) private var dismiss
+    @FocusState private var focusedField: ProfileField?
 
     @State private var editingProfileID: UUID?
     @State private var draftProfileName: String
@@ -18,6 +21,7 @@ struct ProfileSheetView: View {
     @State private var isImportingFile = false
     @State private var isShowingCropper = false
     @State private var isConfirmingRemoveProfile = false
+    @State private var hasSuppressedInitialFocus = false
     @State private var errorMessage: String?
     @State private var presentationDetent: PresentationDetent = .large
 
@@ -77,6 +81,7 @@ struct ProfileSheetView: View {
                         TextField("Saved router connection name", text: $draftProfileName)
                             .textContentType(.name)
                             .textInputAutocapitalization(.words)
+                            .focused($focusedField, equals: .profileName)
                     }
 
                     VStack(alignment: .leading, spacing: 5) {
@@ -85,6 +90,7 @@ struct ProfileSheetView: View {
                             .foregroundStyle(.secondary)
                         TextField("Name displayed on Home", text: $draftRouterName)
                             .textInputAutocapitalization(.words)
+                            .focused($focusedField, equals: .routerName)
                     }
                 } header: {
                     Text("Profile")
@@ -134,6 +140,11 @@ struct ProfileSheetView: View {
                 Button("Cancel", role: .cancel) { }
             } message: {
                 Text("This removes the saved router connection and its local history from LinkWave.")
+            }
+            .onAppear {
+                guard !hasSuppressedInitialFocus else { return }
+                hasSuppressedInitialFocus = true
+                focusedField = nil
             }
         }
         .presentationDetents([.medium, .large], selection: $presentationDetent)

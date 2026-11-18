@@ -119,6 +119,7 @@ public struct ProfileAvatarPickerButton: View {
     let viewModel: MonitorViewModel
     private let size: CGFloat
     @State private var isShowingProfile = false
+    @State private var sheetSessionID = UUID()
 
     public init(viewModel: MonitorViewModel, size: CGFloat = 38) {
         self.viewModel = viewModel
@@ -127,6 +128,7 @@ public struct ProfileAvatarPickerButton: View {
 
     public var body: some View {
         Button {
+            sheetSessionID = UUID()
             isShowingProfile = true
         } label: {
             ProfileAvatarView(size: size)
@@ -137,6 +139,7 @@ public struct ProfileAvatarPickerButton: View {
         .accessibilityLabel("Open Profile")
         .sheet(isPresented: $isShowingProfile) {
             ProfileSheetView(viewModel: viewModel)
+                .id(sheetSessionID)
         }
     }
 }
