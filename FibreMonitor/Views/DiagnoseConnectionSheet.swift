@@ -83,6 +83,7 @@ struct DiagnoseConnectionSheet: View {
     private var verdictSymbol: String {
         switch diagnosis.severity {
         case .optimal: "checkmark.circle.fill"
+        case .pending: "clock"
         case .warning: "exclamationmark.triangle.fill"
         case .critical: "xmark.octagon.fill"
         }
@@ -91,6 +92,7 @@ struct DiagnoseConnectionSheet: View {
     private var verdictColor: Color {
         switch diagnosis.severity {
         case .optimal: .green
+        case .pending: palette.textSecondary.color
         case .warning: .orange
         case .critical: .red
         }
@@ -98,7 +100,6 @@ struct DiagnoseConnectionSheet: View {
 
     private func actionHint(for action: ConnectionDiagnosisAction) -> String {
         switch action {
-        case .inspectWeakClients: "Opens the Clients tab with the Weak filter selected."
         case .reviewWiFiBands: "Opens Wi-Fi settings to review the active bands."
         case .runSpeedTest: "Closes this sheet and starts a speed test on Home."
         }

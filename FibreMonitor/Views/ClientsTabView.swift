@@ -93,7 +93,7 @@ private enum ClientSignal {
         guard device.isOnline, device.port.isWifi, let rssi = device.rssiDbm else { return nil }
         if rssi >= -65 { return "Strong" }
         if rssi >= -79 { return "Fair" }
-        return "Weak"
+        return "Far"
     }
 
     static func detail(for device: OntDevice) -> String? {
@@ -103,6 +103,14 @@ private enum ClientSignal {
         let label = device.port.compactLabel
         return label.isEmpty || label == "—" ? nil : label
     }
+}
+
+private enum OnlineClientSort: String, CaseIterable, Identifiable, Hashable {
+    case `default` = "Default"
+    case strongest = "Strongest"
+    case lowestRSSI = "Lowest RSSI"
+
+    var id: String { rawValue }
 }
 
 private struct ClientSignalBars: View {
@@ -135,6 +143,7 @@ public struct ClientsTabView: View {
     @State private var localWiFiIPv4: String?
     @State private var isOnlineExpanded = true
     @State private var isOfflineExpanded = false
+    @State private var onlineSort: OnlineClientSort = .default
     @State private var pendingBlockConflictDevice: OntDevice?
     @State private var showBlockConflictAlert = false
 
@@ -207,6 +216,7 @@ public struct ClientsTabView: View {
                                 action: {
                                     isOnlineExpanded.toggle()
                                 },
+                                headerAccessory: AnyView(onlineSortPicker),
                                 content: AnyView(clientRows(visibleOnline))
                             )
                         }
@@ -380,17 +390,33 @@ public struct ClientsTabView: View {
 
     private var filteredOnline: [OntDevice] {
         let devices = filter(unblockedDeviceRecords.filter(\.isOnline))
-        return devices.sorted { isThisPhone($0) && !isThisPhone($1) }
+        guard onlineSort != .default else {
+            return devices.sorted { isThisPhone($0) && !isThisPhone($1) }
+        }
+
+        return devices.sorted { lhs, rhs in
+            switch (lhs.rssiDbm, rhs.rssiDbm) {
+            case let (left?, right?) where left != right:
+                return onlineSort == .strongest ? left > right : left < right
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                return resolvedName(for: lhs).localizedCaseInsensitiveCompare(resolvedName(for: rhs)) == .orderedAscending
+            }
+        }
     }
 
-    private var filteredWeakClients: [OntDevice] {
-        filter(unblockedDeviceRecords.filter { $0.isOnline && ($0.rssiDbm ?? .infinity) <= -75 })
-            .sorted {
-                let left = $0.rssiDbm ?? .infinity
-                let right = $1.rssiDbm ?? .infinity
-                if left != right { return left < right }
-                return resolvedName(for: $0).localizedCaseInsensitiveCompare(resolvedName(for: $1)) == .orderedAscending
+    private var onlineSortPicker: some View {
+        Picker("Sort online clients", selection: $onlineSort) {
+            ForEach(OnlineClientSort.allCases) { option in
+                Text(option.rawValue).tag(option)
             }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .accessibilityLabel("Sort online clients")
     }
 
     private var clientFilterTabs: some View {
@@ -425,7 +451,6 @@ public struct ClientsTabView: View {
         switch filter {
         case .all: allCount
         case .online: filteredOnline.count
-        case .weak: filteredWeakClients.count
         case .offline: filteredOffline.count
         case .blocked: filteredBlockedDevices.count
         }
@@ -453,7 +478,6 @@ public struct ClientsTabView: View {
     private var visibleOnline: [OntDevice] {
         switch selectedFilter {
         case .all, .online: filteredOnline
-        case .weak: filteredWeakClients
         case .offline, .blocked: []
         }
     }
@@ -468,7 +492,6 @@ public struct ClientsTabView: View {
         switch selectedFilter {
         case .all: allCount
         case .online: filteredOnline.count
-        case .weak: filteredWeakClients.count
         case .offline: filteredOffline.count
         case .blocked: filteredBlockedDevices.count
         }
@@ -482,9 +505,6 @@ public struct ClientsTabView: View {
                 isOnlineExpanded = true
                 isOfflineExpanded = false
             case .online:
-                isOnlineExpanded = true
-                isOfflineExpanded = false
-            case .weak:
                 isOnlineExpanded = true
                 isOfflineExpanded = false
             case .offline:
@@ -519,19 +539,6 @@ public struct ClientsTabView: View {
                     Text("Online (\(filteredOnline.count))")
                     Spacer()
                     if selectedFilter == .online {
-                        Image(systemName: "checkmark")
-                    }
-                }
-            }
-
-            Button {
-                selectFilter(.weak)
-            } label: {
-                HStack {
-                    Image(systemName: "wifi.exclamationmark")
-                    Text("Weak (\(filteredWeakClients.count))")
-                    Spacer()
-                    if selectedFilter == .weak {
                         Image(systemName: "checkmark")
                     }
                 }
@@ -583,7 +590,6 @@ public struct ClientsTabView: View {
         if !searchText.isEmpty { return "No Matching Clients" }
         if selectedFilter == .blocked { return "No blocked devices" }
         if selectedFilter == .online { return "No online devices" }
-        if selectedFilter == .weak { return "No Weak-Signal Clients" }
         if selectedFilter == .offline { return "No offline devices" }
         if viewModel.isLoggedOut { return "Logged Out of Router" }
         if viewModel.isConnected { return "No Clients Reported" }
@@ -594,7 +600,6 @@ public struct ClientsTabView: View {
         if !searchText.isEmpty { return "Try searching by name, IP address, MAC, or vendor." }
         if selectedFilter == .blocked { return "Devices you block from Wi-Fi will appear here." }
         if selectedFilter == .online { return "The router currently reports no online devices." }
-        if selectedFilter == .weak { return "All online devices have strong Wi-Fi signal above -75 dBm." }
         if selectedFilter == .offline { return "All reported devices are currently online." }
         if viewModel.isLoggedOut { return "Tap Reconnect to resume reading the device list." }
         if let err = viewModel.errorMessage { return err }
@@ -637,6 +642,7 @@ private struct ClientDeviceSectionCard: View {
     let tint: Color
     let isExpanded: Bool
     let action: () -> Void
+    let headerAccessory: AnyView?
     let content: AnyView
 
     init(
@@ -646,6 +652,7 @@ private struct ClientDeviceSectionCard: View {
         tint: Color,
         isExpanded: Bool,
         action: @escaping () -> Void,
+        headerAccessory: AnyView? = nil,
         content: AnyView
     ) {
         self.icon = icon
@@ -654,6 +661,7 @@ private struct ClientDeviceSectionCard: View {
         self.tint = tint
         self.isExpanded = isExpanded
         self.action = action
+        self.headerAccessory = headerAccessory
         self.content = content
     }
 
@@ -687,6 +695,12 @@ private struct ClientDeviceSectionCard: View {
             .accessibilityLabel("\(title), \(count) devices")
             .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
             .accessibilityHint("Double-tap to \(isExpanded ? "collapse" : "expand") this section")
+
+            if let headerAccessory {
+                headerAccessory
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
+            }
 
             if isExpanded {
                 content
@@ -848,7 +862,7 @@ private struct ClientRow: View {
                             if let quality = ClientSignal.quality(for: device) {
                                 Text("· \(quality)")
                                     .font(.caption2.weight(.medium))
-                                    .foregroundStyle(signalColor)
+                                    .linkWaveText(.secondary)
                             }
                         }
                     }

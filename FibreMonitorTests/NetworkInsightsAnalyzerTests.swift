@@ -11,6 +11,10 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
         XCTAssertEqual(critical.severity, .critical)
         XCTAssertEqual(critical.checks.first?.status, .critical)
         XCTAssertTrue(critical.inlineHint.contains("-27.8 dBm"))
+
+        XCTAssertEqual(diagnose(rx: -26).severity, .optimal)
+        XCTAssertEqual(diagnose(rx: -27).severity, .critical)
+        XCTAssertEqual(diagnose(rx: -7).severity, .critical)
     }
 
     func testWiFiCrowdingUsesLiveSSIDNamesAndEnabledBandState() {
@@ -26,8 +30,9 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
                 WifiRadio(index: 2, band: "5GHz", enabled: true)
             ],
             networks: [
-                WifiNetwork(ssidIndex: 1, name: "Family-2G", band: "2.4GHz", enabled: true),
-                WifiNetwork(ssidIndex: 5, name: "Family-5G", band: "5GHz", enabled: true)
+                WifiNetwork(ssidIndex: 1, name: "Home Sweet WiFi", band: "2.4GHz", enabled: true),
+                WifiNetwork(ssidIndex: 2, name: "Speed Matters", band: "2.4GHz", enabled: true),
+                WifiNetwork(ssidIndex: 5, name: "Meta", band: "5GHz", enabled: true)
             ]
         )
 
@@ -36,33 +41,100 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
             devices: devices,
             blockedDevices: [],
             wifi: wifi,
-            speedTest: nil
+            speedTest: healthySpeedTest()
         )
 
         let bandCheck = try! XCTUnwrap(result.checks.first { $0.title == "Wi-Fi Band Balance" })
         XCTAssertTrue(result.hasWiFiBandConcern)
         XCTAssertEqual(bandCheck.status, .warning)
-        XCTAssertTrue(bandCheck.detail.contains("‘Family-2G’"))
-        XCTAssertTrue(bandCheck.detail.contains("‘Family-5G’"))
+        XCTAssertTrue(bandCheck.detail.contains("‘Home Sweet WiFi’"))
+        XCTAssertTrue(bandCheck.detail.contains("‘Meta’"))
+        XCTAssertTrue(bandCheck.detail.contains("‘Speed Matters’"))
+        XCTAssertTrue(result.actions.contains(.reviewWiFiBands))
     }
 
-    func testWeakClientsExcludeOfflineAndBlockedDevicesAndSortWeakestFirst() {
-        let weak = makeDevice(mac: "00:00:00:00:00:11", name: "Weak", port: .wifi24(ssidIndex: 1), rssi: -75)
-        let weakest = makeDevice(mac: "00:00:00:00:00:12", name: "Weakest", port: .wifi5(ssidIndex: 5), rssi: -88)
-        let blocked = makeDevice(mac: "00:00:00:00:00:13", name: "Blocked", port: .wifi24(ssidIndex: 1), rssi: -96)
-        let offline = makeDevice(mac: "00:00:00:00:00:14", name: "Offline", port: .wifi24(ssidIndex: 1), rssi: -99, online: false)
-
+    func testClientRSSIAloneDoesNotCreateDiagnosisAlertOrCheck() {
+        let lowSignal = makeDevice(mac: "00:00:00:00:00:11", name: "Private Wi-Fi Device", port: .wifi24(ssidIndex: 1), rssi: -96)
         let result = NetworkInsightsAnalyzer.diagnose(
             snapshot: RouterSnapshot(rxPowerDbm: -15),
-            devices: [weak, weakest, blocked, offline],
-            blockedDevices: [BlockedRouterDevice(domain: "blocked", mac: blocked.mac, ssidName: "SSID 1")],
-            wifi: WifiState(),
-            speedTest: nil
+            devices: [lowSignal],
+            blockedDevices: [],
+            wifi: WifiState(
+                radios: [
+                    WifiRadio(index: 1, band: "2.4GHz", enabled: true),
+                    WifiRadio(index: 2, band: "5GHz", enabled: true)
+                ],
+                networks: [
+                    WifiNetwork(ssidIndex: 1, name: "Home Sweet WiFi", band: "2.4GHz", enabled: true),
+                    WifiNetwork(ssidIndex: 5, name: "Meta", band: "5GHz", enabled: true)
+                ]
+            ),
+            speedTest: healthySpeedTest()
         )
 
-        XCTAssertEqual(result.weakClients.map(\.name), ["Weakest", "Weak"])
-        XCTAssertEqual(result.weakClients.map(\.rssiDbm), [-88, -75])
-        XCTAssertTrue(result.actions.contains(.inspectWeakClients))
+        XCTAssertEqual(result.checks.count, 3)
+        XCTAssertEqual(result.severity, .optimal)
+        XCTAssertFalse(result.hasWiFiBandConcern)
+        XCTAssertFalse(result.summary.localizedCaseInsensitiveContains("weak"))
+        XCTAssertFalse(result.actions.contains(.reviewWiFiBands))
+    }
+
+    func testMissingRouterReadingsRemainPendingInsteadOfAttention() {
+        let result = NetworkInsightsAnalyzer.diagnose(
+            snapshot: RouterSnapshot(),
+            devices: [],
+            blockedDevices: [],
+            wifi: WifiState(),
+            speedTest: healthySpeedTest()
+        )
+
+        XCTAssertEqual(result.severity, .pending)
+        XCTAssertEqual(result.checks.count, 3)
+        XCTAssertFalse(result.actions.contains(.reviewWiFiBands))
+    }
+
+    func testCrowdingRequiresAtLeastFourOnlineClientsAnd75PercentOn24GHz() {
+        let devices = (1...3).map { index in
+            makeDevice(
+                mac: String(format: "00:00:00:00:01:%02x", index),
+                name: "Phone \(index)",
+                port: .wifi24(ssidIndex: index)
+            )
+        }
+        let result = NetworkInsightsAnalyzer.diagnose(
+            snapshot: RouterSnapshot(rxPowerDbm: -15),
+            devices: devices,
+            blockedDevices: [],
+            wifi: WifiState(
+                radios: [
+                    WifiRadio(index: 1, band: "2.4GHz", enabled: true),
+                    WifiRadio(index: 2, band: "5GHz", enabled: true)
+                ],
+                networks: [WifiNetwork(ssidIndex: 5, name: "Meta", band: "5GHz", enabled: true)]
+            ),
+            speedTest: healthySpeedTest()
+        )
+
+        XCTAssertFalse(result.hasWiFiBandConcern)
+        XCTAssertEqual(result.severity, .optimal)
+    }
+
+    func testDegradedSpeedTestRaisesLatencyAndSpeedCheck() {
+        let result = NetworkInsightsAnalyzer.diagnose(
+            snapshot: RouterSnapshot(rxPowerDbm: -15),
+            devices: [],
+            blockedDevices: [],
+            wifi: WifiState(
+                radios: [WifiRadio(index: 2, band: "5GHz", enabled: true)],
+                networks: [WifiNetwork(ssidIndex: 5, name: "Meta", band: "5GHz", enabled: true)]
+            ),
+            speedTest: SpeedTestResult(pingMs: 120, jitterMs: 35, downloadMbps: 9, uploadMbps: 4)
+        )
+
+        let speedCheck = result.checks.first { $0.title == "Latency & Speed" }
+        XCTAssertEqual(speedCheck?.status, .warning)
+        XCTAssertTrue(speedCheck?.detail.contains("high ping") == true)
+        XCTAssertEqual(result.severity, .warning)
     }
 
     func testUsageForecastProjectionAndSpikeDetection() throws {
@@ -127,9 +199,26 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
             snapshot: RouterSnapshot(rxPowerDbm: rx),
             devices: [],
             blockedDevices: [],
-            wifi: WifiState(),
-            speedTest: nil
+            wifi: healthyWifiState(),
+            speedTest: healthySpeedTest()
         )
+    }
+
+    private func healthyWifiState() -> WifiState {
+        WifiState(
+            radios: [
+                WifiRadio(index: 1, band: "2.4GHz", enabled: true),
+                WifiRadio(index: 2, band: "5GHz", enabled: true)
+            ],
+            networks: [
+                WifiNetwork(ssidIndex: 1, name: "Home Sweet WiFi", band: "2.4GHz", enabled: true),
+                WifiNetwork(ssidIndex: 5, name: "Meta", band: "5GHz", enabled: true)
+            ]
+        )
+    }
+
+    private func healthySpeedTest() -> SpeedTestResult {
+        SpeedTestResult(pingMs: 24, jitterMs: 4, downloadMbps: 100, uploadMbps: 20)
     }
 
     private func makeDevice(

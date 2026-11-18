@@ -18,7 +18,6 @@ public enum AppTab: Hashable, Sendable {
 public enum ClientsFilter: String, CaseIterable, Hashable, Sendable {
     case all
     case online
-    case weak
     case offline
     case blocked
 
@@ -26,7 +25,6 @@ public enum ClientsFilter: String, CaseIterable, Hashable, Sendable {
         switch self {
         case .all: "All"
         case .online: "Online"
-        case .weak: "Weak"
         case .offline: "Offline"
         case .blocked: "Blocked"
         }

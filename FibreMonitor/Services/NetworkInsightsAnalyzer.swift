@@ -6,12 +6,14 @@ import FoundationModels
 
 enum InsightSeverity: String, Equatable, Sendable {
     case optimal
+    case pending
     case warning
     case critical
 
     var label: String {
         switch self {
         case .optimal: "Optimal"
+        case .pending: "Checking"
         case .warning: "Needs Attention"
         case .critical: "Action Needed"
         }
@@ -34,7 +36,6 @@ struct ConnectionDiagnosisCheck: Equatable, Identifiable, Sendable {
 }
 
 enum ConnectionDiagnosisAction: String, CaseIterable, Equatable, Sendable, Identifiable {
-    case inspectWeakClients
     case reviewWiFiBands
     case runSpeedTest
 
@@ -42,7 +43,6 @@ enum ConnectionDiagnosisAction: String, CaseIterable, Equatable, Sendable, Ident
 
     var title: String {
         switch self {
-        case .inspectWeakClients: "Inspect Weak Clients"
         case .reviewWiFiBands: "Review Wi-Fi Bands"
         case .runSpeedTest: "Run Speed Test"
         }
@@ -50,18 +50,10 @@ enum ConnectionDiagnosisAction: String, CaseIterable, Equatable, Sendable, Ident
 
     var symbol: String {
         switch self {
-        case .inspectWeakClients: "wifi.exclamationmark"
         case .reviewWiFiBands: "wifi"
         case .runSpeedTest: "speedometer"
         }
     }
-}
-
-struct WeakClientSignal: Equatable, Sendable, Identifiable {
-    var id: String { mac.lowercased() }
-    let mac: String
-    let name: String
-    let rssiDbm: Double
 }
 
 struct ConnectionDiagnosis: Sendable {
@@ -71,7 +63,6 @@ struct ConnectionDiagnosis: Sendable {
     let summary: String
     let checks: [ConnectionDiagnosisCheck]
     let actions: [ConnectionDiagnosisAction]
-    let weakClients: [WeakClientSignal]
     let hasWiFiBandConcern: Bool
 }
 
@@ -98,7 +89,6 @@ enum NetworkInsightsAnalyzer {
     static func diagnose(
         snapshot: RouterSnapshot,
         devices: [OntDevice],
-        deviceNames: [String: String] = [:],
         blockedDevices: [BlockedRouterDevice],
         wifi: WifiState,
         speedTest: SpeedTestResult?
@@ -110,23 +100,14 @@ enum NetworkInsightsAnalyzer {
         let opticalDetail: String
         let opticalHint: String?
         if let rx = snapshot.rxPowerDbm {
-            if (-24.0...(-8.0)).contains(rx) {
-                opticalStatus = .optimal
-                opticalDetail = String(format: "Optical RX is healthy at %.2f dBm.", rx)
-                opticalHint = nil
-            } else if rx < -24.0 && rx > -27.0 {
-                opticalStatus = .warning
-                opticalDetail = String(format: "Optical RX is marginal at %.2f dBm; monitor the fibre connection.", rx)
-                opticalHint = String(format: "Optical RX is marginal at %.1f dBm", rx)
-            } else if rx <= -27.0 || rx >= -7.0 {
+            if rx <= -27.0 || rx >= -7.0 {
                 opticalStatus = .critical
                 opticalDetail = String(format: "Optical RX is weak at %.2f dBm; inspect the fibre path and connectors.", rx)
                 opticalHint = String(format: "Optical RX is weak at %.1f dBm", rx)
             } else {
-                // The unspecified -8...-7 dBm edge is treated as marginal rather than healthy.
-                opticalStatus = .warning
-                opticalDetail = String(format: "Optical RX is outside the preferred range at %.2f dBm.", rx)
-                opticalHint = String(format: "Optical RX needs a closer look at %.1f dBm", rx)
+                opticalStatus = .optimal
+                opticalDetail = String(format: "Optical RX is healthy at %.2f dBm.", rx)
+                opticalHint = nil
             }
         } else {
             opticalStatus = .pending
@@ -138,15 +119,8 @@ enum NetworkInsightsAnalyzer {
         let active5Names = activeSSIDNames(in: wifi, band: .five)
         let fiveGEnabled = bandEnabled(in: wifi, band: .five)
         let wifi24Clients = onlineDevices.filter { wifiBand(for: $0.port) == .twoPointFour }
-        let crowdThresholdReached: Bool
-        if onlineDevices.count >= 4 {
-            crowdThresholdReached = Double(wifi24Clients.count) / Double(onlineDevices.count) >= 0.75
-                || (onlineDevices.count >= 3 && Double(wifi24Clients.count) / Double(onlineDevices.count) >= 0.60)
-        } else if onlineDevices.count >= 3 {
-            crowdThresholdReached = Double(wifi24Clients.count) / Double(onlineDevices.count) >= 0.60
-        } else {
-            crowdThresholdReached = false
-        }
+        let crowdThresholdReached = onlineDevices.count >= 4
+            && Double(wifi24Clients.count) / Double(onlineDevices.count) >= 0.75
         let isFiveGOff = fiveGEnabled == false
         let hasWiFiBandConcern = isFiveGOff || crowdThresholdReached
 
@@ -178,44 +152,21 @@ enum NetworkInsightsAnalyzer {
             wifiHint = nil
         }
 
-        let weakClients = onlineDevices.compactMap { device -> WeakClientSignal? in
-            guard let rssi = device.rssiDbm, rssi <= -75 else { return nil }
-            return WeakClientSignal(
-                mac: device.mac,
-                name: deviceNames[normalizedMAC(device.mac)] ?? device.displayName,
-                rssiDbm: rssi
-            )
-        }
-        .sorted { lhs, rhs in
-            if lhs.rssiDbm != rhs.rssiDbm { return lhs.rssiDbm < rhs.rssiDbm }
-            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-        }
-
-        let weakStatus: InsightCheckStatus = weakClients.isEmpty ? (onlineDevices.isEmpty ? .pending : .optimal) : .warning
-        let weakDetail: String
-        if weakClients.isEmpty {
-            weakDetail = onlineDevices.isEmpty
-                ? "No online client signal readings are available yet."
-                : "No online non-blocked clients are reporting signal at or below -75 dBm."
-        } else {
-            let affected = weakClients.prefix(2).map {
-                "\($0.name) (\(Int($0.rssiDbm.rounded())) dBm)"
-            }.joined(separator: ", ")
-            let additional = weakClients.count > 2 ? " and \(weakClients.count - 2) more" : ""
-            weakDetail = "Weak Wi-Fi signal: \(affected)\(additional)."
-        }
-
         let speedStatus: InsightCheckStatus
         let speedDetail: String
         if let speedTest {
-            speedStatus = .optimal
-            speedDetail = String(
-                format: "Latest test: %.0f ms ping, %.0f ms jitter, %.1f Mbps down and %.1f Mbps up.",
+            let degradedReasons = degradedSpeedReasons(for: speedTest)
+            speedStatus = degradedReasons.isEmpty ? .optimal : .warning
+            let result = String(
+                format: "%.0f ms ping, %.0f ms jitter, %.1f Mbps down and %.1f Mbps up.",
                 speedTest.pingMs,
                 speedTest.jitterMs,
                 speedTest.downloadMbps,
                 speedTest.uploadMbps
             )
+            speedDetail = degradedReasons.isEmpty
+                ? "Latest test: \(result)"
+                : "Degraded test (\(degradedReasons.joined(separator: ", "))): \(result)"
         } else {
             speedStatus = .pending
             speedDetail = "Not tested yet · Pending"
@@ -224,15 +175,16 @@ enum NetworkInsightsAnalyzer {
         let checks = [
             ConnectionDiagnosisCheck(title: "Optical Fibre Line", status: opticalStatus, detail: opticalDetail, symbol: "waveform.path.ecg"),
             ConnectionDiagnosisCheck(title: "Wi-Fi Band Balance", status: wifiStatus, detail: wifiDetail, symbol: "wifi"),
-            ConnectionDiagnosisCheck(title: "Weak Client Signals", status: weakStatus, detail: weakDetail, symbol: "wifi.exclamationmark"),
             ConnectionDiagnosisCheck(title: "Latency & Speed", status: speedStatus, detail: speedDetail, symbol: "speedometer")
         ]
 
         let severity: InsightSeverity
         if opticalStatus == .critical {
             severity = .critical
-        } else if opticalStatus == .warning || hasWiFiBandConcern || !weakClients.isEmpty || opticalStatus == .pending {
+        } else if hasWiFiBandConcern || speedStatus == .warning {
             severity = .warning
+        } else if opticalStatus == .pending || wifiStatus == .pending || speedStatus == .pending {
+            severity = .pending
         } else {
             severity = .optimal
         }
@@ -240,6 +192,7 @@ enum NetworkInsightsAnalyzer {
         let verdictTitle: String
         switch severity {
         case .optimal: verdictTitle = "Your connection looks healthy"
+        case .pending: verdictTitle = "Waiting for router readings"
         case .warning: verdictTitle = "Your connection needs attention"
         case .critical: verdictTitle = "Action needed on your fibre line"
         }
@@ -251,21 +204,21 @@ enum NetworkInsightsAnalyzer {
             inlineHint = "5 GHz is off"
         } else if let wifiHint {
             inlineHint = wifiHint
-        } else if let weakest = weakClients.first {
-            inlineHint = "\(weakest.name) has weak signal at \(Int(weakest.rssiDbm.rounded())) dBm"
+        } else if speedStatus == .warning {
+            inlineHint = "Speed test results are degraded"
         } else if opticalStatus == .pending {
             inlineHint = "Waiting for fibre reading"
+        } else if speedTest == nil {
+            inlineHint = "Run a speed test to check latency and throughput"
         } else {
             inlineHint = "Fibre and Wi-Fi readings look healthy"
         }
 
         var summaryParts = [opticalDetail]
         if wifiStatus == .warning { summaryParts.append(wifiDetail) }
-        if !weakClients.isEmpty { summaryParts.append(weakDetail) }
-        if speedTest == nil { summaryParts.append(speedDetail) }
+        if speedStatus == .warning || speedStatus == .pending { summaryParts.append(speedDetail) }
 
         var actions: [ConnectionDiagnosisAction] = []
-        if !weakClients.isEmpty { actions.append(.inspectWeakClients) }
         if hasWiFiBandConcern { actions.append(.reviewWiFiBands) }
         if speedTest == nil { actions.append(.runSpeedTest) }
 
@@ -276,9 +229,17 @@ enum NetworkInsightsAnalyzer {
             summary: summaryParts.joined(separator: " "),
             checks: checks,
             actions: actions,
-            weakClients: weakClients,
             hasWiFiBandConcern: hasWiFiBandConcern
         )
+    }
+
+    private static func degradedSpeedReasons(for result: SpeedTestResult) -> [String] {
+        var reasons: [String] = []
+        if result.pingMs >= 100 { reasons.append("high ping") }
+        if result.jitterMs >= 30 { reasons.append("high jitter") }
+        if result.downloadMbps < 10 { reasons.append("low download speed") }
+        if result.uploadMbps < 5 { reasons.append("low upload speed") }
+        return reasons
     }
 
     static func forecast(

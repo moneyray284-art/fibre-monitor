@@ -29,9 +29,7 @@ public struct DashboardView: View {
                             viewModel: viewModel,
                             settings: settings,
                             testDownloadMbps: speedTestDownloadMbps,
-                            testUploadMbps: speedTestUploadMbps,
-                            diagnosis: connectionDiagnosis,
-                            openDiagnosis: { showConnectionDiagnosis = true }
+                            testUploadMbps: speedTestUploadMbps
                         )
 
                         if !viewModel.isConnectedToWiFi {
@@ -68,6 +66,10 @@ public struct DashboardView: View {
                             testUploadMbps: $speedTestUploadMbps,
                             startRequested: $startSpeedTestRequested,
                             onCompleted: { latestSpeedTestResult = $0 }
+                        )
+                        ConnectionCheckCard(
+                            diagnosis: connectionDiagnosis,
+                            openDiagnosis: { showConnectionDiagnosis = true }
                         )
                     }
                 }
@@ -141,9 +143,6 @@ public struct DashboardView: View {
         return NetworkInsightsAnalyzer.diagnose(
             snapshot: snapshot,
             devices: viewModel.devices,
-            deviceNames: Dictionary(
-                uniqueKeysWithValues: viewModel.devices.map { ($0.mac.lowercased().filter(\.isHexDigit), viewModel.name(for: $0)) }
-            ),
             blockedDevices: viewModel.blockedDevices,
             wifi: viewModel.wifi,
             speedTest: latestSpeedTestResult
@@ -155,9 +154,6 @@ public struct DashboardView: View {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 280_000_000)
             switch action {
-            case .inspectWeakClients:
-                viewModel.clientsFilter = .weak
-                viewModel.selectedTab = .clients
             case .reviewWiFiBands:
                 viewModel.selectedTab = .wifi
             case .runSpeedTest:
@@ -199,8 +195,6 @@ private struct RouterHeaderCard: View {
     @ObservedObject var settings: SettingsStore
     let testDownloadMbps: Double?
     let testUploadMbps: Double?
-    let diagnosis: ConnectionDiagnosis
-    let openDiagnosis: () -> Void
     @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
@@ -265,23 +259,6 @@ private struct RouterHeaderCard: View {
                 downloadOverrideMbps: testDownloadMbps,
                 uploadOverrideMbps: testUploadMbps
             )
-
-            HStack(spacing: 8) {
-                Image(systemName: diagnosis.severity == .critical ? "xmark.octagon.fill" : (diagnosis.severity == .warning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(diagnosis.severity == .critical ? Color.red : (diagnosis.severity == .warning ? Color.orange : Color.green))
-                    .accessibilityHidden(true)
-                Text("\(diagnosis.severity.label) · \(diagnosis.inlineHint)")
-                    .font(.caption)
-                    .linkWaveText(.secondary)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Diagnose", action: openDiagnosis)
-                    .font(.caption.weight(.semibold))
-                    .frame(minHeight: 44)
-                    .liquidGlassSmallButton()
-            }
-            .accessibilityElement(children: .contain)
         }
         .linkWaveGlassCard()
         .accessibilityElement(children: .combine)
@@ -319,6 +296,57 @@ private struct RouterHeaderCard: View {
     private var wifiOnline: Bool {
         let reportedStates = viewModel.wifi.radios.map(\.enabled) + viewModel.wifi.networks.map(\.enabled)
         return reportedStates.isEmpty ? viewModel.isConnected : reportedStates.contains(true)
+    }
+}
+
+private struct ConnectionCheckCard: View {
+    let diagnosis: ConnectionDiagnosis
+    let openDiagnosis: () -> Void
+    @Environment(\.linkWaveThemePalette) private var palette
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: statusSymbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(statusColor)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Connection Check · \(diagnosis.severity.label)")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(diagnosis.inlineHint)
+                    .font(.caption)
+                    .linkWaveText(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button("Diagnose", action: openDiagnosis)
+                .font(.caption.weight(.semibold))
+                .frame(minHeight: 40)
+                .liquidGlassSmallButton()
+        }
+        .linkWaveGlassCard(padding: 14)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var statusSymbol: String {
+        switch diagnosis.severity {
+        case .optimal: "checkmark.circle.fill"
+        case .pending: "clock"
+        case .warning: "exclamationmark.triangle.fill"
+        case .critical: "xmark.octagon.fill"
+        }
+    }
+
+    private var statusColor: Color {
+        switch diagnosis.severity {
+        case .optimal: .green
+        case .pending: palette.textSecondary.color
+        case .warning: .orange
+        case .critical: .red
+        }
     }
 }
 
