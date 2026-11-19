@@ -50,7 +50,9 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
         XCTAssertTrue(bandCheck.detail.contains("‘Home Sweet WiFi’"))
         XCTAssertTrue(bandCheck.detail.contains("‘Meta’"))
         XCTAssertTrue(bandCheck.detail.contains("‘Speed Matters’"))
-        XCTAssertTrue(result.actions.contains(.reviewWiFiBands))
+        XCTAssertEqual(bandCheck.action, .reviewWiFiBands)
+        XCTAssertEqual(result.checks.first { $0.title == "Latency & Speed" }?.action, .runSpeedTest)
+        XCTAssertNil(result.checks.first { $0.title == "Optical Fibre Line" }?.action)
     }
 
     func testClientRSSIAloneDoesNotCreateDiagnosisAlertOrCheck() {
@@ -76,7 +78,6 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
         XCTAssertEqual(result.severity, .optimal)
         XCTAssertFalse(result.hasWiFiBandConcern)
         XCTAssertFalse(result.summary.localizedCaseInsensitiveContains("weak"))
-        XCTAssertFalse(result.actions.contains(.reviewWiFiBands))
     }
 
     func testMissingRouterReadingsRemainPendingInsteadOfAttention() {
@@ -90,7 +91,6 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
 
         XCTAssertEqual(result.severity, .pending)
         XCTAssertEqual(result.checks.count, 3)
-        XCTAssertFalse(result.actions.contains(.reviewWiFiBands))
     }
 
     func testCrowdingRequiresAtLeastFourOnlineClientsAnd75PercentOn24GHz() {

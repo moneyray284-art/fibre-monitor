@@ -16,33 +16,17 @@ struct DiagnoseConnectionSheet: View {
 
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(diagnosis.checks.enumerated()), id: \.element.id) { index, check in
-                            DiagnosisCheckRow(check: check)
+                            DiagnosisCheckRow(check: check, perform: perform)
                             if index < diagnosis.checks.count - 1 {
                                 Divider().padding(.leading, 42)
                             }
                         }
                     }
                     .linkWaveGlassCard(padding: 4)
-
-                    if !diagnosis.actions.isEmpty {
-                        VStack(spacing: 9) {
-                            ForEach(diagnosis.actions) { action in
-                                Button {
-                                    perform(action)
-                                } label: {
-                                    Label(action.title, systemImage: action.symbol)
-                                        .font(.subheadline.weight(.semibold))
-                                        .frame(maxWidth: .infinity, minHeight: 44)
-                                }
-                                .liquidGlassActionButton(tint: palette.textAccent)
-                                .accessibilityHint(actionHint(for: action))
-                            }
-                        }
-                    }
                 }
                 .padding(.horizontal)
                 .padding(.top, 12)
-                .padding(.bottom, 24)
+                .padding(.bottom, 12)
             }
             .background { LiquidGlassBackground() }
             .navigationTitle("Connection Diagnosis")
@@ -98,19 +82,29 @@ struct DiagnoseConnectionSheet: View {
         }
     }
 
-    private func actionHint(for action: ConnectionDiagnosisAction) -> String {
-        switch action {
-        case .reviewWiFiBands: "Opens Wi-Fi settings to review the active bands."
-        case .runSpeedTest: "Closes this sheet and starts a speed test on Home."
-        }
-    }
 }
 
 private struct DiagnosisCheckRow: View {
     let check: ConnectionDiagnosisCheck
+    let perform: (ConnectionDiagnosisAction) -> Void
     @Environment(\.linkWaveThemePalette) private var palette
 
+    @ViewBuilder
     var body: some View {
+        if let action = check.action {
+            Button {
+                perform(action)
+            } label: {
+                rowContent(action: action)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(actionHint(for: action))
+        } else {
+            rowContent(action: nil)
+        }
+    }
+
+    private func rowContent(action: ConnectionDiagnosisAction?) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: check.symbol)
                 .font(.subheadline.weight(.semibold))
@@ -120,24 +114,51 @@ private struct DiagnosisCheckRow: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(check.title)
-                        .font(.subheadline.weight(.semibold))
-                    Spacer(minLength: 6)
-                    Image(systemName: statusSymbol)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(statusColor)
-                        .accessibilityLabel(statusLabel)
-                }
+                Text(check.title)
+                    .font(.subheadline.weight(.semibold))
                 Text(check.detail)
                     .font(.caption)
                     .linkWaveText(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let action {
+                HStack(spacing: 4) {
+                    Image(systemName: statusSymbol)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(statusColor)
+                        .accessibilityLabel(statusLabel)
+                    Text(action.rowLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.textAccent)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(palette.textAccent)
+                        .accessibilityHidden(true)
+                }
+                .fixedSize()
+                .padding(.top, 3)
+            } else {
+                Image(systemName: statusSymbol)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(statusColor)
+                    .accessibilityLabel(statusLabel)
+                    .padding(.top, 3)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 11)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+    }
+
+    private func actionHint(for action: ConnectionDiagnosisAction) -> String {
+        switch action {
+        case .reviewWiFiBands: "Dismisses this sheet and opens Wi-Fi settings."
+        case .runSpeedTest: "Dismisses this sheet and starts a speed test on Home."
+        }
     }
 
     private var statusSymbol: String {

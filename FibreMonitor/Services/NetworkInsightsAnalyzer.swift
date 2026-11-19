@@ -33,25 +33,17 @@ struct ConnectionDiagnosisCheck: Equatable, Identifiable, Sendable {
     let status: InsightCheckStatus
     let detail: String
     let symbol: String
+    let action: ConnectionDiagnosisAction?
 }
 
-enum ConnectionDiagnosisAction: String, CaseIterable, Equatable, Sendable, Identifiable {
+enum ConnectionDiagnosisAction: String, Equatable, Sendable {
     case reviewWiFiBands
     case runSpeedTest
 
-    var id: String { rawValue }
-
-    var title: String {
+    var rowLabel: String {
         switch self {
-        case .reviewWiFiBands: "Review Wi-Fi Bands"
-        case .runSpeedTest: "Run Speed Test"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .reviewWiFiBands: "wifi"
-        case .runSpeedTest: "speedometer"
+        case .reviewWiFiBands: "Wi-Fi"
+        case .runSpeedTest: "Run Test"
         }
     }
 }
@@ -62,7 +54,6 @@ struct ConnectionDiagnosis: Sendable {
     let inlineHint: String
     let summary: String
     let checks: [ConnectionDiagnosisCheck]
-    let actions: [ConnectionDiagnosisAction]
     let hasWiFiBandConcern: Bool
 }
 
@@ -173,9 +164,9 @@ enum NetworkInsightsAnalyzer {
         }
 
         let checks = [
-            ConnectionDiagnosisCheck(title: "Optical Fibre Line", status: opticalStatus, detail: opticalDetail, symbol: "waveform.path.ecg"),
-            ConnectionDiagnosisCheck(title: "Wi-Fi Band Balance", status: wifiStatus, detail: wifiDetail, symbol: "wifi"),
-            ConnectionDiagnosisCheck(title: "Latency & Speed", status: speedStatus, detail: speedDetail, symbol: "speedometer")
+            ConnectionDiagnosisCheck(title: "Optical Fibre Line", status: opticalStatus, detail: opticalDetail, symbol: "waveform.path.ecg", action: nil),
+            ConnectionDiagnosisCheck(title: "Wi-Fi Band Balance", status: wifiStatus, detail: wifiDetail, symbol: "wifi", action: .reviewWiFiBands),
+            ConnectionDiagnosisCheck(title: "Latency & Speed", status: speedStatus, detail: speedDetail, symbol: "speedometer", action: .runSpeedTest)
         ]
 
         let severity: InsightSeverity
@@ -218,17 +209,12 @@ enum NetworkInsightsAnalyzer {
         if wifiStatus == .warning { summaryParts.append(wifiDetail) }
         if speedStatus == .warning || speedStatus == .pending { summaryParts.append(speedDetail) }
 
-        var actions: [ConnectionDiagnosisAction] = []
-        if hasWiFiBandConcern { actions.append(.reviewWiFiBands) }
-        if speedTest == nil { actions.append(.runSpeedTest) }
-
         return ConnectionDiagnosis(
             severity: severity,
             verdictTitle: verdictTitle,
             inlineHint: inlineHint,
             summary: summaryParts.joined(separator: " "),
             checks: checks,
-            actions: actions,
             hasWiFiBandConcern: hasWiFiBandConcern
         )
     }
@@ -433,6 +419,7 @@ enum ConnectionDiagnosisNarrative {
         guard SystemLanguageModel.default.availability == .available else { return nil }
         let session = LanguageModelSession(instructions: """
         Rewrite the supplied router diagnosis as one concise, calm plain-English summary. Use only the supplied facts, names, and numbers. Do not add, change, round, or infer metrics. Do not change severity or recommendations. Return one sentence only.
+        Do not include individual client names, MAC or IP addresses, or client RSSI readings.
         """)
         let facts = "Severity: \(diagnosis.severity.label). Summary: \(diagnosis.summary)"
 
