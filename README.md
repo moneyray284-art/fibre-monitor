@@ -18,12 +18,14 @@ Open LinkWave, choose **Add Router**, and enter your router credentials. Auto-de
 
 ## Features
 
-- **Home:** router connection state, live download and upload rates while LinkWave is open, optical receive power, and an internet speed test.
+- **Home:** router connection state, live download and upload rates while LinkWave is open, optical receive power, and an internet speed test. The **Connection Check** card below Speed Test summarizes fibre, Wi-Fi band balance, and latency/speed status.
 - **Usage:** household download and upload totals from the router, monthly totals, and a calendar-month history chart.
-- **Clients:** connected-device list with online/offline filters, search, device details, and available block/unblock controls.
+- **Clients:** connected-device list with All, Online, Offline, and Blocked filters, search, device details, and available block/unblock controls. Online devices can be sorted by Default, Strongest, or Lowest RSSI, with neutral Strong/Fair/Far signal labels.
 - **Wi-Fi:** 2.4 GHz and 5 GHz controls, network details, QR sharing, and Wi-Fi credential editing for supported security modes.
 - **Router profiles:** store multiple router profiles and switch between them.
 - **Appearance:** light, dark, or system theme with selectable accent colors and app icons.
+
+Connection Diagnosis shows three checks: Optical Fibre Line, Wi-Fi Band Balance, and Latency & Speed. Wi-Fi band balance can identify 2.4 GHz crowding and names the active 2.4 GHz and 5 GHz networks. Tapping **Wi-Fi** opens Wi-Fi settings; tapping **Run Test** starts Speed Test on Home. Client RSSI readings do not create connection alerts.
 
 Usage totals come from the router's counters. Live speed readings update while the app is in the foreground. LinkWave does not estimate this iPhone's personal data usage or provide a Home Screen widget in this release.
 

@@ -1,15 +1,20 @@
 # LinkWave v2.3.0
 
-This release adds a short, silent launch animation styled to match the LinkWave logo and updates the setup and installation guide.
+This update improves the Home connection summary, diagnosis sheet, and connected-device list.
 
-## What's included
+## What's new
 
-- A complete vertical LinkWave wave mark and matching wordmark on launch.
-- A smoother, shorter transition into Home.
-- Household usage remains based on router counters, with existing local usage history preserved.
-- The unreliable Home Screen widget and estimated Personal Usage card have been removed.
-- Updated README with setup, privacy, and direct IPA download instructions.
+- The Connection Check card now sits below Speed Test on Home.
+- Connection Diagnosis contains three checks: Optical Fibre Line, Wi-Fi Band Balance, and Latency & Speed.
+- The Wi-Fi check names active 2.4 GHz and 5 GHz networks and flags crowding when at least 75% of four or more online devices use 2.4 GHz.
+- Tap the Wi-Fi row to open Wi-Fi settings or Run Test to start a speed test on Home.
+- Clients can be sorted by Default, Strongest, or Lowest RSSI, with neutral Strong/Fair/Far labels.
+- Client RSSI readings no longer trigger connection alerts or appear in diagnostic summaries.
 
-## Install
+## Included features
 
-This is an unsigned IPA. Install it with SideStore, AltStore, or Sideloadly. Download the `.ipa` directly; no ZIP extraction is needed.
+- Live router rates, optical receive power, and an internet speed test.
+- Router-based household usage totals and calendar-month history.
+- Online/offline/blocked client filters, search, device details, and available block/unblock controls.
+- Wi-Fi band controls, network details, QR sharing, and supported credential editing.
+- Multiple router profiles, selectable appearance colors, and app icons.
