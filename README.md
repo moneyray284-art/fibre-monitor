@@ -4,7 +4,7 @@ LinkWave is a native iPhone app for monitoring Huawei fibre ONTs, including the 
 
 ## Download
 
-**[Download the latest LinkWave IPA](https://github.com/moneyray284-art/fibre-monitor/releases/latest/download/LinkWave-v2.3.0.ipa)**
+**[Download the latest LinkWave IPA](https://github.com/moneyray284-art/fibre-monitor/releases/latest/download/LinkWave-v2.3.1.ipa)**
 
 The IPA is unsigned. Install it with SideStore, AltStore, or Sideloadly; it is not an App Store install. You can download the `.ipa` directly from the GitHub Release without extracting a ZIP.
 
@@ -35,6 +35,6 @@ Router credentials are stored in the iOS Keychain. Router monitoring uses the lo
 
 ## Release
 
-Current version: **2.3.0 (build 8)**.
+Current version: **2.3.1 (build 9)**.
 
 Download the IPA from [GitHub Releases](https://github.com/moneyray284-art/fibre-monitor/releases). Source code and the iOS build workflow are in this repository.

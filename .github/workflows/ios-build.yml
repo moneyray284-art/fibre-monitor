@@ -161,6 +161,6 @@ jobs:
           gh release create "$TAG" "$LINKWAVE_IPA_PATH" \
             --target "$GITHUB_SHA" \
             --title "LinkWave $TAG" \
-            --notes-file RELEASE_NOTES_v2.3.0.md \
+            --notes-file "RELEASE_NOTES_v${LINKWAVE_VERSION}.md" \
             --draft=false \
             --prerelease=false
