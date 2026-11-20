@@ -250,11 +250,13 @@ enum NetworkInsightsAnalyzer {
         )
 
         let activeDays = days.filter { $0.totalBytes != nil }
-        let completed = activeDays.filter {
-            calendar.startOfDay(for: $0.date) < today && !$0.isPartial
+        let pastReadingDays = activeDays.filter {
+            calendar.startOfDay(for: $0.date) < today && ($0.totalBytes ?? 0) > 0
         }
-        let completedGB = completed.compactMap { totalGB($0.totalBytes) }
-        let average = completedGB.count >= 2 ? completedGB.reduce(0, +) / Double(completedGB.count) : nil
+        let completedPastDays = pastReadingDays.filter { !$0.isPartial }
+        let forecastDays = completedPastDays.count >= 3 ? completedPastDays : pastReadingDays
+        let forecastGB = forecastDays.compactMap { totalGB($0.totalBytes) }
+        let average = forecastGB.count >= 2 ? forecastGB.reduce(0, +) / Double(forecastGB.count) : nil
 
         let remainingDays: Int
         if calendar.isDate(monthStart, equalTo: currentMonthStart, toGranularity: .month),
@@ -266,7 +268,7 @@ enum NetworkInsightsAnalyzer {
         }
 
         let monthToDateGB = activeDays.compactMap { totalGB($0.totalBytes) }.reduce(0, +)
-        let projected = completed.count >= 3 ? monthToDateGB + (average ?? 0) * Double(remainingDays) : nil
+        let projected = forecastDays.count >= 2 ? monthToDateGB + (average ?? 0) * Double(remainingDays) : nil
 
         let peak = activeDays.compactMap { point -> UsageForecastDay? in
             guard let gb = totalGB(point.totalBytes) else { return nil }
@@ -289,12 +291,17 @@ enum NetworkInsightsAnalyzer {
             spikes = []
         }
 
-        let hasEnoughData = completed.count >= 3
-        let paceNote = paceDescription(completed: completed, averageGB: average, hasEnoughData: hasEnoughData, calendar: calendar)
+        let hasEnoughData = completedPastDays.count >= 3
+        let paceNote = paceDescription(
+            completed: completedPastDays,
+            fallbackDays: forecastDays,
+            averageGB: average,
+            hasEnoughData: hasEnoughData
+        )
 
         return UsageForecast(
             activeReadingDayCount: activeDays.count,
-            completedDayCount: completed.count,
+            completedDayCount: completedPastDays.count,
             remainingDays: remainingDays,
             dailyAverageGb: average,
             projectedMonthGb: projected,
@@ -305,7 +312,7 @@ enum NetworkInsightsAnalyzer {
         )
     }
 
-    private static func makeMonthPoints(
+    static func makeMonthPoints(
         monthStart: Date,
         historyByDay: [Date: DailyUsagePoint],
         todayDownloadBytes: UInt64,
@@ -326,7 +333,11 @@ enum NetworkInsightsAnalyzer {
                     isPartial: true
                 )
             }
-            return historyByDay[key]
+            guard let saved = historyByDay[key] else { return nil }
+            guard key == today else { return saved }
+            var current = saved
+            current.isPartial = true
+            return current
         }
     }
 
@@ -337,12 +348,15 @@ enum NetworkInsightsAnalyzer {
 
     private static func paceDescription(
         completed: [DailyUsagePoint],
+        fallbackDays: [DailyUsagePoint],
         averageGB: Double?,
-        hasEnoughData: Bool,
-        calendar: Calendar
+        hasEnoughData: Bool
     ) -> String {
         guard hasEnoughData, let averageGB, averageGB > 0 else {
-            return "Need 3 completed days to compare your recent pace."
+            if fallbackDays.count >= 2 {
+                return "Based on \(fallbackDays.count) recorded past days."
+            }
+            return "Need 2 recorded past days to show a forecast."
         }
         let latestThree = completed.sorted { $0.date < $1.date }.suffix(3)
         let recentGB = latestThree.compactMap { totalGB($0.totalBytes) }

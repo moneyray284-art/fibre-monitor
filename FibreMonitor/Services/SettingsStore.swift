@@ -305,6 +305,7 @@ public final class SettingsStore: ObservableObject {
         var lastSuccessfulSyncAt: Date?
         var observedDayKeys: [String]?
         var incompleteDayKeys: [String]?
+        var partialTrackingVersion: Int?
         var lastConnectionObservationAt: Date?
         var connectionInterruptions: [ConnectionInterruption]?
     }
@@ -670,8 +671,8 @@ public final class SettingsStore: ObservableObject {
         refreshDataUsageSummary()
     }
 
-    /// Records cumulative WAN counters. Counter deltas can catch up after a pause, but a long
-    /// interval cannot be split accurately across days, so every affected day is marked incomplete.
+    /// Records cumulative WAN counters. Counter deltas can catch up after a pause, but a gap of
+    /// at least 36 hours cannot be split accurately across the affected days.
     public func recordTrafficCounters(download: UInt64, upload: UInt64, for profileId: UUID, at date: Date = Date()) {
         let key = profileId.uuidString
         var usage = usageByProfile[key] ?? ProfileUsage()
@@ -683,7 +684,8 @@ public final class SettingsStore: ObservableObject {
             var cursor = calendar.startOfDay(for: previousSample)
             let finalDay = calendar.startOfDay(for: date)
             var daysMarked = 0
-            if cursor < finalDay {
+            let sampleGap = date.timeIntervalSince(previousSample)
+            if cursor < finalDay && sampleGap >= 36 * 60 * 60 {
                 while cursor <= finalDay && daysMarked < 367 {
                     incompleteDays.insert(Self.dayKey(for: cursor))
                     daysMarked += 1
@@ -716,6 +718,10 @@ public final class SettingsStore: ObservableObject {
 
         let downloadDelta = Self.usageCounterDelta(previous: previousDownload, current: download)
         let uploadDelta = Self.usageCounterDelta(previous: previousUpload, current: upload)
+        if Self.counterDidReset(previous: previousDownload, current: download)
+            || Self.counterDidReset(previous: previousUpload, current: upload) {
+            incompleteDays.insert(dayKey)
+        }
         usage.lastDownloadCounter = download
         usage.lastUploadCounter = upload
         usage.totalDownloadBytes += downloadDelta
@@ -728,6 +734,7 @@ public final class SettingsStore: ObservableObject {
 
         usage.observedDayKeys = observedDays.sorted()
         usage.incompleteDayKeys = incompleteDays.sorted()
+        usage.partialTrackingVersion = 1
 
         usageByProfile[key] = usage
         saveUsage()
@@ -789,10 +796,20 @@ public final class SettingsStore: ObservableObject {
         let todayKey = Self.dayKey(for: Date())
         let monthPrefix = String(todayKey.prefix(7))
         let monthDays = usage.days.filter { $0.key.hasPrefix(monthPrefix) }.values
-        let incompleteDays = Set(usage.incompleteDayKeys ?? [])
+        var incompleteDays = Set(usage.incompleteDayKeys ?? [])
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         var anchorChanged = false
+        // Older builds marked every midnight-crossing sync gap as partial. The old data did not
+        // retain gap durations, so keep only the known first tracking day and today, then record
+        // precise >=36-hour gaps and counter resets going forward.
+        if usage.partialTrackingVersion == nil {
+            let firstTrackingDay = usage.observedDayKeys?.min() ?? usage.days.keys.min()
+            incompleteDays = Set(incompleteDays.filter { $0 == firstTrackingDay || $0 == todayKey })
+            usage.incompleteDayKeys = incompleteDays.sorted()
+            usage.partialTrackingVersion = 1
+            anchorChanged = true
+        }
         if usage.chartStartDayKey == nil {
             usage.chartStartDayKey = usage.days.keys.min()
                 ?? usage.observedDayKeys?.min()
@@ -834,7 +851,7 @@ public final class SettingsStore: ObservableObject {
                 label: date.formatted(.dateTime.month(.abbreviated).day()),
                 downloadBytes: hasUsableReading ? day.downloadBytes : nil,
                 uploadBytes: hasUsableReading ? day.uploadBytes : nil,
-                isPartial: hasUsableReading && incompleteDays.contains(key)
+                isPartial: hasUsableReading && (incompleteDays.contains(key) || calendar.isDateInToday(date))
             )
         }
         let historicalDayKeys = Set(usage.days.keys).union(usage.observedDayKeys ?? [])
@@ -847,7 +864,7 @@ public final class SettingsStore: ObservableObject {
                 label: date.formatted(.dateTime.day()),
                 downloadBytes: hasSavedCounters ? day.downloadBytes : nil,
                 uploadBytes: hasSavedCounters ? day.uploadBytes : nil,
-                isPartial: hasSavedCounters && incompleteDays.contains(key)
+                isPartial: hasSavedCounters && (incompleteDays.contains(key) || calendar.isDateInToday(date))
             )
         }
         dataUsageSummary = DataUsageSummary(
@@ -940,6 +957,15 @@ public final class SettingsStore: ObservableObject {
         }
         // The WAN session likely reset. Count bytes since the reset and resume from this value.
         return current
+    }
+
+    private static func counterDidReset(previous: UInt64, current: UInt64) -> Bool {
+        guard current < previous else { return false }
+        // Preserve the existing 32-bit wrap handling; only other backwards moves are resets.
+        if previous <= UInt64(UInt32.max), previous > UInt64(UInt32.max) / 2 {
+            return false
+        }
+        return true
     }
 
     private static func dayKey(for date: Date) -> String {

@@ -361,7 +361,7 @@ private struct DailyUsageHistoryCard: View {
                 label: String(dayNumber),
                 downloadBytes: isToday && hasTodayUsage ? todayDownloadBytes : saved?.downloadBytes,
                 uploadBytes: isToday && hasTodayUsage ? todayUploadBytes : saved?.uploadBytes,
-                isPartial: saved?.isPartial ?? (isToday && hasTodayUsage)
+                isPartial: isToday || saved?.isPartial == true
             )
         }
     }

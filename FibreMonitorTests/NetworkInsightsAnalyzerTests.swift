@@ -169,7 +169,7 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
         XCTAssertEqual(forecast.peakDay?.date, history[4].date)
     }
 
-    func testUsageForecastGracefullyHidesProjectionBelowThreeCompletedDays() {
+    func testUsageForecastShowsProjectionWithTwoRecordedPastDays() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = date(2026, 6, 3, calendar: calendar)
@@ -189,9 +189,89 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
 
         XCTAssertEqual(forecast.completedDayCount, 2)
         XCTAssertEqual(forecast.dailyAverageGb ?? 0, 5, accuracy: 0.001)
-        XCTAssertNil(forecast.projectedMonthGb)
+        XCTAssertEqual(forecast.projectedMonthGb ?? 0, 145, accuracy: 0.001)
         XCTAssertFalse(forecast.hasEnoughData)
-        XCTAssertEqual(forecast.paceNote, "Need 3 completed days to compare your recent pace.")
+        XCTAssertEqual(forecast.paceNote, "Based on 2 recorded past days.")
+    }
+
+    func testUsageForecastFallsBackToPartialPastDaysAndIgnoresZeroDays() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = date(2026, 6, 4, calendar: calendar)
+        var first = point(2026, 6, 1, gb: 4, calendar: calendar)
+        first.isPartial = true
+        var second = point(2026, 6, 2, gb: 6, calendar: calendar)
+        second.isPartial = true
+        let zero = DailyUsagePoint(
+            date: date(2026, 6, 3, calendar: calendar),
+            label: "3",
+            downloadBytes: 0,
+            uploadBytes: 0,
+            isPartial: false
+        )
+
+        let forecast = NetworkInsightsAnalyzer.forecast(
+            history: [first, second, zero],
+            selectedMonth: now,
+            todayDownloadBytes: 0,
+            todayUploadBytes: 0,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(forecast.dailyAverageGb ?? 0, 5, accuracy: 0.001)
+        XCTAssertEqual(forecast.projectedMonthGb ?? 0, 140, accuracy: 0.001)
+        XCTAssertEqual(forecast.completedDayCount, 0)
+        XCTAssertFalse(forecast.hasEnoughData)
+        XCTAssertEqual(forecast.paceNote, "Based on 2 recorded past days.")
+    }
+
+    func testUsageForecastPrefersThreeNonPartialDaysOverPartialDays() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = date(2026, 6, 6, calendar: calendar)
+        var partial = point(2026, 6, 4, gb: 100, calendar: calendar)
+        partial.isPartial = true
+        let history = [
+            point(2026, 6, 1, gb: 2, calendar: calendar),
+            point(2026, 6, 2, gb: 4, calendar: calendar),
+            point(2026, 6, 3, gb: 6, calendar: calendar),
+            partial
+        ]
+
+        let forecast = NetworkInsightsAnalyzer.forecast(
+            history: history,
+            selectedMonth: now,
+            todayDownloadBytes: 1_000_000_000,
+            todayUploadBytes: 1_000_000_000,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(forecast.dailyAverageGb ?? 0, 4, accuracy: 0.001)
+        XCTAssertEqual(forecast.completedDayCount, 3)
+        XCTAssertTrue(forecast.hasEnoughData)
+        XCTAssertTrue(forecast.paceNote.contains("last 3 completed days"))
+    }
+
+    func testUsageForecastKeepsTodayPartialWhenUsingSavedHistory() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = date(2026, 6, 6, calendar: calendar)
+        var savedToday = point(2026, 6, 6, gb: 2, calendar: calendar)
+        savedToday.isPartial = false
+
+        let todayKey = calendar.startOfDay(for: now)
+        let points = NetworkInsightsAnalyzer.makeMonthPoints(
+            monthStart: calendar.dateInterval(of: .month, for: now)!.start,
+            historyByDay: [todayKey: savedToday],
+            todayDownloadBytes: 0,
+            todayUploadBytes: 0,
+            today: todayKey,
+            calendar: calendar
+        )
+
+        XCTAssertTrue(points.first(where: { calendar.isDate($0.date, inSameDayAs: now) })?.isPartial == true)
     }
 
     private func diagnose(rx: Double) -> ConnectionDiagnosis {
