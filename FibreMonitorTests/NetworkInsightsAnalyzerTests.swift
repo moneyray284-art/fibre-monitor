@@ -251,7 +251,7 @@ final class NetworkInsightsAnalyzerTests: XCTestCase {
         XCTAssertEqual(forecast.dailyAverageGb ?? 0, 4, accuracy: 0.001)
         XCTAssertEqual(forecast.completedDayCount, 3)
         XCTAssertTrue(forecast.hasEnoughData)
-        XCTAssertTrue(forecast.paceNote.contains("last 3 completed days"))
+        XCTAssertEqual(forecast.paceNote, "Your recent pace is in line with your average.")
     }
 
     func testUsageForecastKeepsTodayPartialWhenUsingSavedHistory() {
