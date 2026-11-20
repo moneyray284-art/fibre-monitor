@@ -522,15 +522,21 @@ private struct CompactSpeedCard: View {
     let traffic: TrafficState
     var downloadOverrideMbps: Double? = nil
     var uploadOverrideMbps: Double? = nil
+    @State private var idleDownloadMbps = 0.0
+    @State private var idleUploadMbps = 0.0
     @Environment(\.linkWaveThemePalette) private var palette
+
+    private var displayedDownloadMbps: Double { downloadOverrideMbps ?? idleDownloadMbps }
+    private var displayedUploadMbps: Double { uploadOverrideMbps ?? idleUploadMbps }
 
     var body: some View {
         HStack(spacing: 13) {
             speedMetric(
                 title: "Download",
-                value: downloadOverrideMbps ?? traffic.downloadMbps,
+                value: displayedDownloadMbps,
                 icon: "arrow.down",
-                tint: palette.textAccent
+                tint: palette.textAccent,
+                isInterpolated: downloadOverrideMbps != nil
             )
 
             Rectangle()
@@ -539,20 +545,43 @@ private struct CompactSpeedCard: View {
 
             speedMetric(
                 title: "Upload",
-                value: uploadOverrideMbps ?? traffic.uploadMbps,
+                value: displayedUploadMbps,
                 icon: "arrow.up",
-                tint: palette.textAccent.opacity(0.72)
+                tint: palette.textAccent.opacity(0.72),
+                isInterpolated: uploadOverrideMbps != nil
             )
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Live speed")
         .accessibilityValue(
-            "Download \(Self.accessibilitySpeed(traffic.downloadMbps)), upload \(Self.accessibilitySpeed(traffic.uploadMbps))"
+            "Download \(Self.accessibilitySpeed(displayedDownloadMbps)), upload \(Self.accessibilitySpeed(displayedUploadMbps))"
         )
+        .onAppear {
+            if downloadOverrideMbps == nil { idleDownloadMbps = traffic.downloadMbps }
+            if uploadOverrideMbps == nil { idleUploadMbps = traffic.uploadMbps }
+        }
+        .onChange(of: traffic.downloadMbps) { sample in
+            guard downloadOverrideMbps == nil else { return }
+            withAnimation(.linear(duration: 0.24)) {
+                idleDownloadMbps = smoothedIdleValue(sample, previous: idleDownloadMbps)
+            }
+        }
+        .onChange(of: traffic.uploadMbps) { sample in
+            guard uploadOverrideMbps == nil else { return }
+            withAnimation(.linear(duration: 0.24)) {
+                idleUploadMbps = smoothedIdleValue(sample, previous: idleUploadMbps)
+            }
+        }
+        .onChange(of: downloadOverrideMbps) { override in
+            if override == nil { idleDownloadMbps = traffic.downloadMbps }
+        }
+        .onChange(of: uploadOverrideMbps) { override in
+            if override == nil { idleUploadMbps = traffic.uploadMbps }
+        }
     }
 
-    private func speedMetric(title: String, value: Double, icon: String, tint: Color) -> some View {
+    private func speedMetric(title: String, value: Double, icon: String, tint: Color, isInterpolated: Bool) -> some View {
         HStack(spacing: 9) {
             Image(systemName: icon)
                 .font(.subheadline.weight(.bold))
@@ -569,6 +598,7 @@ private struct CompactSpeedCard: View {
                         .font(.system(.title3, design: .rounded).weight(.bold))
                         .monospacedDigit()
                         .contentTransition(.numericText())
+                        .animation(.linear(duration: isInterpolated ? 0.025 : 0.22), value: value)
                     Text(value >= 1 ? "Mbps" : "Kbps")
                         .font(.caption2.weight(.medium))
                         .linkWaveText(.secondary)
@@ -582,6 +612,11 @@ private struct CompactSpeedCard: View {
         if mbps < 1 { return String(format: "%.0f kilobits per second", mbps * 1_000) }
         return String(format: "%.1f megabits per second", mbps)
     }
+
+    private func smoothedIdleValue(_ sample: Double, previous: Double) -> Double {
+        if sample <= 0 { return 0 }
+        return previous == 0 ? sample : previous * 0.72 + sample * 0.28
+    }
 }
 
 private struct SpeedTestCard: View {
@@ -591,10 +626,23 @@ private struct SpeedTestCard: View {
     @Binding var startRequested: Bool
     let onCompleted: (SpeedTestResult) -> Void
     @State private var result: SpeedTestResult?
+    @State private var pendingResult: SpeedTestResult?
     @State private var progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
     @State private var errorMessage: String?
     @State private var isRunning = false
     @State private var testTask: Task<Void, Never>?
+    @State private var interpolationTask: Task<Void, Never>?
+    @State private var overrideCleanupTask: Task<Void, Never>?
+    @State private var measuredPingMs: Double?
+    @State private var measuredJitterMs: Double?
+    @State private var emaDownloadMbps = 0.0
+    @State private var emaUploadMbps = 0.0
+    @State private var targetDownloadMbps = 0.0
+    @State private var targetUploadMbps = 0.0
+    @State private var displayedDownloadMbps = 0.0
+    @State private var displayedUploadMbps = 0.0
+    @State private var hasDownloadReading = false
+    @State private var hasUploadReading = false
     @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
@@ -643,20 +691,18 @@ private struct SpeedTestCard: View {
                 }
             } else {
                 HStack(spacing: 0) {
-                    resultMetric("Ping", value: "-- ms", tint: palette.textPrimary.color)
-                    resultMetric("Jitter", value: "-- ms", tint: palette.textPrimary.color)
-                    if isRunning {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(progress.phase == .ping ? "Latency" : (progress.phase == .download ? "Download" : "Upload"))
-                                .font(.caption2)
-                                .linkWaveText(.secondary)
-                            Text(progress.detail)
-                                .font(.system(.caption, design: .rounded).weight(.semibold))
-                                .linkWaveText(.primary)
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    resultMetric("Ping", value: measuredPingMs.map { String(format: "%.0f ms", $0) } ?? "-- ms", tint: palette.textPrimary.color)
+                    resultMetric("Jitter", value: measuredJitterMs.map { String(format: "%.0f ms", $0) } ?? "-- ms", tint: palette.textPrimary.color)
+                    resultMetric(
+                        "Downlink",
+                        value: hasDownloadReading ? Self.speed(displayedDownloadMbps) : "-- Mbps",
+                        tint: isRunning && progress.phase == .download ? palette.textAccent : palette.textSecondary.color
+                    )
+                    resultMetric(
+                        "Uplink",
+                        value: hasUploadReading ? Self.speed(displayedUploadMbps) : "-- Mbps",
+                        tint: isRunning && progress.phase == .upload ? palette.textAccent : palette.textSecondary.color
+                    )
                 }
             }
 
@@ -698,7 +744,11 @@ private struct SpeedTestCard: View {
             startRequested = false
             startTest()
         }
-        .onDisappear { testTask?.cancel() }
+        .onDisappear {
+            testTask?.cancel()
+            interpolationTask?.cancel()
+            overrideCleanupTask?.cancel()
+        }
     }
 
     private var startButtonTitle: String {
@@ -734,18 +784,134 @@ private struct SpeedTestCard: View {
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
                 .foregroundStyle(tint)
                 .monospacedDigit()
+                .contentTransition(.numericText())
+                .animation(.linear(duration: 0.025), value: value)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func receiveProgress(_ update: SpeedTestProgress) {
+        let previousPhase = progress.phase
+        progress = update
+
+        if let pingMs = update.pingMs { measuredPingMs = pingMs }
+        if let jitterMs = update.jitterMs { measuredJitterMs = jitterMs }
+
+        if update.phase != previousPhase {
+            switch update.phase {
+            case .ping:
+                break
+            case .download:
+                emaDownloadMbps = 0
+                targetDownloadMbps = 0
+                displayedDownloadMbps = 0
+                hasDownloadReading = false
+                testDownloadMbps = 0
+            case .upload:
+                emaUploadMbps = 0
+                targetUploadMbps = 0
+                displayedUploadMbps = 0
+                hasUploadReading = false
+                testUploadMbps = 0
+            }
+        }
+
+        guard let sampleMbps = update.currentMbps else { return }
+        let elapsed = update.elapsed ?? 0
+        guard elapsed >= 0.4 || update.fraction >= 1 else { return }
+
+        let boundedSample = max(0, sampleMbps)
+        switch update.phase {
+        case .ping:
+            return
+        case .download:
+            emaDownloadMbps = update.fraction >= 1
+                ? boundedSample
+                : (emaDownloadMbps == 0 ? boundedSample : emaDownloadMbps * 0.72 + boundedSample * 0.28)
+            targetDownloadMbps = emaDownloadMbps
+            hasDownloadReading = true
+        case .upload:
+            emaUploadMbps = update.fraction >= 1
+                ? boundedSample
+                : (emaUploadMbps == 0 ? boundedSample : emaUploadMbps * 0.72 + boundedSample * 0.28)
+            targetUploadMbps = emaUploadMbps
+            hasUploadReading = true
+        }
+        scheduleInterpolation()
+    }
+
+    private func scheduleInterpolation() {
+        guard interpolationTask == nil else { return }
+        interpolationTask = Task { @MainActor in
+            while !Task.isCancelled {
+                let downloadDelta = targetDownloadMbps - displayedDownloadMbps
+                let uploadDelta = targetUploadMbps - displayedUploadMbps
+
+                if abs(downloadDelta) < 0.04 && abs(uploadDelta) < 0.04 {
+                    withAnimation(.linear(duration: 0.04)) {
+                        displayedDownloadMbps = targetDownloadMbps
+                        displayedUploadMbps = targetUploadMbps
+                        testDownloadMbps = displayedDownloadMbps
+                        testUploadMbps = displayedUploadMbps
+                    }
+                    break
+                }
+
+                withAnimation(.linear(duration: 1.0 / 30.0)) {
+                    displayedDownloadMbps += downloadDelta * 0.22
+                    displayedUploadMbps += uploadDelta * 0.22
+                    testDownloadMbps = displayedDownloadMbps
+                    testUploadMbps = displayedUploadMbps
+                }
+                try? await Task.sleep(nanoseconds: 33_333_333)
+            }
+
+            interpolationTask = nil
+            guard !Task.isCancelled else { return }
+            if let pendingResult {
+                result = pendingResult
+                self.pendingResult = nil
+                scheduleOverrideCleanup()
+            } else if !isRunning {
+                scheduleOverrideCleanup()
+            }
+        }
+    }
+
+    private func scheduleOverrideCleanup() {
+        overrideCleanupTask?.cancel()
+        overrideCleanupTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_100_000_000)
+            guard !isRunning else { return }
+            withAnimation(.easeOut(duration: 0.2)) {
+                testDownloadMbps = nil
+                testUploadMbps = nil
+            }
+            overrideCleanupTask = nil
+        }
+    }
+
     private func startTest() {
         guard !isRunning, viewModel.canRunSpeedTest else { return }
         isRunning = true
+        result = nil
+        pendingResult = nil
+        measuredPingMs = nil
+        measuredJitterMs = nil
+        emaDownloadMbps = 0
+        emaUploadMbps = 0
+        targetDownloadMbps = 0
+        targetUploadMbps = 0
+        displayedDownloadMbps = 0
+        displayedUploadMbps = 0
+        hasDownloadReading = false
+        hasUploadReading = false
+        overrideCleanupTask?.cancel()
+        overrideCleanupTask = nil
         testDownloadMbps = 0
         testUploadMbps = 0
-        result = nil
         errorMessage = nil
         progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
         viewModel.setSpeedTestRunning(true)
@@ -755,31 +921,22 @@ private struct SpeedTestCard: View {
                 isRunning = false
                 viewModel.setSpeedTestRunning(false)
                 testTask = nil
-                testDownloadMbps = 0
-                testUploadMbps = 0
-                Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 1_100_000_000)
-                    guard !isRunning else { return }
-                    testDownloadMbps = nil
-                    testUploadMbps = nil
+                if pendingResult == nil {
+                    targetDownloadMbps = 0
+                    targetUploadMbps = 0
+                    scheduleInterpolation()
                 }
             }
             do {
                 let completedResult = try await SpeedTestService.run { update in
-                    progress = update
-                    switch update.phase {
-                    case .ping:
-                        testDownloadMbps = 0
-                        testUploadMbps = 0
-                    case .download:
-                        testDownloadMbps = update.currentMbps ?? 0
-                        testUploadMbps = 0
-                    case .upload:
-                        testDownloadMbps = 0
-                        testUploadMbps = update.currentMbps ?? 0
-                    }
+                    receiveProgress(update)
                 }
-                result = completedResult
+                pendingResult = completedResult
+                targetDownloadMbps = completedResult.downloadMbps
+                targetUploadMbps = completedResult.uploadMbps
+                hasDownloadReading = true
+                hasUploadReading = true
+                scheduleInterpolation()
                 onCompleted(completedResult)
             } catch is CancellationError {
                 if errorMessage == nil { errorMessage = "Speed test stopped." }

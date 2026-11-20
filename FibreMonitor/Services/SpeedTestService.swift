@@ -18,6 +18,9 @@ struct SpeedTestProgress: Equatable, Sendable {
     let fraction: Double
     let detail: String
     var currentMbps: Double? = nil
+    var pingMs: Double? = nil
+    var jitterMs: Double? = nil
+    var elapsed: TimeInterval? = nil
 }
 
 private final class TransferByteCounter: @unchecked Sendable {
@@ -91,6 +94,13 @@ enum SpeedTestService {
             onProgress: onProgress
         )
         try Task.checkCancellation()
+        await onProgress(.init(
+            phase: .ping,
+            fraction: 1,
+            detail: "Latency measured",
+            pingMs: latency.pingMs,
+            jitterMs: latency.jitterMs
+        ))
 
         let fastDownloadURLs = fastTargets.compactMap { rangeURL(for: $0, byteCount: fastRangeBytes) }
         var downloadMbps = 0.0
@@ -112,6 +122,15 @@ enum SpeedTestService {
         }
         try Task.checkCancellation()
         guard downloadMbps > 0 else { throw SpeedTestError.downloadFailed }
+        await onProgress(.init(
+            phase: .download,
+            fraction: 1,
+            detail: "Download measured",
+            currentMbps: downloadMbps,
+            pingMs: latency.pingMs,
+            jitterMs: latency.jitterMs,
+            elapsed: transferWindow
+        ))
 
         let payload = randomPayload(count: uploadBytes)
         var uploadMbps = 0.0
@@ -133,6 +152,15 @@ enum SpeedTestService {
         }
         try Task.checkCancellation()
         guard uploadMbps > 0 else { throw SpeedTestError.uploadFailed }
+        await onProgress(.init(
+            phase: .upload,
+            fraction: 1,
+            detail: "Upload measured",
+            currentMbps: uploadMbps,
+            pingMs: latency.pingMs,
+            jitterMs: latency.jitterMs,
+            elapsed: transferWindow
+        ))
 
         return SpeedTestResult(
             pingMs: latency.pingMs,
@@ -357,7 +385,8 @@ enum SpeedTestService {
                     phase: phase,
                     fraction: fraction,
                     detail: "\(secondsLeft)s remaining",
-                    currentMbps: currentMbps
+                    currentMbps: currentMbps,
+                    elapsed: now.timeIntervalSince(beganAt)
                 ))
                 priorBytes = currentBytes
                 priorSampleTime = now
