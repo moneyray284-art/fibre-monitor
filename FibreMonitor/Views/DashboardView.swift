@@ -202,7 +202,11 @@ private struct RouterHeaderCard: View {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(palette.textAccent.opacity(0.12))
+                        .fill(.thinMaterial)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(palette.backgroundTertiary.opacity(0.42))
+                        }
                         .frame(width: 66, height: 54)
                     HuaweiOptiXstarIllustration(isOnline: viewModel.isConnected, wifiOnline: wifiOnline)
                 }
@@ -305,39 +309,39 @@ private struct ConnectionCheckCard: View {
     @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: statusSymbol)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(statusColor)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Connection Check · \(diagnosis.severity.label)")
+        Button(action: openDiagnosis) {
+            HStack(spacing: 10) {
+                Image(systemName: "stethoscope")
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                Text(diagnosis.inlineHint)
-                    .font(.caption)
-                    .linkWaveText(.secondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(statusColor)
+                    .accessibilityHidden(true)
 
-            Button("Diagnose", action: openDiagnosis)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Connection Check · \(diagnosis.severity.label)")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text(diagnosis.inlineHint)
+                        .font(.caption)
+                        .linkWaveText(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 4) {
+                    Text("Diagnose")
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.bold))
+                }
                 .font(.caption.weight(.semibold))
-                .frame(minHeight: 40)
-                .liquidGlassSmallButton()
+                .foregroundStyle(palette.textAccent)
+                .fixedSize()
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .linkWaveGlassCard(padding: 14)
-        .accessibilityElement(children: .contain)
-    }
-
-    private var statusSymbol: String {
-        switch diagnosis.severity {
-        case .optimal: "checkmark.circle.fill"
-        case .pending: "clock"
-        case .warning: "exclamationmark.triangle.fill"
-        case .critical: "xmark.octagon.fill"
-        }
+        .accessibilityLabel("Connection Check, \(diagnosis.severity.label). \(diagnosis.inlineHint). Diagnose.")
     }
 
     private var statusColor: Color {
@@ -378,58 +382,75 @@ private struct HuaweiOptiXstarIllustration: View {
     var body: some View {
         ZStack {
             Capsule()
-                .fill(LinearGradient(colors: [.white, Color(red: 0.80, green: 0.84, blue: 0.88)], startPoint: .top, endPoint: .bottom))
+                .fill(LinearGradient(colors: [Color(red: 0.82, green: 0.86, blue: 0.90), Color(red: 0.43, green: 0.49, blue: 0.57)], startPoint: .leading, endPoint: .trailing))
                 .frame(width: 3, height: 22)
-                .offset(x: -16, y: -13)
+                .rotationEffect(.degrees(-12))
+                .offset(x: -20, y: -14)
             Capsule()
-                .fill(LinearGradient(colors: [.white, Color(red: 0.80, green: 0.84, blue: 0.88)], startPoint: .top, endPoint: .bottom))
+                .fill(LinearGradient(colors: [Color(red: 0.82, green: 0.86, blue: 0.90), Color(red: 0.43, green: 0.49, blue: 0.57)], startPoint: .leading, endPoint: .trailing))
                 .frame(width: 3, height: 22)
-                .offset(x: 16, y: -13)
+                .rotationEffect(.degrees(12))
+                .offset(x: 20, y: -14)
 
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
+            Image(systemName: "wifi")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(palette.textAccent)
+                .offset(y: -18)
+
+            RouterChassis()
                 .fill(LinearGradient(
-                    colors: [.white, Color(red: 0.94, green: 0.96, blue: 0.98)],
+                    colors: [Color(red: 0.84, green: 0.87, blue: 0.91), Color(red: 0.60, green: 0.66, blue: 0.73)],
                     startPoint: .top,
                     endPoint: .bottom
                 ))
-                .frame(width: 62, height: 25)
+                .frame(width: 60, height: 23)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(palette.textPrimary.color.opacity(0.12), lineWidth: 0.8)
+                    RouterChassis().stroke(Color.white.opacity(0.50), lineWidth: 0.8)
                 }
                 .overlay(alignment: .bottomLeading) {
                     HStack(spacing: 5) {
-                        led("PON", color: ponLight)
-                        led("WLAN", color: wlanLight)
+                        Circle().fill(ponLight).frame(width: 4, height: 4)
+                            .shadow(color: ponLight.opacity(0.9), radius: 2)
+                        Circle().fill(wlanLight).frame(width: 4, height: 4)
+                            .shadow(color: wlanLight.opacity(0.9), radius: 2)
                     }
-                    .padding(.leading, 7)
+                    .padding(.leading, 9)
                     .padding(.bottom, 5)
                 }
                 .overlay(alignment: .topTrailing) {
-                    HStack(spacing: 2) {
+                    VStack(alignment: .trailing, spacing: 2) {
                         ForEach(0..<3, id: \.self) { _ in
-                            Capsule().fill(Color.gray.opacity(0.38)).frame(width: 1.5, height: 5)
+                            Capsule().fill(Color.black.opacity(0.20)).frame(width: 11, height: 1)
                         }
                     }
-                    .padding(.top, 5)
+                    .padding(.top, 8)
                     .padding(.trailing, 7)
+                }
+                .overlay {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.12))
+                        .frame(height: 1)
+                        .padding(.horizontal, 8)
+                        .offset(y: 1)
                 }
                 .shadow(color: .black.opacity(0.16), radius: 3, y: 2)
         }
         .frame(width: 66, height: 50)
         .accessibilityLabel("Huawei OptiXstar HG8145X6 router with PON and WLAN status lights")
     }
+}
 
-    private func led(_ label: String, color: Color) -> some View {
-        HStack(spacing: 2) {
-            Circle()
-                .fill(color)
-                .frame(width: 4, height: 4)
-                .shadow(color: color.opacity(0.8), radius: 2)
-            Text(label)
-                .font(.system(size: 4.5, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.gray)
-        }
+private struct RouterChassis: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX + 7, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX - 7, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - 4))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX - 4, y: rect.maxY), control: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX + 4, y: rect.maxY))
+        path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.maxY - 4), control: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -591,6 +612,25 @@ private struct SpeedTestCard: View {
                         .font(.system(size: 9, weight: .bold, design: .rounded))
                         .foregroundStyle(palette.textAccent)
                         .lineLimit(1)
+                    Button("Stop", action: stopTest)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.textAccent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .buttonStyle(.plain)
+                        .linkWaveInteractiveGlassCapsule()
+                } else {
+                    Button(action: startTest) {
+                        Label(result == nil ? "Start Test" : "Run Again", systemImage: startButtonSymbol)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(viewModel.canRunSpeedTest ? palette.textAccent : palette.textSecondary.color)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                    .linkWaveInteractiveGlassCapsule()
+                    .disabled(!viewModel.settings.isConfigured || !viewModel.canRunSpeedTest)
+                    .accessibilityLabel(startButtonTitle)
                 }
             }
 
@@ -641,22 +681,7 @@ private struct SpeedTestCard: View {
                     Text("\(Int(progress.fraction * 100))%")
                         .font(.caption.monospacedDigit().weight(.semibold))
                         .linkWaveText(.secondary)
-                    Button("Stop", action: stopTest)
-                        .font(.caption.weight(.semibold))
-                        .buttonStyle(.bordered)
-                        .tint(palette.textAccent)
                 }
-            } else {
-                Button(action: startTest) {
-                    Label(startButtonTitle, systemImage: startButtonSymbol)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(viewModel.canRunSpeedTest ? palette.textAccent : palette.textSecondary.color)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                }
-                .buttonStyle(.plain)
-                .linkWaveInteractiveGlassCapsule()
-                .disabled(!viewModel.settings.isConfigured || !viewModel.canRunSpeedTest)
             }
         }
         .linkWaveGlassCard()
@@ -679,7 +704,7 @@ private struct SpeedTestCard: View {
     private var startButtonTitle: String {
         if !viewModel.isConnectedToWiFi { return "Connect to Wi-Fi to run Speed Test" }
         if !viewModel.hasInternetPath { return "No Internet for Speed Test" }
-        return result == nil ? "Start Test" : "Run Again"
+        return result == nil ? "Start Speed Test" : "Run Speed Test Again"
     }
 
     private var startButtonSymbol: String {

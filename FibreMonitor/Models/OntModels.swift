@@ -66,6 +66,18 @@ public struct ConnectionInterruption: Codable, Equatable, Sendable, Identifiable
         self.restoredAt = restoredAt
         self.observedDurationSeconds = observedDurationSeconds
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, startedAt, restoredAt, observedDurationSeconds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? values.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
+        startedAt = (try? values.decodeIfPresent(Date.self, forKey: .startedAt)) ?? .distantPast
+        restoredAt = try? values.decodeIfPresent(Date.self, forKey: .restoredAt)
+        observedDurationSeconds = try? values.decodeIfPresent(TimeInterval.self, forKey: .observedDurationSeconds)
+    }
 }
 
 public struct WanInfo: Equatable, Sendable {

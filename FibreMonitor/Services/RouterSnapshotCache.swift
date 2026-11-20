@@ -38,6 +38,27 @@ public struct RouterSnapshot: Codable, Sendable {
         self.pppoeUptimeSeconds = pppoeUptimeSeconds
         self.updatedAt = updatedAt
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case routerProfileID, routerHost, routerModel, rxPowerDbm
+        case todayDownloadBytes, todayUploadBytes, todayTotalBytes
+        case onlineClientCount, offlineClientCount, pppoeUptimeSeconds, updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        routerProfileID = try? values.decodeIfPresent(String.self, forKey: .routerProfileID)
+        routerHost = try? values.decodeIfPresent(String.self, forKey: .routerHost)
+        routerModel = try? values.decodeIfPresent(String.self, forKey: .routerModel)
+        rxPowerDbm = try? values.decodeIfPresent(Double.self, forKey: .rxPowerDbm)
+        todayDownloadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .todayDownloadBytes)) ?? 0
+        todayUploadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .todayUploadBytes)) ?? 0
+        todayTotalBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .todayTotalBytes)) ?? 0
+        onlineClientCount = (try? values.decodeIfPresent(Int.self, forKey: .onlineClientCount)) ?? 0
+        offlineClientCount = try? values.decodeIfPresent(Int.self, forKey: .offlineClientCount)
+        pppoeUptimeSeconds = try? values.decodeIfPresent(Int.self, forKey: .pppoeUptimeSeconds)
+        updatedAt = (try? values.decodeIfPresent(Date.self, forKey: .updatedAt)) ?? .distantPast
+    }
 }
 
 /// Keeps the last router readings available to LinkWave itself between launches.

@@ -292,6 +292,19 @@ public final class SettingsStore: ObservableObject {
         struct Day: Codable {
             var downloadBytes: UInt64 = 0
             var uploadBytes: UInt64 = 0
+
+            init(downloadBytes: UInt64 = 0, uploadBytes: UInt64 = 0) {
+                self.downloadBytes = downloadBytes
+                self.uploadBytes = uploadBytes
+            }
+
+            private enum CodingKeys: String, CodingKey { case downloadBytes, uploadBytes }
+
+            init(from decoder: Decoder) throws {
+                let values = try decoder.container(keyedBy: CodingKeys.self)
+                downloadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .downloadBytes)) ?? 0
+                uploadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .uploadBytes)) ?? 0
+            }
         }
 
         var lastDownloadCounter: UInt64?
@@ -308,20 +321,82 @@ public final class SettingsStore: ObservableObject {
         var partialTrackingVersion: Int?
         var lastConnectionObservationAt: Date?
         var connectionInterruptions: [ConnectionInterruption]?
+
+        init() { }
+
+        private enum CodingKeys: String, CodingKey {
+            case lastDownloadCounter, lastUploadCounter, totalDownloadBytes, totalUploadBytes, days
+            case chartStartDayKey, lastCounterSampleAt, lastSuccessfulSyncAt, observedDayKeys
+            case incompleteDayKeys, partialTrackingVersion, lastConnectionObservationAt, connectionInterruptions
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            lastDownloadCounter = try? values.decodeIfPresent(UInt64.self, forKey: .lastDownloadCounter)
+            lastUploadCounter = try? values.decodeIfPresent(UInt64.self, forKey: .lastUploadCounter)
+            totalDownloadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .totalDownloadBytes)) ?? 0
+            totalUploadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .totalUploadBytes)) ?? 0
+            days = (try? values.decodeIfPresent([String: Day].self, forKey: .days)) ?? [:]
+            chartStartDayKey = try? values.decodeIfPresent(String.self, forKey: .chartStartDayKey)
+            lastCounterSampleAt = try? values.decodeIfPresent(Date.self, forKey: .lastCounterSampleAt)
+            lastSuccessfulSyncAt = try? values.decodeIfPresent(Date.self, forKey: .lastSuccessfulSyncAt)
+            observedDayKeys = try? values.decodeIfPresent([String].self, forKey: .observedDayKeys)
+            incompleteDayKeys = try? values.decodeIfPresent([String].self, forKey: .incompleteDayKeys)
+            partialTrackingVersion = try? values.decodeIfPresent(Int.self, forKey: .partialTrackingVersion)
+            lastConnectionObservationAt = try? values.decodeIfPresent(Date.self, forKey: .lastConnectionObservationAt)
+            connectionInterruptions = try? values.decodeIfPresent([ConnectionInterruption].self, forKey: .connectionInterruptions)
+        }
     }
 
     private struct SharedDailyUsageHistory: Codable {
         struct Day: Codable {
             var downloadBytes: UInt64
             var uploadBytes: UInt64
+
+            init(downloadBytes: UInt64, uploadBytes: UInt64) {
+                self.downloadBytes = downloadBytes
+                self.uploadBytes = uploadBytes
+            }
+
+            private enum CodingKeys: String, CodingKey { case downloadBytes, uploadBytes }
+
+            init(from decoder: Decoder) throws {
+                let values = try decoder.container(keyedBy: CodingKeys.self)
+                downloadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .downloadBytes)) ?? 0
+                uploadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .uploadBytes)) ?? 0
+            }
         }
 
         struct Profile: Codable {
             var chartStartDayKey: String?
             var days: [String: Day]
+
+            init(chartStartDayKey: String?, days: [String: Day]) {
+                self.chartStartDayKey = chartStartDayKey
+                self.days = days
+            }
+
+            private enum CodingKeys: String, CodingKey { case chartStartDayKey, days }
+
+            init(from decoder: Decoder) throws {
+                let values = try decoder.container(keyedBy: CodingKeys.self)
+                chartStartDayKey = try? values.decodeIfPresent(String.self, forKey: .chartStartDayKey)
+                days = (try? values.decodeIfPresent([String: Day].self, forKey: .days)) ?? [:]
+            }
         }
 
         var profiles: [String: Profile]
+
+        init(profiles: [String: Profile]) {
+            self.profiles = profiles
+        }
+
+        private enum CodingKeys: String, CodingKey { case profiles }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            profiles = (try? values.decodeIfPresent([String: Profile].self, forKey: .profiles)) ?? [:]
+        }
     }
 
     public init(

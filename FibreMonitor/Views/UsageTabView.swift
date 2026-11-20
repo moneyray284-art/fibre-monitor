@@ -113,7 +113,7 @@ private struct UsageForecastCard: View {
             HStack(alignment: .top, spacing: 8) {
                 forecastMetric("Daily Average", value: formatGB(forecast.dailyAverageGb))
                 forecastMetric("Projected Month", value: formatGB(forecast.projectedMonthGb))
-                forecastMetric("Peak Day", value: peakDayText)
+                forecastMetric("Peak Day", value: peakDayValue, subtitle: peakDayDate)
             }
 
             if let spike = forecast.spikeDays.first {
@@ -154,23 +154,32 @@ private struct UsageForecastCard: View {
         .accessibilityElement(children: .contain)
     }
 
-    private var peakDayText: String {
+    private var peakDayValue: String {
         guard let peak = forecast.peakDay else { return "--" }
-        return "\(formatGB(peak.totalGb)) · \(peak.date.formatted(.dateTime.month(.abbreviated).day()))"
+        return formatGB(peak.totalGb)
     }
 
-    private func forecastMetric(_ title: String, value: String) -> some View {
+    private var peakDayDate: String? {
+        forecast.peakDay?.date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    private func forecastMetric(_ title: String, value: String, subtitle: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .font(.caption2)
                 .linkWaveText(.secondary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .frame(height: 15, alignment: .topLeading)
             Text(value)
                 .font(.system(.subheadline, design: .rounded).weight(.semibold))
                 .monospacedDigit()
-                .lineLimit(2)
+                .lineLimit(1)
                 .minimumScaleFactor(0.78)
+            Text(subtitle ?? " ")
+                .font(.caption2)
+                .linkWaveText(.secondary)
+                .lineLimit(1)
+                .frame(height: 13, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -188,10 +197,21 @@ private struct UsageForecastCard: View {
 private struct SyncStatusCard: View {
     let summary: DataUsageSummary
     @Environment(\.linkWaveThemePalette) private var palette
+    @State private var showsSyncGapDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            CardHeader(icon: "arrow.triangle.2.circlepath", title: "Router Sync") { EmptyView() }
+            CardHeader(icon: "arrow.triangle.2.circlepath", title: "Router Sync") {
+                Button {
+                    showsSyncGapDetails.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(palette.textSecondary.color)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(showsSyncGapDetails ? "Hide sync gap information" : "Show sync gap information")
+            }
 
             if let syncDate = summary.lastSuccessfulSyncAt {
                 Text("Last successful check: \(syncDate.formatted(date: .abbreviated, time: .shortened))")
@@ -225,13 +245,16 @@ private struct SyncStatusCard: View {
                     .foregroundColor(palette.textAccent)
             }
 
-            Text("The iPhone checks the router while LinkWave is active. A long gap can leave the daily split incomplete.")
-                .font(.caption2)
-                .linkWaveText(.secondary)
+            if showsSyncGapDetails {
+                Text("The iPhone checks the router while LinkWave is active. A long gap can leave the daily split incomplete.")
+                    .font(.caption2)
+                    .linkWaveText(.secondary)
+                    .transition(.opacity)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .linkWaveGlassCard()
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 
     private var hasPartialTodayUsage: Bool {
@@ -250,6 +273,8 @@ private struct SyncStatusCard: View {
 
 private struct UsageTotalsCard: View {
     let summary: DataUsageSummary
+    @Environment(\.linkWaveThemePalette) private var palette
+    @State private var showsUsageDetails = false
 
     var body: some View {
         VStack(spacing: 10) {
@@ -260,6 +285,15 @@ private struct UsageTotalsCard: View {
                 Text("UNLIMITED PLAN")
                     .font(.caption2.weight(.bold))
                     .linkWaveText(.secondary)
+                Button {
+                    showsUsageDetails.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(palette.textSecondary.color)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(showsUsageDetails ? "Hide data usage information" : "Show data usage information")
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 5) {
@@ -285,15 +319,30 @@ private struct UsageTotalsCard: View {
 
             usageRow("Today", download: summary.todayDownloadBytes, upload: summary.todayUploadBytes)
             usageRow("This month", download: summary.monthDownloadBytes, upload: summary.monthUploadBytes)
-            usageRow("Since tracking", download: summary.totalDownloadBytes, upload: summary.totalUploadBytes)
+            if !sinceTrackingMatchesMonth {
+                usageRow("Since tracking", download: summary.totalDownloadBytes, upload: summary.totalUploadBytes)
+            }
 
-            Text("Totals start from the first counter check. Long sync gaps or router counter resets can affect date allocation.")
-                .font(.caption2)
-                .linkWaveText(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if showsUsageDetails {
+                Text("Totals start from the first counter check. Long sync gaps or router counter resets can affect date allocation.")
+                    .font(.caption2)
+                    .linkWaveText(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .transition(.opacity)
+            }
         }
         .linkWaveGlassCard()
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var sinceTrackingMatchesMonth: Bool {
+        isWithinDisplayTolerance(summary.totalDownloadBytes, summary.monthDownloadBytes)
+            && isWithinDisplayTolerance(summary.totalUploadBytes, summary.monthUploadBytes)
+    }
+
+    private func isWithinDisplayTolerance(_ lhs: UInt64, _ rhs: UInt64) -> Bool {
+        let difference = lhs >= rhs ? lhs - rhs : rhs - lhs
+        return Double(difference) <= 50_000_000
     }
 
     private func usageRow(_ title: String, download: UInt64, upload: UInt64) -> some View {
@@ -575,7 +624,7 @@ private struct DailyUsageHistoryCard: View {
             Text(axisLabels.0).frame(maxWidth: .infinity, alignment: .leading)
             Text(axisLabels.1).frame(maxWidth: .infinity, alignment: .center)
             Text(axisLabels.2).frame(maxWidth: .infinity, alignment: .trailing)
-            Color.clear.frame(width: 42)
+            Color.clear.frame(width: 56)
         }
         .font(.system(size: 9, weight: .medium))
         .monospacedDigit()

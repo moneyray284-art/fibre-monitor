@@ -55,6 +55,23 @@ public struct RouterProfile: Identifiable, Codable, Equatable, Sendable {
         self.routerType = routerType
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id, name, routerName, host, username, lastUsed, detectedModel, cfgMode, routerType
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? values.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
+        name = (try? values.decodeIfPresent(String.self, forKey: .name)) ?? "Router"
+        routerName = try? values.decodeIfPresent(String.self, forKey: .routerName)
+        host = (try? values.decodeIfPresent(String.self, forKey: .host)) ?? ""
+        username = (try? values.decodeIfPresent(String.self, forKey: .username)) ?? "root"
+        lastUsed = try? values.decodeIfPresent(Date.self, forKey: .lastUsed)
+        detectedModel = try? values.decodeIfPresent(String.self, forKey: .detectedModel)
+        cfgMode = try? values.decodeIfPresent(String.self, forKey: .cfgMode)
+        routerType = (try? values.decodeIfPresent(RouterType.self, forKey: .routerType)) ?? .huaweiONT
+    }
+
     /// Backwards-compatible prefilled MTN profile; the Add Router UI now uses its preset selector.
     public static func mtnTemplate(id: UUID = UUID()) -> RouterProfile {
         RouterProfile(id: id, name: "New router (MTN)", host: "192.168.2.1", username: "root")
