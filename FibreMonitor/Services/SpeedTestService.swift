@@ -7,6 +7,49 @@ struct SpeedTestResult: Equatable, Sendable {
     let uploadMbps: Double
 }
 
+public struct SpeedTestRecord: Codable, Identifiable, Equatable {
+    public let id: UUID
+    public let timestamp: Date
+    public let pingMs: Double
+    public let jitterMs: Double
+    public let downMbps: Double
+    public let upMbps: Double
+
+    public init(
+        id: UUID = UUID(),
+        timestamp: Date = Date(),
+        pingMs: Double,
+        jitterMs: Double,
+        downMbps: Double,
+        upMbps: Double
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.pingMs = pingMs
+        self.jitterMs = jitterMs
+        self.downMbps = downMbps
+        self.upMbps = upMbps
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, timestamp, pingMs, jitterMs, downMbps, upMbps
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? values.decode(UUID.self, forKey: .id)) ?? UUID()
+        timestamp = (try? values.decode(Date.self, forKey: .timestamp)) ?? .distantPast
+        pingMs = (try? values.decode(Double.self, forKey: .pingMs)) ?? 0
+        jitterMs = (try? values.decode(Double.self, forKey: .jitterMs)) ?? 0
+        downMbps = (try? values.decode(Double.self, forKey: .downMbps)) ?? 0
+        upMbps = (try? values.decode(Double.self, forKey: .upMbps)) ?? 0
+    }
+
+    var result: SpeedTestResult {
+        SpeedTestResult(pingMs: pingMs, jitterMs: jitterMs, downloadMbps: downMbps, uploadMbps: upMbps)
+    }
+}
+
 struct SpeedTestProgress: Equatable, Sendable {
     enum Phase: String, Equatable, Sendable {
         case ping = "Checking latency"

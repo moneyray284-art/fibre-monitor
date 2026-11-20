@@ -62,6 +62,8 @@ public final class MonitorViewModel: ObservableObject {
     @Published public private(set) var connectionState: RouterConnectionState = .offline
     @Published public private(set) var isRefreshing = false
     @Published public private(set) var isSpeedTestRunning = false
+    @Published public private(set) var speedHistory: [SpeedTestRecord] = []
+    @Published public private(set) var activeSpeedTestRecord: SpeedTestRecord?
     @Published public private(set) var isLiveTrafficActive = false
     @Published public private(set) var isForegroundSessionReady = false
     @Published public private(set) var isRouterLoginPaused = false
@@ -106,6 +108,7 @@ public final class MonitorViewModel: ObservableObject {
     private var isWiFiRecoveryPending = false
     private let reachabilityFailureThreshold = 3
     private var lastTrafficSampleAt: Date = .distantPast
+    private static let speedHistoryDefaultsKey = "linkwave.speedTest.history.v1"
     // Health, Wi-Fi and LAN come from full web pages (50-130 KB), so sync them rarely.
     private var lastPageSync: Date = .distantPast
     private let pageSyncInterval: TimeInterval = 30
@@ -152,6 +155,7 @@ public final class MonitorViewModel: ObservableObject {
             credentialsRevision: settings.routerCredentialsRevision
         )
         self.connectionState = settings.isConfigured ? .connecting : .offline
+        self.speedHistory = Self.loadSpeedHistory()
         hydrateCachedRouterData()
         settings.refreshUsageSummaryForCurrentLocalDay()
         settings.$activeProfileId
@@ -397,6 +401,40 @@ public final class MonitorViewModel: ObservableObject {
 
     public func setSpeedTestRunning(_ running: Bool) {
         isSpeedTestRunning = running
+    }
+
+    func clearActiveSpeedTestRecord() {
+        activeSpeedTestRecord = nil
+    }
+
+    @discardableResult
+    func completeSpeedTest(_ result: SpeedTestResult) -> SpeedTestRecord {
+        let record = SpeedTestRecord(
+            pingMs: result.pingMs,
+            jitterMs: result.jitterMs,
+            downMbps: result.downloadMbps,
+            upMbps: result.uploadMbps
+        )
+        activeSpeedTestRecord = record
+        speedHistory = Array(([record] + speedHistory).prefix(10))
+        persistSpeedHistory()
+        return record
+    }
+
+    func clearSpeedTestHistory() {
+        speedHistory = []
+        persistSpeedHistory()
+    }
+
+    private static func loadSpeedHistory() -> [SpeedTestRecord] {
+        guard let data = UserDefaults.standard.data(forKey: speedHistoryDefaultsKey),
+              let records = try? JSONDecoder().decode([SpeedTestRecord].self, from: data) else { return [] }
+        return Array(records.sorted { $0.timestamp > $1.timestamp }.prefix(10))
+    }
+
+    private func persistSpeedHistory() {
+        guard let data = try? JSONEncoder().encode(speedHistory) else { return }
+        UserDefaults.standard.set(data, forKey: Self.speedHistoryDefaultsKey)
     }
 
     private func pollLiveTraffic() async {

@@ -6,7 +6,6 @@ public struct DashboardView: View {
     @State private var showSettings = false
     @State private var showConnectionDiagnosis = false
     @State private var startSpeedTestRequested = false
-    @State private var latestSpeedTestResult: SpeedTestResult?
     @State private var speedTestDownloadMbps: Double?
     @State private var speedTestUploadMbps: Double?
     @Environment(\.colorScheme) private var colorScheme
@@ -64,8 +63,7 @@ public struct DashboardView: View {
                             viewModel: viewModel,
                             testDownloadMbps: $speedTestDownloadMbps,
                             testUploadMbps: $speedTestUploadMbps,
-                            startRequested: $startSpeedTestRequested,
-                            onCompleted: { latestSpeedTestResult = $0 }
+                            startRequested: $startSpeedTestRequested
                         )
                         ConnectionCheckCard(
                             diagnosis: connectionDiagnosis,
@@ -145,7 +143,7 @@ public struct DashboardView: View {
             devices: viewModel.devices,
             blockedDevices: viewModel.blockedDevices,
             wifi: viewModel.wifi,
-            speedTest: latestSpeedTestResult
+            speedTest: viewModel.activeSpeedTestRecord?.result
         )
     }
 
@@ -623,8 +621,6 @@ private struct SpeedTestCard: View {
     @Binding var testDownloadMbps: Double?
     @Binding var testUploadMbps: Double?
     @Binding var startRequested: Bool
-    let onCompleted: (SpeedTestResult) -> Void
-    @State private var result: SpeedTestResult?
     @State private var pendingResult: SpeedTestResult?
     @State private var progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
     @State private var errorMessage: String?
@@ -645,7 +641,20 @@ private struct SpeedTestCard: View {
     @State private var isReturningGatewayDownloadToLive = false
     @State private var hasDownloadReading = false
     @State private var hasUploadReading = false
+    @State private var isHistoryExpanded = false
+    @State private var inspectedHistoryID: UUID?
+    @State private var selectedActivity: SpeedTestActivity?
     @Environment(\.linkWaveThemePalette) private var palette
+
+    private var inspectedRecord: SpeedTestRecord? {
+        viewModel.speedHistory.first { $0.id == inspectedHistoryID }
+    }
+
+    private var displayedRecord: SpeedTestRecord? {
+        inspectedRecord ?? (pendingResult == nil ? viewModel.activeSpeedTestRecord : nil)
+    }
+
+    private var isInspectingSavedRun: Bool { inspectedRecord != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
@@ -653,9 +662,17 @@ private struct SpeedTestCard: View {
                 Image(systemName: "speedometer")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(palette.textAccent)
-                Text("Speed Test")
-                    .font(.headline.weight(.semibold))
-                    .linkWaveText(.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Speed Test")
+                        .font(.headline.weight(.semibold))
+                        .linkWaveText(.primary)
+                    if let inspectedRecord {
+                        Text("Saved · \(Self.formattedTime(inspectedRecord.timestamp))")
+                            .font(.caption2)
+                            .linkWaveText(.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 Spacer()
                 if isRunning {
                     Text(progress.phase.rawValue.uppercased())
@@ -671,7 +688,7 @@ private struct SpeedTestCard: View {
                         .linkWaveInteractiveGlassCapsule()
                 } else {
                     Button(action: startTest) {
-                        Label(result == nil ? "Start Test" : "Run Again", systemImage: startButtonSymbol)
+                        Label(displayedRecord == nil ? "Start Test" : "Run Again", systemImage: startButtonSymbol)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(viewModel.canRunSpeedTest ? palette.textAccent : palette.textSecondary.color)
                             .padding(.horizontal, 10)
@@ -684,28 +701,36 @@ private struct SpeedTestCard: View {
                 }
             }
 
-            if let result {
-                HStack(spacing: 0) {
-                    resultMetric("Ping", value: String(format: "%.0f ms", result.pingMs), tint: palette.textPrimary.color)
-                    resultMetric("Jitter", value: String(format: "%.0f ms", result.jitterMs), tint: palette.textPrimary.color)
-                    resultMetric("Downlink", value: Self.speed(result.downloadMbps), tint: palette.textAccent)
-                    resultMetric("Uplink", value: Self.speed(result.uploadMbps), tint: palette.textAccent.opacity(0.72))
-                }
-            } else {
-                HStack(spacing: 0) {
-                    resultMetric("Ping", value: measuredPingMs.map { String(format: "%.0f ms", $0) } ?? "-- ms", tint: palette.textPrimary.color)
-                    resultMetric("Jitter", value: measuredJitterMs.map { String(format: "%.0f ms", $0) } ?? "-- ms", tint: palette.textPrimary.color)
-                    resultMetric(
-                        "Downlink",
-                        value: hasDownloadReading ? Self.speed(displayedDownloadMbps) : "-- Mbps",
-                        tint: isRunning && progress.phase == .download ? palette.textAccent : palette.textSecondary.color
-                    )
-                    resultMetric(
-                        "Uplink",
-                        value: hasUploadReading ? Self.speed(displayedUploadMbps) : "-- Mbps",
-                        tint: isRunning && progress.phase == .upload ? palette.textAccent : palette.textSecondary.color
-                    )
-                }
+            HStack(spacing: 0) {
+                resultMetric(
+                    "Ping",
+                    value: displayedRecord.map { String(format: "%.0f ms", $0.pingMs) }
+                        ?? measuredPingMs.map { String(format: "%.0f ms", $0) } ?? "-- ms",
+                    tint: palette.textPrimary.color
+                )
+                resultMetric(
+                    "Jitter",
+                    value: displayedRecord.map { String(format: "%.0f ms", $0.jitterMs) }
+                        ?? measuredJitterMs.map { String(format: "%.0f ms", $0) } ?? "-- ms",
+                    tint: palette.textPrimary.color
+                )
+                resultMetric(
+                    "Downlink",
+                    value: displayedRecord.map { Self.speed($0.downMbps) }
+                        ?? (hasDownloadReading ? Self.speed(displayedDownloadMbps) : "-- Mbps"),
+                    tint: isRunning && progress.phase == .download ? palette.textAccent : palette.textSecondary.color
+                )
+                resultMetric(
+                    "Uplink",
+                    value: displayedRecord.map { Self.speed($0.upMbps) }
+                        ?? (hasUploadReading ? Self.speed(displayedUploadMbps) : "-- Mbps"),
+                    tint: isRunning && progress.phase == .upload ? palette.textAccent : palette.textSecondary.color
+                )
+            }
+
+            if !isRunning, pendingResult == nil, let displayedRecord {
+                Divider().overlay(palette.textTertiary.color.opacity(0.22))
+                activityStrengthSection(for: displayedRecord)
             }
 
             if isRunning {
@@ -731,6 +756,11 @@ private struct SpeedTestCard: View {
                         .linkWaveText(.secondary)
                 }
             }
+
+            if !isRunning, pendingResult == nil, !viewModel.speedHistory.isEmpty {
+                Divider().overlay(palette.textTertiary.color.opacity(0.22))
+                previousTestsSection
+            }
         }
         .linkWaveGlassCard()
         .accessibilityElement(children: .contain)
@@ -753,7 +783,7 @@ private struct SpeedTestCard: View {
         }
         .onDisappear {
             testTask?.cancel()
-            interpolationTask?.cancel()
+            if pendingResult == nil { interpolationTask?.cancel() }
             overrideCleanupTask?.cancel()
         }
     }
@@ -761,11 +791,11 @@ private struct SpeedTestCard: View {
     private var startButtonTitle: String {
         if !viewModel.isConnectedToWiFi { return "Connect to Wi-Fi to run Speed Test" }
         if !viewModel.hasInternetPath { return "No Internet for Speed Test" }
-        return result == nil ? "Start Speed Test" : "Run Speed Test Again"
+        return displayedRecord == nil ? "Start Speed Test" : "Run Speed Test Again"
     }
 
     private var startButtonSymbol: String {
-        viewModel.canRunSpeedTest ? (result == nil ? "play.fill" : "arrow.clockwise") : "wifi.slash"
+        viewModel.canRunSpeedTest ? (displayedRecord == nil ? "play.fill" : "arrow.clockwise") : "wifi.slash"
     }
 
     private var phaseStatus: String {
@@ -779,6 +809,248 @@ private struct SpeedTestCard: View {
     private func stopTest() {
         errorMessage = "Speed test stopped."
         testTask?.cancel()
+    }
+
+    private var previousTestsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isHistoryExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .foregroundStyle(palette.textSecondary.color)
+                    Text("Previous Tests")
+                        .foregroundStyle(palette.textPrimary.color)
+                    Text("(\(viewModel.speedHistory.count))")
+                        .foregroundStyle(palette.textSecondary.color)
+                        .monospacedDigit()
+                    Spacer(minLength: 4)
+                    if !isHistoryExpanded, let latest = viewModel.speedHistory.first {
+                        Text("\(Int(latest.downMbps.rounded())) / \(Int(latest.upMbps.rounded())) Mbps")
+                            .foregroundStyle(palette.textSecondary.color)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.textSecondary.color)
+                        .rotationEffect(.degrees(isHistoryExpanded ? 180 : 0))
+                }
+                .font(.caption.weight(.medium))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(isHistoryExpanded ? "Collapse previous speed tests" : "Show previous speed tests")
+
+            if isHistoryExpanded {
+                VStack(spacing: 0) {
+                    ForEach(Array(viewModel.speedHistory.enumerated()), id: \.element.id) { index, entry in
+                        Button {
+                            inspectedHistoryID = inspectedHistoryID == entry.id ? nil : entry.id
+                            selectedActivity = nil
+                        } label: {
+                            historyRow(entry)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 9)
+                                .background(
+                                    inspectedHistoryID == entry.id
+                                        ? Color.primary.opacity(0.06)
+                                        : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        if index < viewModel.speedHistory.count - 1 {
+                            Divider()
+                                .overlay(palette.textTertiary.color.opacity(0.18))
+                                .padding(.leading, 8)
+                        }
+                    }
+                }
+
+                HStack {
+                    Text("Tap a run to inspect")
+                        .font(.caption2)
+                        .linkWaveText(.secondary)
+                    Spacer()
+                    Button("Clear") {
+                        viewModel.clearSpeedTestHistory()
+                        inspectedHistoryID = nil
+                        isHistoryExpanded = false
+                        selectedActivity = nil
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(palette.textAccent)
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    private func historyRow(_ record: SpeedTestRecord) -> some View {
+        let tiers = SpeedTestActivity.allCases.map { ActivityStrengthTier.rating(for: $0, record: record) }
+        let summary: String
+        let summaryColor: Color
+        if tiers.allSatisfy({ $0 == .great }) {
+            summary = "Great"
+            summaryColor = .green
+        } else if tiers.contains(.poor) {
+            summary = "Slow"
+            summaryColor = .red
+        } else {
+            summary = "Steady"
+            summaryColor = .blue
+        }
+
+        return HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(Self.formattedTime(record.timestamp))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(palette.textPrimary.color)
+                    .lineLimit(1)
+                Text(summary)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(summaryColor)
+            }
+            Spacer(minLength: 6)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text("\(Int(record.downMbps.rounded())) ↓ / \(Int(record.upMbps.rounded())) ↑")
+                    .font(.caption.monospacedDigit().weight(.medium))
+                    .foregroundStyle(palette.textPrimary.color)
+                    .lineLimit(1)
+                Text(String(format: "%.1f ms", record.pingMs))
+                    .font(.caption2.monospacedDigit())
+                    .linkWaveText(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    private func activityStrengthSection(for record: SpeedTestRecord) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Activity Strength")
+                    .font(.caption.weight(.medium))
+                    .linkWaveText(.secondary)
+                Spacer()
+                if isInspectingSavedRun {
+                    Button("Close") {
+                        inspectedHistoryID = nil
+                        selectedActivity = nil
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(palette.textAccent)
+                    .buttonStyle(.plain)
+                } else {
+                    Text("Tap to inspect")
+                        .font(.caption2)
+                        .linkWaveText(.secondary)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                ForEach(SpeedTestActivity.allCases) { activity in
+                    let tier = ActivityStrengthTier.rating(for: activity, record: record)
+                    Button {
+                        selectedActivity = activity
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: activity.symbol)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(tier.color)
+                                .frame(width: 14)
+                            Text(activity.title)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(palette.textPrimary.color)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            HStack(alignment: .bottom, spacing: 2) {
+                                ForEach(0..<4, id: \.self) { index in
+                                    Capsule()
+                                        .fill(index < tier.rawValue ? tier.color : palette.textTertiary.color.opacity(0.34))
+                                        .frame(width: 2.5, height: CGFloat(7 + index * 2))
+                                }
+                            }
+                            Text(tier.title)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(tier.color)
+                                .frame(width: 34, alignment: .trailing)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 7)
+                        .frame(maxWidth: .infinity, minHeight: 34)
+                        .background {
+                            if selectedActivity == activity {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.primary.opacity(0.06))
+                            }
+                        }
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Text(activityExplanation(for: selectedActivity, record: record))
+                .font(.caption2)
+                .linkWaveText(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func activityExplanation(for activity: SpeedTestActivity?, record: SpeedTestRecord) -> String {
+        let ping = String(format: "%.0f", record.pingMs)
+        let jitter = String(format: "%.0f", record.jitterMs)
+        let down = String(format: "%.1f", record.downMbps)
+        let up = String(format: "%.1f", record.upMbps)
+
+        guard let activity else {
+            let tiers = SpeedTestActivity.allCases.map { ActivityStrengthTier.rating(for: $0, record: record) }
+            if tiers.allSatisfy({ $0 == .great }) { return "Ready for streaming, calls & low-lag gaming" }
+            if tiers.contains(.poor) { return "High latency or weak uplink may disrupt calls & gaming" }
+            return "Smooth for daily streaming, calls & play"
+        }
+
+        let tier = ActivityStrengthTier.rating(for: activity, record: record)
+        switch activity {
+        case .gaming:
+            if tier == .poor { return "High \(ping) ms ping · \(jitter) ms jitter causes lag spikes" }
+            if tier == .fair { return "\(ping) ms ping · \(jitter) ms jitter — playable with slight delay" }
+            return "\(ping) ms ping · \(jitter) ms jitter for responsive online play"
+        case .streaming:
+            if record.downMbps >= 50 { return "\(down) Mbps downlink handles multiple 4K HDR streams" }
+            if record.downMbps >= 25 { return "\(down) Mbps downlink handles smooth 4K streaming" }
+            if record.downMbps >= 10 { return "\(down) Mbps downlink handles HD 1080p streaming" }
+            return "\(down) Mbps downlink may buffer on HD streams"
+        case .videoCalls:
+            if tier == .poor { return "\(up) Mbps uplink & \(ping) ms ping may freeze video calls" }
+            if tier == .fair { return "\(up) Mbps uplink works for calls; disable HD if choppy" }
+            return "\(up) Mbps uplink keeps HD calls clear without dropouts"
+        case .browsing:
+            if tier == .poor { return "\(down) Mbps down feels sluggish on media-heavy pages" }
+            if tier == .fair { return "\(down) Mbps down handles web browsing; large files take longer" }
+            return "\(down) Mbps down loads pages and updates fast"
+        }
+    }
+
+    private static func formattedTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        if Calendar.current.isDateInToday(date) {
+            formatter.dateFormat = "'Today, 'h:mm a"
+        } else {
+            formatter.dateFormat = "MMM d, h:mm a"
+        }
+        return formatter.string(from: date)
+            .replacingOccurrences(of: "AM", with: "am")
+            .replacingOccurrences(of: "PM", with: "pm")
     }
 
     private func resultMetric(_ title: String, value: String, tint: Color) -> some View {
@@ -894,7 +1166,7 @@ private struct SpeedTestCard: View {
             interpolationTask = nil
             guard !Task.isCancelled else { return }
             if let pendingResult {
-                result = pendingResult
+                selectedActivity = nil
                 self.pendingResult = nil
                 scheduleOverrideCleanup()
             } else if !isRunning {
@@ -919,8 +1191,11 @@ private struct SpeedTestCard: View {
     private func startTest() {
         guard !isRunning, viewModel.canRunSpeedTest else { return }
         isRunning = true
-        result = nil
+        viewModel.clearActiveSpeedTestRecord()
         pendingResult = nil
+        inspectedHistoryID = nil
+        isHistoryExpanded = false
+        selectedActivity = nil
         measuredPingMs = nil
         measuredJitterMs = nil
         emaDownloadMbps = 0
@@ -957,13 +1232,13 @@ private struct SpeedTestCard: View {
                 let completedResult = try await SpeedTestService.run { update in
                     receiveProgress(update)
                 }
+                viewModel.completeSpeedTest(completedResult)
                 pendingResult = completedResult
                 targetDownloadMbps = completedResult.downloadMbps
                 targetUploadMbps = completedResult.uploadMbps
                 hasDownloadReading = true
                 hasUploadReading = true
                 scheduleInterpolation()
-                onCompleted(completedResult)
             } catch is CancellationError {
                 if errorMessage == nil { errorMessage = "Speed test stopped." }
             } catch let error as URLError where error.code == .cancelled {
@@ -977,6 +1252,88 @@ private struct SpeedTestCard: View {
     private static func speed(_ mbps: Double) -> String {
         if mbps >= 1_000 { return String(format: "%.2f Gbps", mbps / 1_000) }
         return String(format: "%.1f Mbps", mbps)
+    }
+}
+
+private enum SpeedTestActivity: String, CaseIterable, Identifiable {
+    case gaming
+    case streaming
+    case videoCalls
+    case browsing
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .gaming: "Gaming"
+        case .streaming: "Streaming"
+        case .videoCalls: "Video Calls"
+        case .browsing: "Browsing"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .gaming: "gamecontroller.fill"
+        case .streaming: "tv.fill"
+        case .videoCalls: "video.fill"
+        case .browsing: "globe"
+        }
+    }
+}
+
+private enum ActivityStrengthTier: Int {
+    case poor = 1
+    case fair = 2
+    case good = 3
+    case great = 4
+
+    var title: String {
+        switch self {
+        case .great: "Great"
+        case .good: "Good"
+        case .fair: "Fair"
+        case .poor: "Poor"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .great: .green
+        case .good: .cyan
+        case .fair: .orange
+        case .poor: .red
+        }
+    }
+
+    static func rating(for activity: SpeedTestActivity, record: SpeedTestRecord) -> ActivityStrengthTier {
+        let ping = record.pingMs
+        let jitter = record.jitterMs
+        let down = record.downMbps
+        let up = record.upMbps
+
+        switch activity {
+        case .gaming:
+            if ping <= 20 && jitter <= 5 && down >= 15 && up >= 5 { return .great }
+            if ping <= 45 && jitter <= 12 && down >= 10 && up >= 3 { return .good }
+            if ping <= 80 && jitter <= 25 && down >= 5 && up >= 1 { return .fair }
+            return .poor
+        case .streaming:
+            if down >= 50 { return .great }
+            if down >= 25 { return .good }
+            if down >= 10 { return .fair }
+            return .poor
+        case .videoCalls:
+            if up >= 15 && down >= 15 && ping <= 40 && jitter <= 10 { return .great }
+            if up >= 5 && down >= 8 && ping <= 75 && jitter <= 20 { return .good }
+            if up >= 2 && down >= 3 && ping <= 120 { return .fair }
+            return .poor
+        case .browsing:
+            if down >= 40 && ping <= 50 { return .great }
+            if down >= 15 && ping <= 100 { return .good }
+            if down >= 5 { return .fair }
+            return .poor
+        }
     }
 }
 
