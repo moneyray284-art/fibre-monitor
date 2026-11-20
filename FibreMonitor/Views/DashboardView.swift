@@ -597,7 +597,6 @@ private struct CompactSpeedCard: View {
                     Text(value >= 1 ? String(format: value >= 100 ? "%.0f" : "%.1f", value) : String(format: "%.0f", value * 1_000))
                         .font(.system(.title3, design: .rounded).weight(.bold))
                         .monospacedDigit()
-                        .contentTransition(.numericText())
                         .animation(.linear(duration: isInterpolated ? 0.025 : 0.22), value: value)
                     Text(value >= 1 ? "Mbps" : "Kbps")
                         .font(.caption2.weight(.medium))
@@ -641,6 +640,9 @@ private struct SpeedTestCard: View {
     @State private var targetUploadMbps = 0.0
     @State private var displayedDownloadMbps = 0.0
     @State private var displayedUploadMbps = 0.0
+    @State private var gatewayDownloadReturnMbps = 0.0
+    @State private var gatewayDownloadReturnTargetMbps = 0.0
+    @State private var isReturningGatewayDownloadToLive = false
     @State private var hasDownloadReading = false
     @State private var hasUploadReading = false
     @Environment(\.linkWaveThemePalette) private var palette
@@ -739,6 +741,11 @@ private struct SpeedTestCard: View {
                 ? "Speed test stopped because the internet path was lost."
                 : "Speed test stopped because Wi-Fi disconnected."
         }
+        .onChange(of: viewModel.traffic.downloadMbps) { sample in
+            guard isReturningGatewayDownloadToLive else { return }
+            gatewayDownloadReturnTargetMbps = max(0, sample)
+            scheduleInterpolation()
+        }
         .onChange(of: startRequested) { requested in
             guard requested else { return }
             startRequested = false
@@ -784,7 +791,6 @@ private struct SpeedTestCard: View {
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
                 .foregroundStyle(tint)
                 .monospacedDigit()
-                .contentTransition(.numericText())
                 .animation(.linear(duration: 0.025), value: value)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -810,11 +816,15 @@ private struct SpeedTestCard: View {
                 hasDownloadReading = false
                 testDownloadMbps = 0
             case .upload:
+                isReturningGatewayDownloadToLive = true
+                gatewayDownloadReturnMbps = displayedDownloadMbps
+                gatewayDownloadReturnTargetMbps = max(0, viewModel.traffic.downloadMbps)
                 emaUploadMbps = 0
                 targetUploadMbps = 0
                 displayedUploadMbps = 0
                 hasUploadReading = false
                 testUploadMbps = 0
+                scheduleInterpolation()
             }
         }
 
@@ -848,12 +858,20 @@ private struct SpeedTestCard: View {
             while !Task.isCancelled {
                 let downloadDelta = targetDownloadMbps - displayedDownloadMbps
                 let uploadDelta = targetUploadMbps - displayedUploadMbps
+                let gatewayDownloadDelta = gatewayDownloadReturnTargetMbps - gatewayDownloadReturnMbps
+                let gatewayDownloadIsSettled = !isReturningGatewayDownloadToLive || abs(gatewayDownloadDelta) < 0.04
 
-                if abs(downloadDelta) < 0.04 && abs(uploadDelta) < 0.04 {
+                if abs(downloadDelta) < 0.04 && abs(uploadDelta) < 0.04 && gatewayDownloadIsSettled {
                     withAnimation(.linear(duration: 0.04)) {
                         displayedDownloadMbps = targetDownloadMbps
                         displayedUploadMbps = targetUploadMbps
-                        testDownloadMbps = displayedDownloadMbps
+                        if isReturningGatewayDownloadToLive {
+                            gatewayDownloadReturnMbps = gatewayDownloadReturnTargetMbps
+                            testDownloadMbps = nil
+                            isReturningGatewayDownloadToLive = false
+                        } else if progress.phase == .download {
+                            testDownloadMbps = displayedDownloadMbps
+                        }
                         testUploadMbps = displayedUploadMbps
                     }
                     break
@@ -862,7 +880,12 @@ private struct SpeedTestCard: View {
                 withAnimation(.linear(duration: 1.0 / 30.0)) {
                     displayedDownloadMbps += downloadDelta * 0.22
                     displayedUploadMbps += uploadDelta * 0.22
-                    testDownloadMbps = displayedDownloadMbps
+                    if isReturningGatewayDownloadToLive {
+                        gatewayDownloadReturnMbps += gatewayDownloadDelta * 0.22
+                        testDownloadMbps = gatewayDownloadReturnMbps
+                    } else if progress.phase == .download {
+                        testDownloadMbps = displayedDownloadMbps
+                    }
                     testUploadMbps = displayedUploadMbps
                 }
                 try? await Task.sleep(nanoseconds: 33_333_333)
@@ -906,6 +929,9 @@ private struct SpeedTestCard: View {
         targetUploadMbps = 0
         displayedDownloadMbps = 0
         displayedUploadMbps = 0
+        gatewayDownloadReturnMbps = 0
+        gatewayDownloadReturnTargetMbps = 0
+        isReturningGatewayDownloadToLive = false
         hasDownloadReading = false
         hasUploadReading = false
         overrideCleanupTask?.cancel()
