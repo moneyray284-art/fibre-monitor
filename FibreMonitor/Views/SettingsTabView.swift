@@ -202,6 +202,9 @@ public struct SettingsTabView: View {
                     .disabled(!appIconManager.supportsAlternateIcons && choice != .classic)
                 }
             }
+            Text("Logo Color applies to the LinkWave icon designs. Classic keeps its original artwork.")
+                .font(.caption)
+                .linkWaveText(.secondary)
 
             if !appIconManager.supportsAlternateIcons {
                 Text("Alternate app icons aren't supported on this device.")

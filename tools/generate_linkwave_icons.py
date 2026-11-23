@@ -1,4 +1,4 @@
-"""Generate the 15 Logo Color variants for LinkWave's five alternate designs.
+"""Generate the 40 Logo Color variants for LinkWave's five alternate designs.
 
 The primary AppIcon and all existing alternate icon sets are deliberately left
 untouched. Artwork is drawn from vector bezier paths at 3x resolution and
@@ -28,6 +28,11 @@ LOGO_COLORS = {
     "Cyan": ("#0E7490", "#22D3EE"),
     "Sky": ("#0284C7", "#38BDF8"),
     "Mint": ("#0F766E", "#2DD4BF"),
+    "Emerald": ("#059669", "#34D399"),
+    "Indigo": ("#4338CA", "#818CF8"),
+    "Violet": ("#6D28D9", "#A78BFA"),
+    "Rose": ("#BE123C", "#FB7185"),
+    "Amber": ("#B45309", "#FBBF24"),
 }
 
 
@@ -246,8 +251,20 @@ def save_icon_set(set_name: str, light_accent: str, dark_accent: str, artwork: s
 def main() -> None:
     for design_name, artwork in DESIGNS.items():
         for color_name, (light_accent, dark_accent) in LOGO_COLORS.items():
+            set_name = f"{design_name}{color_name}"
+            folder = ROOT / f"{set_name}.appiconset"
+            expected = (
+                folder / f"{set_name}.png",
+                folder / f"{set_name}-Dark.png",
+                folder / f"{set_name}-Tinted.png",
+                folder / "Contents.json",
+            )
+            # Existing Cyan, Sky, and Mint sets are shipped artwork. Leave them
+            # byte-for-byte untouched; render only missing color/design variants.
+            if all(path.is_file() for path in expected):
+                continue
             save_icon_set(
-                f"{design_name}{color_name}",
+                set_name,
                 light_accent,
                 dark_accent,
                 artwork,

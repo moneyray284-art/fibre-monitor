@@ -93,18 +93,6 @@ public enum AppLogoColorChoice: String, CaseIterable, Identifiable, Hashable {
         case .amber: .orange
         }
     }
-
-    /// Alternate icon artwork is bundled only in the original Cyan, Sky, and Mint variants.
-    /// Keep new wordmark colors independent while resolving icon selection to an existing asset.
-    public var alternateIconVariant: AppLogoColorChoice {
-        switch self {
-        case .cyan, .sky, .mint: self
-        case .emerald: .mint
-        case .indigo, .violet: .sky
-        case .rose: .cyan
-        case .amber: .mint
-        }
-    }
 }
 
 public enum AppIconChoice: String, CaseIterable, Identifiable, Hashable {
@@ -168,7 +156,7 @@ public enum AppIconChoice: String, CaseIterable, Identifiable, Hashable {
         case .classic: return nil
         case .orange, .blue, .purple, .green: return nil
         }
-        return "\(prefix)\(logoColor.alternateIconVariant.title)"
+        return "\(prefix)\(logoColor.title)"
     }
 
     public var pickerEquivalent: AppIconChoice {

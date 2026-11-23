@@ -103,11 +103,11 @@ jobs:
           PRIMARY_ICON=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$PLIST" 2>/dev/null || true)
           [[ -z "$PRIMARY_ICON" || "$PRIMARY_ICON" == "AppIcon" ]] || { echo "::error::Expected the untouched Classic primary icon AppIcon, found $PRIMARY_ICON"; exit 1; }
           for icon in AppIconOrange AppIconBlue AppIconPurple AppIconGreen AppIconLaunchArcs AppIconMonogramI AppIconArcsI AppIconLinkRing AppIconWavefrontW \
-            AppIconLaunchArcsCyan AppIconLaunchArcsSky AppIconLaunchArcsMint \
-            AppIconMonogramICyan AppIconMonogramISky AppIconMonogramIMint \
-            AppIconArcsICyan AppIconArcsISky AppIconArcsIMint \
-            AppIconLinkRingCyan AppIconLinkRingSky AppIconLinkRingMint \
-            AppIconWavefrontWCyan AppIconWavefrontWSky AppIconWavefrontWMint; do
+            AppIconLaunchArcsCyan AppIconLaunchArcsSky AppIconLaunchArcsMint AppIconLaunchArcsEmerald AppIconLaunchArcsIndigo AppIconLaunchArcsViolet AppIconLaunchArcsRose AppIconLaunchArcsAmber \
+            AppIconMonogramICyan AppIconMonogramISky AppIconMonogramIMint AppIconMonogramIEmerald AppIconMonogramIIndigo AppIconMonogramIViolet AppIconMonogramIRose AppIconMonogramIAmber \
+            AppIconArcsICyan AppIconArcsISky AppIconArcsIMint AppIconArcsIEmerald AppIconArcsIIndigo AppIconArcsIViolet AppIconArcsIRose AppIconArcsIAmber \
+            AppIconLinkRingCyan AppIconLinkRingSky AppIconLinkRingMint AppIconLinkRingEmerald AppIconLinkRingIndigo AppIconLinkRingViolet AppIconLinkRingRose AppIconLinkRingAmber \
+            AppIconWavefrontWCyan AppIconWavefrontWSky AppIconWavefrontWMint AppIconWavefrontWEmerald AppIconWavefrontWIndigo AppIconWavefrontWViolet AppIconWavefrontWRose AppIconWavefrontWAmber; do
             /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundleAlternateIcons:$icon" "$PLIST" > /dev/null || { echo "::error::Alternate icon $icon missing from built Info.plist"; exit 1; }
           done
           APP=build/Build/Products/Release-iphoneos/FibreMonitor.app
