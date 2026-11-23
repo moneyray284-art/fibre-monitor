@@ -81,6 +81,12 @@ public enum AppThemePreset: String, CaseIterable, Identifiable, Codable {
     case emerald
     case sunset
     case luna
+    case cobaltIndigo
+    case pulseViolet
+    case coralRose
+    case solarAmber
+    case oceanic
+    case nordicSlate
 
     public var id: String { rawValue }
 
@@ -91,6 +97,12 @@ public enum AppThemePreset: String, CaseIterable, Identifiable, Codable {
         case .emerald: "Emerald"
         case .sunset: "Sunset"
         case .luna: "Luna"
+        case .cobaltIndigo: "Cobalt Indigo"
+        case .pulseViolet: "Pulse Violet"
+        case .coralRose: "Coral Rose"
+        case .solarAmber: "Solar Amber"
+        case .oceanic: "Oceanic"
+        case .nordicSlate: "Nordic Slate"
         }
     }
 
@@ -101,6 +113,12 @@ public enum AppThemePreset: String, CaseIterable, Identifiable, Codable {
         case .emerald: "leaf.fill"
         case .sunset: "sun.horizon.fill"
         case .luna: "moon.fill"
+        case .cobaltIndigo: "sparkles"
+        case .pulseViolet: "wand.and.stars"
+        case .coralRose: "camera.macro"
+        case .solarAmber: "flame.fill"
+        case .oceanic: "water.waves"
+        case .nordicSlate: "cloud.fill"
         }
     }
 
@@ -116,6 +134,36 @@ public enum AppThemePreset: String, CaseIterable, Identifiable, Codable {
             ThemePalette(bgPrimary: .init(red: 0.986, green: 0.96, blue: 0.948), bgSecondary: .init(red: 1, green: 0.99, blue: 0.985), bgTertiary: .init(red: 0.968, green: 0.928, blue: 0.908), bgElevated: .init(red: 0.995, green: 0.976, blue: 0.966), textPrimary: .init(red: 0.145, green: 0.09, blue: 0.075), textSecondary: .init(red: 0.46, green: 0.365, blue: 0.335), textTertiary: .init(red: 0.64, green: 0.545, blue: 0.515), accent: .init(red: 0.945, green: 0.39, blue: 0.22))
         case .luna:
             ThemePalette(bgPrimary: .init(red: 0.964, green: 0.952, blue: 0.986), bgSecondary: .init(red: 0.992, green: 0.988, blue: 1), bgTertiary: .init(red: 0.936, green: 0.916, blue: 0.972), bgElevated: .init(red: 0.98, green: 0.972, blue: 0.996), textPrimary: .init(red: 0.105, green: 0.085, blue: 0.145), textSecondary: .init(red: 0.4, green: 0.36, blue: 0.475), textTertiary: .init(red: 0.585, green: 0.545, blue: 0.655), accent: .init(red: 0.545, green: 0.361, blue: 0.965))
+        case .cobaltIndigo:
+            Self.makePalette(
+                bgPrimary: 0xF2F4FC, bgSecondary: 0xFFFFFF, bgTertiary: 0xE8ECFA, bgElevated: 0xD8DFF7,
+                textPrimary: 0x0E142B, textSecondary: 0x3E4B7A, textTertiary: 0x6674A3, accent: 0x4338CA
+            )
+        case .pulseViolet:
+            Self.makePalette(
+                bgPrimary: 0xF6F2FC, bgSecondary: 0xFFFFFF, bgTertiary: 0xEFE6FA, bgElevated: 0xE2D2F7,
+                textPrimary: 0x1D0F30, textSecondary: 0x5B3E80, textTertiary: 0x8264A8, accent: 0x6D28D9
+            )
+        case .coralRose:
+            Self.makePalette(
+                bgPrimary: 0xFCF3F5, bgSecondary: 0xFFFFFF, bgTertiary: 0xF7E5E9, bgElevated: 0xEED1D8,
+                textPrimary: 0x270D14, textSecondary: 0x6E3B49, textTertiary: 0x94606E, accent: 0xBE123C
+            )
+        case .solarAmber:
+            Self.makePalette(
+                bgPrimary: 0xFBF8F0, bgSecondary: 0xFFFFFF, bgTertiary: 0xF5EEDB, bgElevated: 0xEAE0C2,
+                textPrimary: 0x221B0A, textSecondary: 0x645329, textTertiary: 0x87764A, accent: 0xB45309
+            )
+        case .oceanic:
+            Self.makePalette(
+                bgPrimary: 0xF0F9FA, bgSecondary: 0xFFFFFF, bgTertiary: 0xE1F3F5, bgElevated: 0xCBE9ED,
+                textPrimary: 0x082429, textSecondary: 0x2A5B63, textTertiary: 0x528088, accent: 0x0891B2
+            )
+        case .nordicSlate:
+            Self.makePalette(
+                bgPrimary: 0xF3F5F8, bgSecondary: 0xFFFFFF, bgTertiary: 0xE7ECF2, bgElevated: 0xD8E0EA,
+                textPrimary: 0x111827, textSecondary: 0x4B5563, textTertiary: 0x6B7280, accent: 0x0284C7
+            )
         }
     }
 
@@ -131,12 +179,68 @@ public enum AppThemePreset: String, CaseIterable, Identifiable, Codable {
             ThemePalette(bgPrimary: .init(red: 0.08, green: 0.056, blue: 0.05), bgSecondary: .init(red: 0.128, green: 0.092, blue: 0.084), bgTertiary: .init(red: 0.175, green: 0.13, blue: 0.118), bgElevated: .init(red: 0.212, green: 0.16, blue: 0.146), textPrimary: .init(red: 0.988, green: 0.965, blue: 0.958), textSecondary: .init(red: 0.735, green: 0.64, blue: 0.618), textTertiary: .init(red: 0.535, green: 0.445, blue: 0.425), accent: .init(red: 0.984, green: 0.573, blue: 0.235))
         case .luna:
             ThemePalette(bgPrimary: .init(red: 0.066, green: 0.054, blue: 0.088), bgSecondary: .init(red: 0.108, green: 0.09, blue: 0.142), bgTertiary: .init(red: 0.15, green: 0.126, blue: 0.195), bgElevated: .init(red: 0.185, green: 0.156, blue: 0.238), textPrimary: .init(red: 0.972, green: 0.96, blue: 0.995), textSecondary: .init(red: 0.665, green: 0.625, blue: 0.745), textTertiary: .init(red: 0.465, green: 0.425, blue: 0.55), accent: .init(red: 0.655, green: 0.545, blue: 0.98))
+        case .cobaltIndigo:
+            Self.makePalette(
+                bgPrimary: 0x060813, bgSecondary: 0x0C1022, bgTertiary: 0x131934, bgElevated: 0x1A2246,
+                textPrimary: 0xF1F3FF, textSecondary: 0x9BA5D6, textTertiary: 0x6874AB, accent: 0x818CF8
+            )
+        case .pulseViolet:
+            Self.makePalette(
+                bgPrimary: 0x0B0714, bgSecondary: 0x130D22, bgTertiary: 0x1C1333, bgElevated: 0x261A45,
+                textPrimary: 0xF7F2FF, textSecondary: 0xB79EE0, textTertiary: 0x8469B0, accent: 0xA78BFA
+            )
+        case .coralRose:
+            Self.makePalette(
+                bgPrimary: 0x13070B, bgSecondary: 0x1D0C12, bgTertiary: 0x29121A, bgElevated: 0x361823,
+                textPrimary: 0xFFF1F4, textSecondary: 0xCCA0AC, textTertiary: 0x966976, accent: 0xFB7185
+            )
+        case .solarAmber:
+            Self.makePalette(
+                bgPrimary: 0x0E0C06, bgSecondary: 0x17140B, bgTertiary: 0x221D11, bgElevated: 0x2E2717,
+                textPrimary: 0xFEF9EC, textSecondary: 0xC8B991, textTertiary: 0x91825C, accent: 0xFBBF24
+            )
+        case .oceanic:
+            Self.makePalette(
+                bgPrimary: 0x041014, bgSecondary: 0x091B21, bgTertiary: 0x0F272F, bgElevated: 0x15343E,
+                textPrimary: 0xECFEFF, textSecondary: 0x86BCC4, textTertiary: 0x528992, accent: 0x2DD4BF
+            )
+        case .nordicSlate:
+            Self.makePalette(
+                bgPrimary: 0x090B0E, bgSecondary: 0x111419, bgTertiary: 0x181D24, bgElevated: 0x212832,
+                textPrimary: 0xF3F4F6, textSecondary: 0x9CA3AF, textTertiary: 0x6B7280, accent: 0x38BDF8
+            )
         }
     }
 
     public func previewDots(for scheme: ColorScheme) -> [Color] {
         let palette = scheme == .dark ? darkPalette : lightPalette
         return [palette.bgPrimary.color, palette.bgSecondary.color, palette.bgTertiary.color, palette.accent.color]
+    }
+
+    private static func makePalette(
+        bgPrimary: UInt32,
+        bgSecondary: UInt32,
+        bgTertiary: UInt32,
+        bgElevated: UInt32,
+        textPrimary: UInt32,
+        textSecondary: UInt32,
+        textTertiary: UInt32,
+        accent: UInt32
+    ) -> ThemePalette {
+        func color(_ hex: UInt32) -> CodableColor {
+            CodableColor(
+                red: Double((hex >> 16) & 0xFF) / 255,
+                green: Double((hex >> 8) & 0xFF) / 255,
+                blue: Double(hex & 0xFF) / 255
+            )
+        }
+
+        return ThemePalette(
+            bgPrimary: color(bgPrimary), bgSecondary: color(bgSecondary),
+            bgTertiary: color(bgTertiary), bgElevated: color(bgElevated),
+            textPrimary: color(textPrimary), textSecondary: color(textSecondary),
+            textTertiary: color(textTertiary), accent: color(accent)
+        )
     }
 }
 

@@ -51,6 +51,11 @@ public enum AppLogoColorChoice: String, CaseIterable, Identifiable, Hashable {
     case cyan
     case sky
     case mint
+    case emerald
+    case indigo
+    case violet
+    case rose
+    case amber
 
     public var id: String { rawValue }
     public var title: String { rawValue.capitalized }
@@ -63,6 +68,16 @@ public enum AppLogoColorChoice: String, CaseIterable, Identifiable, Hashable {
         case (.sky, _): Color(red: 2.0 / 255.0, green: 132.0 / 255.0, blue: 199.0 / 255.0)
         case (.mint, .dark): Color(red: 45.0 / 255.0, green: 212.0 / 255.0, blue: 191.0 / 255.0)
         case (.mint, _): Color(red: 15.0 / 255.0, green: 118.0 / 255.0, blue: 110.0 / 255.0)
+        case (.emerald, .dark): Color(red: 52.0 / 255.0, green: 211.0 / 255.0, blue: 153.0 / 255.0)
+        case (.emerald, _): Color(red: 5.0 / 255.0, green: 150.0 / 255.0, blue: 105.0 / 255.0)
+        case (.indigo, .dark): Color(red: 129.0 / 255.0, green: 140.0 / 255.0, blue: 248.0 / 255.0)
+        case (.indigo, _): Color(red: 67.0 / 255.0, green: 56.0 / 255.0, blue: 202.0 / 255.0)
+        case (.violet, .dark): Color(red: 167.0 / 255.0, green: 139.0 / 255.0, blue: 250.0 / 255.0)
+        case (.violet, _): Color(red: 109.0 / 255.0, green: 40.0 / 255.0, blue: 217.0 / 255.0)
+        case (.rose, .dark): Color(red: 251.0 / 255.0, green: 113.0 / 255.0, blue: 133.0 / 255.0)
+        case (.rose, _): Color(red: 190.0 / 255.0, green: 18.0 / 255.0, blue: 60.0 / 255.0)
+        case (.amber, .dark): Color(red: 251.0 / 255.0, green: 191.0 / 255.0, blue: 36.0 / 255.0)
+        case (.amber, _): Color(red: 180.0 / 255.0, green: 83.0 / 255.0, blue: 9.0 / 255.0)
         }
     }
 
@@ -71,6 +86,23 @@ public enum AppLogoColorChoice: String, CaseIterable, Identifiable, Hashable {
         case .cyan: .cyan
         case .sky: .blue
         case .mint: .green
+        case .emerald: .green
+        case .indigo: .blue
+        case .violet: .purple
+        case .rose: .orange
+        case .amber: .orange
+        }
+    }
+
+    /// Alternate icon artwork is bundled only in the original Cyan, Sky, and Mint variants.
+    /// Keep new wordmark colors independent while resolving icon selection to an existing asset.
+    public var alternateIconVariant: AppLogoColorChoice {
+        switch self {
+        case .cyan, .sky, .mint: self
+        case .emerald: .mint
+        case .indigo, .violet: .sky
+        case .rose: .cyan
+        case .amber: .mint
         }
     }
 }
@@ -136,7 +168,7 @@ public enum AppIconChoice: String, CaseIterable, Identifiable, Hashable {
         case .classic: return nil
         case .orange, .blue, .purple, .green: return nil
         }
-        return "\(prefix)\(logoColor.title)"
+        return "\(prefix)\(logoColor.alternateIconVariant.title)"
     }
 
     public var pickerEquivalent: AppIconChoice {
