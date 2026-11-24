@@ -3,7 +3,6 @@ import SwiftUI
 public struct SettingsTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
-    @ObservedObject private var appIconManager = AppIconManager.shared
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("linkwave.surfaceStyle") private var surfaceStyleRawValue = LinkWaveSurfaceStyle.liquidGlass.rawValue
     @State private var editorMode: RouterProfileEditorView.Mode?
@@ -18,16 +17,10 @@ public struct SettingsTabView: View {
     public var body: some View {
         Form {
             routersSection
-            updatesSection
+            networkAndToolsSection
             appearanceSection
-            networkDetailsSection
-            diagnosticsSection
-            toolsSection
-            if settings.isConfigured {
-                routerControlsSection
-                sessionSection
-            }
-            aboutSection
+            preferencesSection
+            systemAndAboutSection
         }
         .environment(\.linkWaveThemePalette, palette)
         .environment(\.linkWaveSurfaceStyle, surfaceStyle)
@@ -121,22 +114,29 @@ public struct SettingsTabView: View {
             } label: {
                 Label("Add Router", systemImage: "plus.circle.fill")
             }
+            if settings.isConfigured {
+                if viewModel.isLoggedOut {
+                    Button {
+                        viewModel.reconnectSession()
+                    } label: {
+                        Label("Reconnect to Router", systemImage: "arrow.clockwise.circle")
+                    }
+                } else {
+                    Button(role: .destructive) {
+                        Task { await viewModel.logoutSession() }
+                    } label: {
+                        Label("Log Out of Router", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                }
+            }
         } header: {
             HStack {
-                Text("Routers")
+                Text("Routers & Session")
                 Spacer()
                 if !settings.profiles.isEmpty { EditButton() }
             }
         } footer: {
-            Text("Tap a router to switch to it. Switching logs out of the current router session first. Swipe or tap Edit to reorder or remove a profile.")
-                .linkWaveText(.secondary)
-        }
-    }
-
-    private var updatesSection: some View {
-        Section("Updates") {
-            Label("Syncs on launch, when the app returns, and when a tab is more than 10 seconds out of date.", systemImage: "arrow.triangle.2.circlepath")
-                .font(.subheadline)
+            Text("Tap a router to switch, use its pencil to edit, or tap Edit to reorder and remove profiles. Logging out frees the router's single-session web interface so it can be used in a browser.")
                 .linkWaveText(.secondary)
         }
     }
@@ -164,70 +164,48 @@ public struct SettingsTabView: View {
             }
             .pickerStyle(.segmented)
 
-            ColorPicker(
-                "Accent Color",
-                selection: Binding(
-                    get: { palette.accent.color },
-                    set: { settings.setThemeColor($0, for: \.accent, scheme: colorScheme) }
-                ),
-                supportsOpacity: false
-            )
-
-            Picker("Logo Color", selection: Binding(
-                get: { settings.logoColor },
-                set: { settings.setLogoColor($0) }
-            )) {
-                ForEach(AppLogoColorChoice.allCases) { choice in
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(choice.color(for: colorScheme))
-                            .frame(width: 12, height: 12)
-                        Text(choice.title)
-                    }
-                    .tag(choice)
-                }
-            }
-            .pickerStyle(.menu)
-
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
-                ForEach(AppIconChoice.allCases) { choice in
-                    AppIconPickerTile(
-                        choice: choice,
-                        isSelected: appIconManager.activeIconName == choice.alternateIconName(logoColor: settings.logoColor),
-                        logoColor: settings.logoColor.color(for: colorScheme)
-                    ) {
-                        settings.appIconChoice = choice
-                        appIconManager.apply(choice, logoColor: settings.logoColor)
-                    }
-                    .disabled(!appIconManager.supportsAlternateIcons && choice != .classic)
-                }
-            }
-            Text("Logo Color applies to the LinkWave icon designs. Classic keeps its original artwork.")
-                .font(.caption)
-                .linkWaveText(.secondary)
-
-            if !appIconManager.supportsAlternateIcons {
-                Text("Alternate app icons aren't supported on this device.")
-                    .font(.caption)
-                    .linkWaveText(.secondary)
-            }
-            if let error = appIconManager.errorMessage {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .accessibilityLabel("App icon error: \(error)")
-            }
-
-            Toggle("Auto-Match Accent Theme", isOn: Binding(
-                get: { settings.autoMatchAppIconToAccentColor },
-                set: { settings.setAutoMatchAccentTheme($0, sourceScheme: colorScheme) }
-            ))
-                .accessibilityHint("Keeps the Light and Dark accent colors in sync. The app icon and Logo Color remain independent.")
-
             NavigationLink {
                 ThemeSettingsView(settings: settings)
             } label: {
-                Label("Theme Colors & Haptics", systemImage: "paintpalette")
+                HStack(spacing: 10) {
+                    Label("Theme & Colors", systemImage: "paintpalette")
+                    Spacer(minLength: 6)
+                    HStack(spacing: -5) {
+                        ForEach(Array(themeSummaryDots.enumerated()), id: \.offset) { _, color in
+                            Circle()
+                                .fill(color)
+                                .frame(width: 15, height: 15)
+                                .overlay(Circle().strokeBorder(Color.primary.opacity(0.18), lineWidth: 1))
+                        }
+                    }
+                    Text(activeThemeName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+            }
+
+            NavigationLink {
+                AppIconSettingsView(settings: settings)
+            } label: {
+                HStack(spacing: 12) {
+                    LinkWaveAppIconPreview(
+                        choice: settings.appIconChoice,
+                        logoColor: settings.logoColor.color(for: colorScheme)
+                    )
+                    .frame(width: 38, height: 38)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("App Icon")
+                            .foregroundStyle(.primary)
+                        Text("\(settings.appIconChoice.title) · \(settings.logoColor.title)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
             }
         }
     }
@@ -240,56 +218,8 @@ public struct SettingsTabView: View {
         LinkWaveSurfaceStyle(rawValue: surfaceStyleRawValue) ?? .liquidGlass
     }
 
-    private var networkDetailsSection: some View {
-        Section("Network Details") {
-            LabeledContent("Gateway", value: viewModel.wan.gateway.isEmpty ? "—" : viewModel.wan.gateway)
-            LabeledContent(
-                "ISP DNS",
-                value: viewModel.wan.dnsServers.isEmpty ? "—" : viewModel.wan.dnsServers.joined(separator: ", ")
-            )
-            LabeledContent("WAN IP", value: viewModel.wan.ipAddress.isEmpty ? "—" : viewModel.wan.ipAddress)
-            if !viewModel.wan.connectionType.isEmpty {
-                LabeledContent("Connection type", value: viewModel.wan.connectionType)
-            }
-        }
-    }
-
-    private var diagnosticsSection: some View {
-        Section("Advanced Diagnostics") {
-            if !viewModel.wan.connectionStatus.isEmpty {
-                LabeledContent(
-                    viewModel.wan.connectionType == "IPoE" ? "WAN status" : "PPPoE status",
-                    value: viewModel.wan.connectionStatus
-                )
-            }
-            if viewModel.wan.uptimeSeconds > 0 {
-                LabeledContent(
-                    viewModel.wan.connectionType == "IPoE" ? "WAN uptime" : "PPPoE uptime",
-                    value: InternetCard.uptime(viewModel.wan.uptimeSeconds)
-                )
-            }
-            if let rx = viewModel.optical.rxPowerDbm {
-                LabeledContent("Optical Rx power", value: String(format: "%.2f dBm", rx))
-            }
-            if let cpu = viewModel.health.cpuPercent {
-                LabeledContent("CPU load", value: "\(cpu)%")
-            }
-            if let memory = viewModel.health.memoryPercent {
-                LabeledContent("Memory load", value: "\(memory)%")
-            }
-            if viewModel.wan.connectionStatus.isEmpty,
-               viewModel.wan.uptimeSeconds <= 0,
-               viewModel.optical.rxPowerDbm == nil,
-               !viewModel.health.hasCpuOrMemory {
-                Text("Connect to the router to view available diagnostics.")
-                    .font(.caption)
-                    .linkWaveText(.secondary)
-            }
-        }
-    }
-
-    private var toolsSection: some View {
-        Section("Tools & Network") {
+    private var networkAndToolsSection: some View {
+        Section("Network & Tools") {
             NavigationLink {
                 DiagnosticsScreen(viewModel: viewModel)
             } label: {
@@ -300,77 +230,302 @@ public struct SettingsTabView: View {
             } label: {
                 Label("Home Network (LAN & DHCP)", systemImage: "network")
             }
-        }
-    }
-
-    private var routerControlsSection: some View {
-        Section("Router Controls") {
-            Button(role: .destructive) {
-                showRebootAlert = true
+            NavigationLink {
+                RouterTelemetrySettingsView(viewModel: viewModel)
             } label: {
-                Label("Restart Fibre Router", systemImage: "power")
+                LabeledContent("Router Telemetry", value: telemetrySummary)
             }
-            .disabled(!viewModel.isConnected || viewModel.isLoggedOut)
         }
     }
 
-    private var sessionSection: some View {
+    private var preferencesSection: some View {
         Section {
-            if viewModel.isLoggedOut {
+            ForEach(HapticLevel.allCases) { option in
+                let selected = settings.hapticLevel == option
                 Button {
-                    viewModel.reconnectSession()
+                    settings.hapticLevel = option
+                    Haptics.impact(.light)
                 } label: {
-                    Label("Reconnect to Router", systemImage: "arrow.clockwise.circle")
+                    HStack(spacing: 12) {
+                        Image(systemName: option.symbolName)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(selected ? palette.accent.color : palette.textSecondary.color)
+                            .frame(width: 24)
+                        Text(option.title)
+                            .foregroundStyle(palette.textPrimary.color)
+                        Spacer()
+                        if selected {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(palette.accent.color)
+                        }
+                    }
                 }
-            } else {
-                Button(role: .destructive) {
-                    Task { await viewModel.logoutSession() }
-                } label: {
-                    Label("Log Out of Router", systemImage: "rectangle.portrait.and.arrow.right")
-                }
+                .buttonStyle(.plain)
             }
         } header: {
-            Text("Session")
+            Text("Preferences")
         } footer: {
-            Text("Logging out frees the router's single-session web interface so you can open it in a browser.")
-                .linkWaveText(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Tap feedback follows the selected level. Success and error feedback use system patterns.")
+                Text("Syncs on launch, when the app returns, and when a tab is more than 10 seconds out of date.")
+            }
+            .linkWaveText(.secondary)
         }
     }
 
-    private var aboutSection: some View {
-        Section("About") {
-            LabeledContent("Version") {
-                HStack(spacing: 7) {
-                    Text(appVersion)
-                        .font(.subheadline.monospacedDigit())
+    private var systemAndAboutSection: some View {
+        Section("System & About") {
+            if settings.isConfigured {
+                Button(role: .destructive) {
+                    showRebootAlert = true
+                } label: {
+                    Label("Restart Fibre Router", systemImage: "power")
+                }
+                .disabled(!viewModel.isConnected || viewModel.isLoggedOut)
+            }
+
+            NavigationLink {
+                AboutSettingsView(viewModel: viewModel, settings: settings)
+            } label: {
+                HStack {
+                    Label("About", systemImage: "info.circle")
+                    Spacer(minLength: 8)
+                    Text("\(versionAndBuild) · \(shortRouterModel)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
             }
-            LabeledContent("Router", value: activeRouterDescription)
-            if let config = settings.activeProfile?.cfgMode, !config.isEmpty {
-                LabeledContent("Configuration", value: config)
-            }
-            if !viewModel.health.firmware.isEmpty {
-                LabeledContent("Firmware", value: viewModel.health.firmware)
-            }
-            if !viewModel.health.hardware.isEmpty {
-                LabeledContent("Hardware", value: viewModel.health.hardware)
-            }
         }
     }
 
-    private var activeRouterDescription: String {
-        if !viewModel.health.model.isEmpty {
-            return "Huawei OptiXstar \(viewModel.health.model)"
+    private var activeThemeName: String {
+        settings.activePreset(for: colorScheme)?.title ?? "Custom"
+    }
+
+    private var themeSummaryDots: [Color] {
+        settings.activePreset(for: colorScheme)?.previewDots(for: colorScheme)
+            ?? [palette.bgPrimary.color, palette.bgSecondary.color, palette.accent.color]
+    }
+
+    private var telemetrySummary: String {
+        var parts: [String] = []
+        if !viewModel.wan.connectionType.isEmpty { parts.append(viewModel.wan.connectionType) }
+        if viewModel.wan.uptimeSeconds > 0 { parts.append(InternetCard.uptime(viewModel.wan.uptimeSeconds)) }
+        if let cpu = viewModel.health.cpuPercent { parts.append("\(cpu)% CPU") }
+        return parts.isEmpty ? "Status and hardware readings" : parts.joined(separator: " · ")
+    }
+
+    private var versionAndBuild: String {
+        let info = Bundle.main.infoDictionary
+        return "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+    }
+
+    private var shortRouterModel: String {
+        if !viewModel.health.model.isEmpty { return viewModel.health.model }
+        if let model = settings.activeProfile?.detectedModel, !model.isEmpty { return model }
+        return "ONT"
+    }
+}
+
+private struct RouterTelemetrySettingsView: View {
+    @ObservedObject var viewModel: MonitorViewModel
+    @ObservedObject private var settings: SettingsStore
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("linkwave.surfaceStyle") private var surfaceStyleRawValue = LinkWaveSurfaceStyle.liquidGlass.rawValue
+
+    init(viewModel: MonitorViewModel) {
+        self.viewModel = viewModel
+        self.settings = viewModel.settings
+    }
+
+    private var palette: ThemePalette { settings.themePalette(for: colorScheme) }
+    private var surfaceStyle: LinkWaveSurfaceStyle {
+        LinkWaveSurfaceStyle(rawValue: surfaceStyleRawValue) ?? .liquidGlass
+    }
+
+    var body: some View {
+        Form {
+            Section("Network Details") {
+                LabeledContent("Gateway", value: viewModel.wan.gateway.isEmpty ? "—" : viewModel.wan.gateway)
+                LabeledContent(
+                    "ISP DNS",
+                    value: viewModel.wan.dnsServers.isEmpty ? "—" : viewModel.wan.dnsServers.joined(separator: ", ")
+                )
+                LabeledContent("WAN IP", value: viewModel.wan.ipAddress.isEmpty ? "—" : viewModel.wan.ipAddress)
+                if !viewModel.wan.connectionType.isEmpty {
+                    LabeledContent("Connection type", value: viewModel.wan.connectionType)
+                }
+            }
+
+            Section("Advanced Diagnostics") {
+                if !viewModel.wan.connectionStatus.isEmpty {
+                    LabeledContent(
+                        viewModel.wan.connectionType == "IPoE" ? "WAN status" : "PPPoE status",
+                        value: viewModel.wan.connectionStatus
+                    )
+                }
+                if viewModel.wan.uptimeSeconds > 0 {
+                    LabeledContent(
+                        viewModel.wan.connectionType == "IPoE" ? "WAN uptime" : "PPPoE uptime",
+                        value: InternetCard.uptime(viewModel.wan.uptimeSeconds)
+                    )
+                }
+                if let rx = viewModel.optical.rxPowerDbm {
+                    LabeledContent("Optical Rx power", value: String(format: "%.2f dBm", rx))
+                }
+                if let cpu = viewModel.health.cpuPercent {
+                    LabeledContent("CPU load", value: "\(cpu)%")
+                }
+                if let memory = viewModel.health.memoryPercent {
+                    LabeledContent("Memory load", value: "\(memory)%")
+                }
+                if viewModel.wan.connectionStatus.isEmpty,
+                   viewModel.wan.uptimeSeconds <= 0,
+                   viewModel.optical.rxPowerDbm == nil,
+                   !viewModel.health.hasCpuOrMemory {
+                    Text("Connect to the router to view available diagnostics.")
+                        .font(.caption)
+                        .linkWaveText(.secondary)
+                }
+            }
         }
+        .environment(\.linkWaveThemePalette, palette)
+        .environment(\.linkWaveSurfaceStyle, surfaceStyle)
+        .linkWaveThemedListSurface()
+        .linkWaveText(.primary)
+        .liquidGlassScrollEdges()
+        .navigationTitle("Router Telemetry")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+    }
+}
+
+private struct AboutSettingsView: View {
+    @ObservedObject var viewModel: MonitorViewModel
+    @ObservedObject var settings: SettingsStore
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("linkwave.surfaceStyle") private var surfaceStyleRawValue = LinkWaveSurfaceStyle.liquidGlass.rawValue
+
+    private var palette: ThemePalette { settings.themePalette(for: colorScheme) }
+    private var surfaceStyle: LinkWaveSurfaceStyle {
+        LinkWaveSurfaceStyle(rawValue: surfaceStyleRawValue) ?? .liquidGlass
+    }
+
+    var body: some View {
+        Form {
+            Section("About") {
+                LabeledContent("Version", value: versionAndBuild)
+                    .font(.subheadline.monospacedDigit())
+                LabeledContent("Router", value: routerDescription)
+                if let config = settings.activeProfile?.cfgMode, !config.isEmpty {
+                    LabeledContent("Configuration", value: config)
+                }
+                if !viewModel.health.firmware.isEmpty {
+                    LabeledContent("Firmware", value: viewModel.health.firmware)
+                }
+                if !viewModel.health.hardware.isEmpty {
+                    LabeledContent("Hardware", value: viewModel.health.hardware)
+                }
+            }
+        }
+        .environment(\.linkWaveThemePalette, palette)
+        .environment(\.linkWaveSurfaceStyle, surfaceStyle)
+        .linkWaveThemedListSurface()
+        .linkWaveText(.primary)
+        .liquidGlassScrollEdges()
+        .navigationTitle("About")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+    }
+
+    private var versionAndBuild: String {
+        let info = Bundle.main.infoDictionary
+        return "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+    }
+
+    private var routerDescription: String {
+        if !viewModel.health.model.isEmpty { return "Huawei OptiXstar \(viewModel.health.model)" }
         if let model = settings.activeProfile?.detectedModel, !model.isEmpty {
             return "Huawei OptiXstar \(model)"
         }
         return "Huawei OptiXstar ONT"
     }
+}
 
-    private var appVersion: String {
-        let info = Bundle.main.infoDictionary
-        return "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+private struct AppIconSettingsView: View {
+    @ObservedObject var settings: SettingsStore
+    @ObservedObject private var appIconManager = AppIconManager.shared
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("linkwave.surfaceStyle") private var surfaceStyleRawValue = LinkWaveSurfaceStyle.liquidGlass.rawValue
+
+    private var palette: ThemePalette { settings.themePalette(for: colorScheme) }
+    private var surfaceStyle: LinkWaveSurfaceStyle {
+        LinkWaveSurfaceStyle(rawValue: surfaceStyleRawValue) ?? .liquidGlass
+    }
+
+    var body: some View {
+        Form {
+            Section("Logo Color") {
+                Picker("Logo Color", selection: Binding(
+                    get: { settings.logoColor },
+                    set: { settings.setLogoColor($0) }
+                )) {
+                    ForEach(AppLogoColorChoice.allCases) { choice in
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(choice.color(for: colorScheme))
+                                .frame(width: 12, height: 12)
+                            Text(choice.title)
+                        }
+                        .tag(choice)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+
+            Section("App Icon") {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
+                    ForEach(AppIconChoice.allCases) { choice in
+                        AppIconPickerTile(
+                            choice: choice,
+                            isSelected: appIconManager.activeIconName == choice.alternateIconName(logoColor: settings.logoColor),
+                            logoColor: settings.logoColor.color(for: colorScheme)
+                        ) {
+                            settings.appIconChoice = choice
+                            appIconManager.apply(choice, logoColor: settings.logoColor)
+                        }
+                        .disabled(!appIconManager.supportsAlternateIcons && choice != .classic)
+                    }
+                }
+
+                Text("Logo Color applies to the LinkWave icon designs. Classic keeps its original artwork.")
+                    .font(.caption)
+                    .linkWaveText(.secondary)
+
+                if !appIconManager.supportsAlternateIcons {
+                    Text("Alternate app icons aren't supported on this device.")
+                        .font(.caption)
+                        .linkWaveText(.secondary)
+                }
+                if let error = appIconManager.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .accessibilityLabel("App icon error: \(error)")
+                }
+            }
+        }
+        .environment(\.linkWaveThemePalette, palette)
+        .environment(\.linkWaveSurfaceStyle, surfaceStyle)
+        .linkWaveThemedListSurface()
+        .linkWaveText(.primary)
+        .liquidGlassScrollEdges()
+        .navigationTitle("App Icon")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
     }
 }
 

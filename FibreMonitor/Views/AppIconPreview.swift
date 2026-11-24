@@ -39,7 +39,7 @@ struct AppIconPickerTile: View {
     }
 }
 
-private struct LinkWaveAppIconPreview: View {
+struct LinkWaveAppIconPreview: View {
     let choice: AppIconChoice
     let logoColor: Color
 

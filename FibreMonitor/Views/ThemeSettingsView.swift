@@ -32,10 +32,10 @@ struct ThemeSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
+                themesSection
+                accentColorSection
                 backgroundsSection
                 textColorsSection
-                themesSection
-                hapticsSection
                 resetSection
             }
             .padding(.horizontal, 16)
@@ -44,7 +44,7 @@ struct ThemeSettingsView: View {
         .background(palette.backgroundPrimary.ignoresSafeArea())
         .environment(\.linkWaveThemePalette, palette)
         .linkWaveText(.primary)
-        .navigationTitle("Theme & Haptics")
+        .navigationTitle("Theme & Colors")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .alert(
@@ -94,8 +94,35 @@ struct ThemeSettingsView: View {
                 colorPickerRow("Secondary", keyPath: \.textSecondary)
                 divider
                 colorPickerRow("Tertiary", keyPath: \.textTertiary)
-                divider
-                colorPickerRow("Accent", keyPath: \.accent)
+            }
+        }
+    }
+
+    private var accentColorSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("ACCENT COLOR", badge: colorScheme == .dark ? "DARK" : "LIGHT")
+            cardContainer {
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(palette.accent.color)
+                        .frame(width: 26, height: 26)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(palette.textTertiary.color.opacity(0.25), lineWidth: 1)
+                        }
+                    Text("Accent Color")
+                        .font(.system(size: 16))
+                        .foregroundStyle(palette.textPrimary.color)
+                    Spacer()
+                    ColorPicker(
+                        "Accent Color",
+                        selection: colorBinding(\.accent),
+                        supportsOpacity: false
+                    )
+                    .labelsHidden()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
             }
         }
     }
@@ -104,6 +131,15 @@ struct ThemeSettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("PRESET THEMES")
             cardContainer {
+                Toggle("Auto-Match Accent Theme", isOn: Binding(
+                    get: { settings.autoMatchAppIconToAccentColor },
+                    set: { settings.setAutoMatchAccentTheme($0, sourceScheme: colorScheme) }
+                ))
+                .accessibilityHint("Keeps the Light and Dark accent colors in sync. The app icon and Logo Color remain independent.")
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                divider
+
                 ForEach(Array(AppThemePreset.allCases.enumerated()), id: \.element.id) { index, preset in
                     let isActivePreset = settings.activePreset(for: colorScheme) == preset
                     Button {
@@ -148,46 +184,6 @@ struct ThemeSettingsView: View {
                     if index < AppThemePreset.allCases.count - 1 { divider }
                 }
             }
-        }
-    }
-
-    private var hapticsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("HAPTICS")
-            cardContainer {
-                ForEach(Array(HapticLevel.allCases.enumerated()), id: \.element.id) { index, option in
-                    let selected = settings.hapticLevel == option
-                    Button {
-                        settings.hapticLevel = option
-                        Haptics.impact(.light)
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: option.symbolName)
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(selected ? palette.accent.color : palette.textSecondary.color)
-                                .frame(width: 24)
-                            Text(option.title)
-                                .font(.system(size: 16, weight: selected ? .semibold : .regular))
-                                .foregroundStyle(palette.textPrimary.color)
-                            Spacer()
-                            if selected {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundStyle(palette.accent.color)
-                            }
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 13)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    if index < HapticLevel.allCases.count - 1 { divider }
-                }
-            }
-            Text("Tap feedback follows the selected level. Success and error feedback use system patterns.")
-                .font(.footnote)
-                .linkWaveText(.tertiary)
-                .padding(.horizontal, 6)
         }
     }
 
