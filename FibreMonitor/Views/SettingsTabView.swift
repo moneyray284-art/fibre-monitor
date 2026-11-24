@@ -143,26 +143,40 @@ public struct SettingsTabView: View {
 
     private var appearanceSection: some View {
         Section("Appearance") {
-            Picker("Theme", selection: Binding(
-                get: { settings.theme },
-                set: { newTheme in
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        settings.theme = newTheme
+            VStack(alignment: .leading, spacing: 7) {
+                Label("Mode", systemImage: "circle.lefthalf.filled")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("Mode", selection: Binding(
+                    get: { settings.theme },
+                    set: { newTheme in
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            settings.theme = newTheme
+                        }
+                    }
+                )) {
+                    ForEach(AppTheme.allCases) { theme in
+                        Text(theme.title).tag(theme)
                     }
                 }
-            )) {
-                ForEach(AppTheme.allCases) { theme in
-                    Text(theme.title).tag(theme)
-                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
 
-            Picker("Surface Style", selection: $surfaceStyleRawValue) {
-                ForEach(LinkWaveSurfaceStyle.allCases) { style in
-                    Text(style.title).tag(style.rawValue)
+            VStack(alignment: .leading, spacing: 7) {
+                Label("Surface", systemImage: "square.stack.3d.up")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("Surface", selection: $surfaceStyleRawValue) {
+                    ForEach(LinkWaveSurfaceStyle.allCases) { style in
+                        Text(style.title).tag(style.rawValue)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
 
             NavigationLink {
                 ThemeSettingsView(settings: settings)
@@ -189,22 +203,23 @@ public struct SettingsTabView: View {
             NavigationLink {
                 AppIconSettingsView(settings: settings)
             } label: {
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     LinkWaveAppIconPreview(
                         choice: settings.appIconChoice,
                         logoColor: settings.logoColor.color(for: colorScheme)
                     )
-                    .frame(width: 38, height: 38)
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .clipped()
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("App Icon")
-                            .foregroundStyle(.primary)
-                        Text("\(settings.appIconChoice.title) · \(settings.logoColor.title)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
+                    Text("App Icon")
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 6)
+                    Text("\(settings.appIconChoice.title) · \(settings.logoColor.title)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
             }
         }
@@ -233,43 +248,57 @@ public struct SettingsTabView: View {
             NavigationLink {
                 RouterTelemetrySettingsView(viewModel: viewModel)
             } label: {
-                LabeledContent("Router Telemetry", value: telemetrySummary)
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Router Telemetry")
+                        Text(telemetrySummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "waveform.path.ecg")
+                }
             }
         }
     }
 
     private var preferencesSection: some View {
         Section {
-            ForEach(HapticLevel.allCases) { option in
-                let selected = settings.hapticLevel == option
-                Button {
-                    settings.hapticLevel = option
-                    Haptics.impact(.light)
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: option.symbolName)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(selected ? palette.accent.color : palette.textSecondary.color)
-                            .frame(width: 24)
-                        Text(option.title)
-                            .foregroundStyle(palette.textPrimary.color)
-                        Spacer()
-                        if selected {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(palette.accent.color)
+            Menu {
+                ForEach(HapticLevel.allCases) { option in
+                    Button {
+                        settings.hapticLevel = option
+                        Haptics.impact()
+                    } label: {
+                        if settings.hapticLevel == option {
+                            Label(option.title, systemImage: "checkmark")
+                        } else {
+                            Text(option.title)
                         }
                     }
                 }
-                .buttonStyle(.plain)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: settings.hapticLevel.symbolName)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(palette.accent.color)
+                        .frame(width: 24)
+                    Text("Haptics")
+                        .foregroundStyle(palette.textPrimary.color)
+                    Spacer(minLength: 8)
+                    Text(settings.hapticLevel.title)
+                        .foregroundStyle(palette.textSecondary.color)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(palette.textTertiary.color)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
         } header: {
             Text("Preferences")
         } footer: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Tap feedback follows the selected level. Success and error feedback use system patterns.")
-                Text("Syncs on launch, when the app returns, and when a tab is more than 10 seconds out of date.")
-            }
+            Text("Syncs on launch, when the app returns, and when a tab is more than 10 seconds out of date.")
             .linkWaveText(.secondary)
         }
     }
