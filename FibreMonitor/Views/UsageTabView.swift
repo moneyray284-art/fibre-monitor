@@ -545,7 +545,7 @@ private struct UsageTotalsCard: View {
                                 .linkWaveText(.secondary)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
-                                .background(palette.backgroundTertiary.color.opacity(0.55), in: Capsule())
+                                .background(palette.backgroundTertiary.opacity(0.55), in: Capsule())
                         }
                     }
                     Text("↓ \(Self.format(month.downloadBytes)) · ↑ \(Self.format(month.uploadBytes)) · \(month.activeDaysCount) active days")
