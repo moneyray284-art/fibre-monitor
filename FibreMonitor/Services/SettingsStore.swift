@@ -306,6 +306,9 @@ public final class SettingsStore: ObservableObject {
         didSet { defaults.set(autoMatchAppIconToAccentColor, forKey: Keys.autoMatchAppIcon) }
     }
     @Published public private(set) var dataUsageSummary = DataUsageSummary()
+    /// Changes only when daily history changes; chart views can observe this small token
+    /// without comparing the full history array during each scrub update.
+    public private(set) var usageHistoryRevision = 0
     @Published public private(set) var profileAliases: [String: [String: String]] = [:]
 
     private struct ProfileUsage: Codable {
@@ -890,6 +893,9 @@ public final class SettingsStore: ObservableObject {
 
     private func refreshDataUsageSummary() {
         guard let profileId = activeProfile?.id else {
+            if !dataUsageSummary.historicalDailyHistory.isEmpty {
+                usageHistoryRevision &+= 1
+            }
             dataUsageSummary = DataUsageSummary()
             return
         }
@@ -970,7 +976,7 @@ public final class SettingsStore: ObservableObject {
                 isPartial: hasSavedCounters && (incompleteDays.contains(key) || calendar.isDateInToday(date))
             )
         }
-        dataUsageSummary = DataUsageSummary(
+        let nextSummary = DataUsageSummary(
             todayDownloadBytes: usage.days[todayKey]?.downloadBytes ?? 0,
             todayUploadBytes: usage.days[todayKey]?.uploadBytes ?? 0,
             monthDownloadBytes: monthDays.reduce(0) { $0 + $1.downloadBytes },
@@ -982,6 +988,10 @@ public final class SettingsStore: ObservableObject {
             dailyHistory: history,
             historicalDailyHistory: historicalHistory
         )
+        if historicalHistory != dataUsageSummary.historicalDailyHistory {
+            usageHistoryRevision &+= 1
+        }
+        dataUsageSummary = nextSummary
     }
 
     public func refreshUsageSummaryForCurrentLocalDay() {

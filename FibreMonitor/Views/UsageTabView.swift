@@ -50,17 +50,56 @@ private struct UsageMonthSummary: Identifiable, Equatable {
     }
 }
 
+private struct UsageScreenDerivedData {
+    var previousMonths: [UsageMonthSummary]
+    var selectedMonthSummary: UsageMonthSummary?
+    var forecast: UsageForecast
+
+    static func make(summary: DataUsageSummary, selectedMonth: Date) -> UsageScreenDerivedData {
+        let previousMonths = UsageMonthSummary.previousMonths(from: summary.historicalDailyHistory)
+        let current = matchingMonth(in: previousMonths, selectedMonth: selectedMonth)
+        let forecast = NetworkInsightsAnalyzer.forecast(
+            history: summary.historicalDailyHistory,
+            selectedMonth: selectedMonth,
+            todayDownloadBytes: summary.todayDownloadBytes,
+            todayUploadBytes: summary.todayUploadBytes
+        )
+        return UsageScreenDerivedData(
+            previousMonths: previousMonths,
+            selectedMonthSummary: current,
+            forecast: forecast
+        )
+    }
+
+    static func matchingMonth(in months: [UsageMonthSummary], selectedMonth: Date) -> UsageMonthSummary? {
+        let calendar = Calendar.current
+        return months.first {
+            calendar.isDate($0.monthStart, equalTo: selectedMonth, toGranularity: .month)
+        }
+    }
+}
+
 public struct UsageTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
     @Environment(\.linkWaveThemePalette) private var palette
     @State private var showSettings = false
-    @State private var selectedUsageDay = Calendar.current.startOfDay(for: Date())
-    @State private var selectedUsageMonth = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Calendar.current.startOfDay(for: Date())
+    @State private var selectedUsageDay: Date
+    @State private var selectedUsageMonth: Date
+    @State private var derivedData: UsageScreenDerivedData
 
     public init(viewModel: MonitorViewModel) {
         self.viewModel = viewModel
         self.settings = viewModel.settings
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let currentMonth = calendar.dateInterval(of: .month, for: today)?.start ?? today
+        _selectedUsageDay = State(initialValue: today)
+        _selectedUsageMonth = State(initialValue: currentMonth)
+        _derivedData = State(initialValue: UsageScreenDerivedData.make(
+            summary: viewModel.settings.dataUsageSummary,
+            selectedMonth: currentMonth
+        ))
     }
 
     public var body: some View {
@@ -87,6 +126,7 @@ public struct UsageTabView: View {
                         )
                         DailyUsageHistoryCard(
                             history: settings.dataUsageSummary.historicalDailyHistory,
+                            historyRevision: settings.usageHistoryRevision,
                             todayDownloadBytes: settings.dataUsageSummary.todayDownloadBytes,
                             todayUploadBytes: settings.dataUsageSummary.todayUploadBytes,
                             onLocalDayRollover: { settings.refreshUsageSummaryForCurrentLocalDay() },
@@ -120,26 +160,49 @@ public struct UsageTabView: View {
         .onChange(of: showSettings) { isPresented in
             if !isPresented { viewModel.settingsDidDismiss() }
         }
+        .onChange(of: settings.usageHistoryRevision) { _ in
+            refreshHistoricalDerivedData()
+        }
+        .onChange(of: selectedUsageMonth) { month in
+            derivedData.selectedMonthSummary = UsageScreenDerivedData.matchingMonth(
+                in: derivedData.previousMonths,
+                selectedMonth: month
+            )
+            refreshForecast()
+        }
     }
 
     private var selectedMonthForecast: UsageForecast {
-        NetworkInsightsAnalyzer.forecast(
-            history: settings.dataUsageSummary.historicalDailyHistory,
-            selectedMonth: selectedUsageMonth,
-            todayDownloadBytes: settings.dataUsageSummary.todayDownloadBytes,
-            todayUploadBytes: settings.dataUsageSummary.todayUploadBytes
-        )
+        derivedData.forecast
     }
 
     private var previousMonthSummaries: [UsageMonthSummary] {
-        UsageMonthSummary.previousMonths(from: settings.dataUsageSummary.historicalDailyHistory)
+        derivedData.previousMonths
     }
 
     private var selectedMonthSummary: UsageMonthSummary? {
-        let calendar = Calendar.current
-        return previousMonthSummaries.first {
-            calendar.isDate($0.monthStart, equalTo: selectedUsageMonth, toGranularity: .month)
-        }
+        derivedData.selectedMonthSummary
+    }
+
+    private func refreshHistoricalDerivedData() {
+        derivedData.previousMonths = UsageMonthSummary.previousMonths(
+            from: settings.dataUsageSummary.historicalDailyHistory
+        )
+        derivedData.selectedMonthSummary = UsageScreenDerivedData.matchingMonth(
+            in: derivedData.previousMonths,
+            selectedMonth: selectedUsageMonth
+        )
+        refreshForecast()
+    }
+
+    private func refreshForecast() {
+        let summary = settings.dataUsageSummary
+        derivedData.forecast = NetworkInsightsAnalyzer.forecast(
+            history: summary.historicalDailyHistory,
+            selectedMonth: selectedUsageMonth,
+            todayDownloadBytes: summary.todayDownloadBytes,
+            todayUploadBytes: summary.todayUploadBytes
+        )
     }
 
     private func selectUsageMonth(_ month: Date) {
@@ -611,14 +674,94 @@ private struct UsageTotalsCard: View {
     }
 }
 
+private struct DailyUsageChartData {
+    let monthPoints: [DailyUsagePoint]
+    let monthOptions: [Date]
+    let chartTopGB: Double
+
+    static func make(
+        history: [DailyUsagePoint],
+        todayDownloadBytes: UInt64,
+        todayUploadBytes: UInt64,
+        selectedMonth: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> DailyUsageChartData {
+        let currentMonth = calendar.dateInterval(of: .month, for: now)?.start ?? calendar.startOfDay(for: now)
+        let selectedMonthStart = calendar.dateInterval(of: .month, for: selectedMonth)?.start ?? currentMonth
+        let monthOptions = Set(history.compactMap { point -> Date? in
+            guard point.date < currentMonth, (point.totalBytes ?? 0) > 0 else { return nil }
+            return calendar.dateInterval(of: .month, for: point.date)?.start
+        } + [currentMonth]).sorted(by: >)
+
+        let historyByDate = Dictionary(
+            history.map { (calendar.startOfDay(for: $0.date), $0) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+        let monthPoints: [DailyUsagePoint]
+        if let range = calendar.range(of: .day, in: .month, for: selectedMonthStart) {
+            let hasTodayUsage = todayDownloadBytes > 0 || todayUploadBytes > 0
+            monthPoints = range.compactMap { dayNumber in
+                guard let date = calendar.date(byAdding: .day, value: dayNumber - 1, to: selectedMonthStart) else {
+                    return nil
+                }
+                let saved = historyByDate[calendar.startOfDay(for: date)]
+                let isToday = calendar.isDateInToday(date)
+                return DailyUsagePoint(
+                    date: date,
+                    label: String(dayNumber),
+                    downloadBytes: isToday && hasTodayUsage ? todayDownloadBytes : saved?.downloadBytes,
+                    uploadBytes: isToday && hasTodayUsage ? todayUploadBytes : saved?.uploadBytes,
+                    isPartial: isToday || saved?.isPartial == true
+                )
+            }
+        } else {
+            monthPoints = []
+        }
+
+        let maximumGB = Double(monthPoints.compactMap(\.totalBytes).max() ?? 0) / 1_000_000_000
+        return DailyUsageChartData(
+            monthPoints: monthPoints,
+            monthOptions: monthOptions,
+            chartTopGB: max(20, ceil((maximumGB * 1.15) / 10) * 10)
+        )
+    }
+}
+
 private struct DailyUsageHistoryCard: View {
     let history: [DailyUsagePoint]
+    let historyRevision: Int
     let todayDownloadBytes: UInt64
     let todayUploadBytes: UInt64
     let onLocalDayRollover: () -> Void
     @Binding var selectedDate: Date
     @Binding var selectedMonth: Date
     @Environment(\.linkWaveThemePalette) private var palette
+    @State private var chartData: DailyUsageChartData
+
+    init(
+        history: [DailyUsagePoint],
+        historyRevision: Int,
+        todayDownloadBytes: UInt64,
+        todayUploadBytes: UInt64,
+        onLocalDayRollover: @escaping () -> Void,
+        selectedDate: Binding<Date>,
+        selectedMonth: Binding<Date>
+    ) {
+        self.history = history
+        self.historyRevision = historyRevision
+        self.todayDownloadBytes = todayDownloadBytes
+        self.todayUploadBytes = todayUploadBytes
+        self.onLocalDayRollover = onLocalDayRollover
+        self._selectedDate = selectedDate
+        self._selectedMonth = selectedMonth
+        _chartData = State(initialValue: DailyUsageChartData.make(
+            history: history,
+            todayDownloadBytes: todayDownloadBytes,
+            todayUploadBytes: todayUploadBytes,
+            selectedMonth: selectedMonth.wrappedValue
+        ))
+    }
 
     private var calendar: Calendar { Calendar.current }
 
@@ -631,35 +774,11 @@ private struct DailyUsageHistoryCard: View {
     }
 
     private var monthOptions: [Date] {
-        let recordedMonths = history.compactMap { point -> Date? in
-            guard point.date < currentMonth, (point.totalBytes ?? 0) > 0 else { return nil }
-            return calendar.dateInterval(of: .month, for: point.date)?.start
-        }
-        return Array(Set(recordedMonths + [currentMonth])).sorted(by: >)
+        chartData.monthOptions
     }
 
     private var monthPoints: [DailyUsagePoint] {
-        points(in: selectedMonthStart)
-    }
-
-    private func points(in month: Date) -> [DailyUsagePoint] {
-        guard let range = calendar.range(of: .day, in: .month, for: month) else { return [] }
-        let historyByDate = Dictionary(uniqueKeysWithValues: history.map {
-            (calendar.startOfDay(for: $0.date), $0)
-        })
-        return range.compactMap { dayNumber in
-            guard let date = calendar.date(byAdding: .day, value: dayNumber - 1, to: month) else { return nil }
-            let saved = historyByDate[date]
-            let isToday = calendar.isDateInToday(date)
-            let hasTodayUsage = todayDownloadBytes > 0 || todayUploadBytes > 0
-            return DailyUsagePoint(
-                date: date,
-                label: String(dayNumber),
-                downloadBytes: isToday && hasTodayUsage ? todayDownloadBytes : saved?.downloadBytes,
-                uploadBytes: isToday && hasTodayUsage ? todayUploadBytes : saved?.uploadBytes,
-                isPartial: isToday || saved?.isPartial == true
-            )
-        }
+        chartData.monthPoints
     }
 
     private var selectedPoint: DailyUsagePoint? {
@@ -667,8 +786,7 @@ private struct DailyUsageHistoryCard: View {
     }
 
     private var chartTopGB: Double {
-        let maximumGB = Double(monthPoints.compactMap(\.totalBytes).max() ?? 0) / 1_000_000_000
-        return max(20, ceil((maximumGB * 1.15) / 10) * 10)
+        chartData.chartTopGB
     }
 
     private var axisLabels: (String, String, String) {
@@ -695,6 +813,8 @@ private struct DailyUsageHistoryCard: View {
             selectedMonth = newMonth
             selectedDate = calendar.startOfDay(for: Date())
         }
+        .onChange(of: historyRevision) { _ in rebuildChartData() }
+        .onChange(of: selectedMonth) { _ in rebuildChartData() }
         .task {
             while !Task.isCancelled {
                 let now = Date()
@@ -711,6 +831,15 @@ private struct DailyUsageHistoryCard: View {
                 selectedDate = calendar.startOfDay(for: Date())
             }
         }
+    }
+
+    private func rebuildChartData() {
+        chartData = DailyUsageChartData.make(
+            history: history,
+            todayDownloadBytes: todayDownloadBytes,
+            todayUploadBytes: todayUploadBytes,
+            selectedMonth: selectedMonth
+        )
     }
 
     private var monthMenu: some View {
@@ -765,10 +894,21 @@ private struct DailyUsageHistoryCard: View {
         selectedMonth = monthStart
         if calendar.isDate(monthStart, equalTo: currentMonth, toGranularity: .month) {
             selectedDate = calendar.startOfDay(for: Date())
-        } else if let mostRecentUsage = points(in: monthStart).last(where: { ($0.totalBytes ?? 0) > 0 }) {
-            selectedDate = mostRecentUsage.date
         } else {
-            selectedDate = points(in: monthStart).last?.date ?? monthStart
+            let mostRecentUsage = history
+                .filter {
+                    calendar.isDate($0.date, equalTo: monthStart, toGranularity: .month)
+                        && ($0.totalBytes ?? 0) > 0
+                }
+                .max(by: { $0.date < $1.date })
+            if let mostRecentUsage {
+                selectedDate = mostRecentUsage.date
+            } else if let dayRange = calendar.range(of: .day, in: .month, for: monthStart),
+                      let lastDay = calendar.date(byAdding: .day, value: dayRange.count - 1, to: monthStart) {
+                selectedDate = lastDay
+            } else {
+                selectedDate = monthStart
+            }
         }
     }
 
@@ -881,9 +1021,8 @@ private struct DailyUsageHistoryCard: View {
 
     private func selectNearestDay(to date: Date) {
         guard !monthPoints.isEmpty else { return }
-        let index = monthPoints.indices.min { lhs, rhs in
-            abs(monthPoints[lhs].date.timeIntervalSince(date)) < abs(monthPoints[rhs].date.timeIntervalSince(date))
-        } ?? 0
+        let dayOffset = calendar.dateComponents([.day], from: selectedMonthStart, to: date).day ?? 0
+        let index = min(max(dayOffset, 0), monthPoints.count - 1)
         selectedDate = monthPoints[index].date
     }
 

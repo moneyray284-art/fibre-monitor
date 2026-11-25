@@ -184,7 +184,7 @@ public struct ClientsTabView: View {
                                 message: "Devices you block from Wi-Fi will appear here."
                             )
                         } else {
-                            VStack(spacing: 10) {
+                            LazyVStack(spacing: 10) {
                                 CardHeader(icon: "hand.raised.fill", title: "Blocked") {
                                     Pill(text: "\(filteredBlockedDevices.count)", color: .red)
                                 }
@@ -359,10 +359,10 @@ public struct ClientsTabView: View {
 
     @ViewBuilder
     private func clientRows(_ devices: [OntDevice]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(Array(devices.enumerated()), id: \.offset) { entry in
-                clientButton(for: entry.element)
-                if entry.offset < devices.count - 1 {
+        LazyVStack(spacing: 0) {
+            ForEach(devices) { device in
+                clientButton(for: device)
+                if device.id != devices.last?.id {
                     LinkWaveHairlineDivider(leading: 54)
                         .padding(.trailing, 12)
                 }

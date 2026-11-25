@@ -200,11 +200,14 @@ private struct RouterHeaderCard: View {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(.thinMaterial)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(palette.backgroundTertiary.opacity(0.42))
-                        }
+                        .fill(LinearGradient(
+                            colors: [
+                                palette.backgroundSecondary.opacity(0.94),
+                                palette.backgroundTertiary.opacity(0.78)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
                         .frame(width: 66, height: 54)
                     HuaweiOptiXstarIllustration(isOnline: viewModel.isConnected, wifiOnline: wifiOnline)
                 }

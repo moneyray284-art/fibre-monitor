@@ -37,13 +37,8 @@ private func linkWaveSolidBorderColor(colorScheme: ColorScheme) -> Color {
 
 // Liquid Glass styling.
 //
-// On iOS 26+ everything here uses the system Liquid Glass material (`glassEffect`,
-// `.glass` button styles), so it refracts, adapts to light/dark and reacts to touch
-// like the rest of the OS. Earlier iOS versions fall back to blur materials.
-//
-// Following Apple's guidance, glass is only used for surfaces floating over the
-// background (cards, banners, buttons). Chips *inside* a card use a plain system
-// fill instead, because glass on top of glass can't sample what's behind it.
+// Native Liquid Glass remains on system navigation chrome. Scroll cards use static,
+// theme-aware fills and rims to avoid per-card backdrop sampling.
 
 /// Shared card surface for LinkWave's primary screens and supporting cards.
 public struct LinkWaveGlassCard: ViewModifier {
@@ -78,46 +73,45 @@ public struct LinkWaveGlassCard: ViewModifier {
     private func liquidGlass(_ content: some View, shape: RoundedRectangle) -> some View {
         let sheenColors = colorScheme == .dark
             ? [Color.white.opacity(0.08), Color.white.opacity(0.015)]
-            : [Color.white.opacity(0.92), Color.white.opacity(0.74)]
+            : [Color.white.opacity(0.94), Color.white.opacity(0.82)]
         let rimColors = colorScheme == .dark
             ? [Color.white.opacity(0.18), Color.white.opacity(0.06)]
             : [Color.white.opacity(0.95), Color.black.opacity(0.11)]
 
         return content
             .background {
-                ZStack {
-                    shape.fill(.ultraThinMaterial)
-                    if colorScheme == .dark {
-                        shape.fill(palette.backgroundSecondary.opacity(0.72))
+                if colorScheme == .dark {
+                    ZStack {
+                        shape.fill(palette.backgroundSecondary.opacity(0.82))
+                        shape.fill(LinearGradient(colors: sheenColors, startPoint: .top, endPoint: .bottom))
                     }
+                } else {
                     shape.fill(LinearGradient(colors: sheenColors, startPoint: .top, endPoint: .bottom))
                 }
             }
-            .glassEffect(.regular, in: shape)
             .overlay {
                 shape.stroke(
                     LinearGradient(colors: rimColors, startPoint: .top, endPoint: .bottom),
                     lineWidth: colorScheme == .dark ? 0.85 : 0.8
                 )
             }
-            .shadow(
-                color: Color.black.opacity(colorScheme == .dark ? 0.28 : 0.07),
-                radius: colorScheme == .dark ? 14 : 8,
-                y: colorScheme == .dark ? 6 : 3
-            )
     }
 
     private func frosted(_ content: some View, shape: RoundedRectangle) -> some View {
         content
             .background {
                 ZStack {
-                    shape.fill(.thinMaterial)
                     if colorScheme == .dark {
-                        shape.fill(palette.backgroundSecondary.opacity(0.72))
+                        shape.fill(palette.backgroundSecondary.opacity(0.96))
+                        shape.fill(palette.textAccent.opacity(0.025))
                     } else {
-                        shape.fill(Color.white.opacity(0.84))
+                        shape.fill(Color.white.opacity(0.90))
                     }
-                    shape.fill(palette.textAccent.opacity(colorScheme == .dark ? 0.025 : 0.012))
+                    shape.fill(LinearGradient(
+                        colors: [Color.white.opacity(0.04), .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ))
                 }
             }
             .overlay {
@@ -132,11 +126,6 @@ public struct LinkWaveGlassCard: ViewModifier {
                     lineWidth: 0.75
                 )
             }
-            .shadow(
-                color: Color.black.opacity(colorScheme == .dark ? 0.22 : 0.06),
-                radius: colorScheme == .dark ? 10 : 6,
-                y: colorScheme == .dark ? 5 : 2
-            )
     }
 
     private func cleanSolid(_ content: some View, shape: RoundedRectangle) -> some View {
@@ -157,48 +146,22 @@ public struct LiquidGlassPillModifier: ViewModifier {
     public func body(content: Content) -> some View { content }
 }
 
-/// Pre-iOS 26 approximation using regular material and a soft shadow.
-private struct LegacyGlassModifier: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.linkWaveThemePalette) private var palette
-
-    func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
-        content
-            .background(.regularMaterial, in: shape)
-            .overlay(shape.fill(palette.bgSecondary.color.opacity(colorScheme == .dark ? 0.07 : 0.045)))
-            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.06), radius: 14, y: 6)
-    }
-}
-
-/// Full-width action button: prominent Liquid Glass on iOS 26, bordered prominent before.
+/// Full-width action button. Scroll content uses a bordered control, not a second glass layer.
 public struct LiquidGlassActionButtonModifier: ViewModifier {
     let tint: Color?
-    @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
     @Environment(\.linkWaveThemePalette) private var palette
 
     @ViewBuilder
     public func body(content: Content) -> some View {
         let resolvedTint = tint ?? palette.textAccent
-        if #available(iOS 26.0, *), surfaceStyle == .liquidGlass {
-            content.buttonStyle(.glassProminent).tint(resolvedTint).controlSize(.large)
-        } else {
-            content.buttonStyle(.borderedProminent).tint(resolvedTint).controlSize(.large)
-        }
+        content.buttonStyle(.borderedProminent).tint(resolvedTint).controlSize(.large)
     }
 }
 
-/// Small secondary button (presets, expand chevrons): glass on iOS 26, bordered before.
+/// Small secondary button for scroll content, using a lightweight bordered control.
 public struct LiquidGlassSmallButtonModifier: ViewModifier {
-    @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
-
-    @ViewBuilder
     public func body(content: Content) -> some View {
-        if #available(iOS 26.0, *), surfaceStyle == .liquidGlass {
-            content.buttonStyle(.glass).controlSize(.small)
-        } else {
-            content.buttonStyle(.bordered).controlSize(.small)
-        }
+        content.buttonStyle(.bordered).controlSize(.small)
     }
 }
 
@@ -282,8 +245,8 @@ private struct LinkWaveThemedListSurfaceModifier: ViewModifier {
         case .frosted:
             AnyView(
                 Rectangle()
-                    .fill(.thinMaterial)
-                    .overlay(palette.backgroundSecondary.opacity(0.52))
+                    .fill(palette.backgroundSecondary.opacity(colorScheme == .dark ? 0.88 : 0.92))
+                    .overlay(palette.textAccent.opacity(colorScheme == .dark ? 0.025 : 0.01))
             )
         case .cleanSolid:
             AnyView(palette.backgroundSecondary)
@@ -519,16 +482,24 @@ private struct LinkWaveInteractiveGlassCapsuleModifier: ViewModifier {
     func body(content: Content) -> some View {
         switch surfaceStyle {
         case .liquidGlass:
-            if #available(iOS 26.0, *) { content.glassEffect(.regular.interactive(), in: Capsule()) }
-            else { content.background(.regularMaterial, in: Capsule()) }
-        case .frosted:
-            content.background {
-                ZStack {
-                    Capsule().fill(.thinMaterial)
-                    Capsule().fill(palette.accent.color.opacity(colorScheme == .dark ? 0.08 : 0.05))
+            content
+                .background(palette.backgroundSecondary.opacity(colorScheme == .dark ? 0.82 : 0.86), in: Capsule())
+                .overlay {
+                    Capsule().stroke(
+                        LinearGradient(
+                            colors: colorScheme == .dark
+                                ? [Color.white.opacity(0.18), Color.white.opacity(0.06)]
+                                : [Color.white.opacity(0.95), Color.black.opacity(0.11)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.75
+                    )
                 }
-            }
-                .overlay(Capsule().stroke(palette.textSecondary.color.opacity(colorScheme == .dark ? 0.30 : 0.23), lineWidth: 1))
+        case .frosted:
+            content
+                .background(palette.backgroundSecondary.opacity(colorScheme == .dark ? 0.92 : 0.90), in: Capsule())
+                .overlay(Capsule().stroke(colorScheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.09), lineWidth: 0.75))
         case .cleanSolid:
             content.background(linkWaveSolidSurfaceColor(palette, colorScheme: colorScheme), in: Capsule())
                 .overlay(Capsule().stroke(linkWaveSolidBorderColor(colorScheme: colorScheme), lineWidth: 1))
@@ -578,16 +549,24 @@ private struct LiquidGlassCapsuleModifier: ViewModifier {
     func body(content: Content) -> some View {
         switch surfaceStyle {
         case .liquidGlass:
-            if #available(iOS 26.0, *) { content.glassEffect(.regular.interactive(), in: Capsule()) }
-            else { content.background(.regularMaterial, in: Capsule()) }
-        case .frosted:
-            content.background {
-                ZStack {
-                    Capsule().fill(.thinMaterial)
-                    Capsule().fill(palette.accent.color.opacity(colorScheme == .dark ? 0.08 : 0.05))
+            content
+                .background(palette.backgroundSecondary.opacity(colorScheme == .dark ? 0.82 : 0.86), in: Capsule())
+                .overlay {
+                    Capsule().stroke(
+                        LinearGradient(
+                            colors: colorScheme == .dark
+                                ? [Color.white.opacity(0.18), Color.white.opacity(0.06)]
+                                : [Color.white.opacity(0.95), Color.black.opacity(0.11)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.75
+                    )
                 }
-            }
-                .overlay(Capsule().stroke(palette.textSecondary.color.opacity(colorScheme == .dark ? 0.30 : 0.23), lineWidth: 1))
+        case .frosted:
+            content
+                .background(palette.backgroundSecondary.opacity(colorScheme == .dark ? 0.92 : 0.90), in: Capsule())
+                .overlay(Capsule().stroke(colorScheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.09), lineWidth: 0.75))
         case .cleanSolid:
             content.background(linkWaveSolidSurfaceColor(palette, colorScheme: colorScheme), in: Capsule())
                 .overlay(Capsule().stroke(linkWaveSolidBorderColor(colorScheme: colorScheme), lineWidth: 1))
