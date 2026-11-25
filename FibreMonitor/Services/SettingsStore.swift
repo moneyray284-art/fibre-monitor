@@ -532,7 +532,15 @@ public final class SettingsStore: ObservableObject {
     }
 
     public func themePalette(for scheme: ColorScheme) -> ThemePalette {
-        scheme == .dark ? darkThemePalette : lightThemePalette
+        var palette = scheme == .dark ? darkThemePalette : lightThemePalette
+        guard scheme == .light, activePreset(for: scheme) != nil else { return palette }
+
+        // Built-in Light presets use a shared high-contrast ink scale; custom palettes keep
+        // the exact text colors selected by the user.
+        palette.textPrimary = CodableColor(red: 0.0431, green: 0.0706, blue: 0.1255)
+        palette.textSecondary = CodableColor(red: 0.2784, green: 0.3333, blue: 0.4118)
+        palette.textTertiary = CodableColor(red: 0.3922, green: 0.4549, blue: 0.5451)
+        return palette
     }
 
     public func setLogoColor(_ choice: AppLogoColorChoice) {

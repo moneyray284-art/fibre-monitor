@@ -146,7 +146,7 @@ public struct SettingsTabView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Label("Mode", systemImage: "circle.lefthalf.filled")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary.color)
 
                 Picker("Mode", selection: Binding(
                     get: { settings.theme },
@@ -167,7 +167,7 @@ public struct SettingsTabView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Label("Surface", systemImage: "square.stack.3d.up")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary.color)
 
                 Picker("Surface", selection: $surfaceStyleRawValue) {
                     ForEach(LinkWaveSurfaceStyle.allCases) { style in
@@ -194,7 +194,7 @@ public struct SettingsTabView: View {
                     }
                     Text(activeThemeName)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(palette.textSecondary.color)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
@@ -217,7 +217,7 @@ public struct SettingsTabView: View {
                     Spacer(minLength: 6)
                     Text("\(settings.appIconChoice.title) · \(settings.logoColor.title)")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(palette.textSecondary.color)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                 }
@@ -253,7 +253,7 @@ public struct SettingsTabView: View {
                         Text("Router Telemetry")
                         Text(telemetrySummary)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(palette.textSecondary.color)
                     }
                 } icon: {
                     Image(systemName: "waveform.path.ecg")
@@ -322,7 +322,7 @@ public struct SettingsTabView: View {
                     Spacer(minLength: 8)
                     Text("\(versionAndBuild) · \(shortRouterModel)")
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(palette.textSecondary.color)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                 }

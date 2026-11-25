@@ -595,6 +595,7 @@ private struct CompactSpeedCard: View {
                     Text(value >= 1 ? String(format: value >= 100 ? "%.0f" : "%.1f", value) : String(format: "%.0f", value * 1_000))
                         .font(.system(.title3, design: .rounded).weight(.bold))
                         .monospacedDigit()
+                        .tracking(-0.3)
                         .animation(.linear(duration: isInterpolated ? 0.025 : 0.22), value: value)
                     Text(value >= 1 ? "Mbps" : "Kbps")
                         .font(.caption2.weight(.medium))
@@ -729,7 +730,7 @@ private struct SpeedTestCard: View {
             }
 
             if !isRunning, pendingResult == nil, let displayedRecord {
-                Divider().overlay(palette.textTertiary.color.opacity(0.22))
+                LinkWaveHairlineDivider()
                 activityStrengthSection(for: displayedRecord)
             }
 
@@ -758,7 +759,7 @@ private struct SpeedTestCard: View {
             }
 
             if !isRunning, pendingResult == nil, !viewModel.speedHistory.isEmpty {
-                Divider().overlay(palette.textTertiary.color.opacity(0.22))
+                LinkWaveHairlineDivider()
                 previousTestsSection
             }
         }
@@ -864,9 +865,7 @@ private struct SpeedTestCard: View {
                         }
                         .buttonStyle(.plain)
                         if index < viewModel.speedHistory.count - 1 {
-                            Divider()
-                                .overlay(palette.textTertiary.color.opacity(0.18))
-                                .padding(.leading, 8)
+                            LinkWaveHairlineDivider(leading: 8)
                         }
                     }
                 }
@@ -1063,6 +1062,7 @@ private struct SpeedTestCard: View {
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
                 .foregroundStyle(tint)
                 .monospacedDigit()
+                .tracking(-0.2)
                 .animation(.linear(duration: 0.025), value: value)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -1362,6 +1362,7 @@ private struct HomeSummaryRow: View {
                     Text(Self.format(todayTotalBytes))
                         .font(.system(.title3, design: .rounded).weight(.bold))
                         .monospacedDigit()
+                        .tracking(-0.3)
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
                         .contentTransition(.numericText())
@@ -1395,6 +1396,7 @@ private struct HomeSummaryRow: View {
                         Text("\(onlineCount) online")
                             .font(.system(.title3, design: .rounded).weight(.bold))
                             .monospacedDigit()
+                            .tracking(-0.3)
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
                     }

@@ -363,8 +363,7 @@ public struct ClientsTabView: View {
             ForEach(Array(devices.enumerated()), id: \.offset) { entry in
                 clientButton(for: entry.element)
                 if entry.offset < devices.count - 1 {
-                    Divider()
-                        .padding(.leading, 54)
+                    LinkWaveHairlineDivider(leading: 54)
                         .padding(.trailing, 12)
                 }
             }

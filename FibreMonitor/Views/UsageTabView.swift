@@ -267,6 +267,7 @@ private struct UsageForecastCard: View {
             Text(value)
                 .font(.system(.subheadline, design: .rounded).weight(.semibold))
                 .monospacedDigit()
+                .tracking(-0.25)
                 .lineLimit(1)
                 .minimumScaleFactor(0.78)
             Text(subtitle ?? " ")
@@ -415,6 +416,7 @@ private struct UsageTotalsCard: View {
                 Text(Self.format(Self.total(selectedMonthDownloadBytes, selectedMonthUploadBytes)))
                     .font(.system(.largeTitle, design: .rounded).weight(.bold))
                     .monospacedDigit()
+                    .tracking(-0.45)
                 Text(isCurrentMonth ? "this month" : "in \(selectedMonthTitle)")
                     .font(.caption)
                     .linkWaveText(.secondary)
@@ -442,17 +444,19 @@ private struct UsageTotalsCard: View {
             }
             .font(.caption2.weight(.medium))
             .linkWaveText(.secondary)
+            LinkWaveHairlineDivider()
+                .padding(.leading, 8)
 
             if isCurrentMonth {
                 usageRow("Today", download: summary.todayDownloadBytes, upload: summary.todayUploadBytes)
+                LinkWaveHairlineDivider(leading: 8)
                 usageRow("This month", download: summary.monthDownloadBytes, upload: summary.monthUploadBytes)
             } else {
                 usageRow(selectedMonthTitle, download: selectedMonthDownloadBytes, upload: selectedMonthUploadBytes)
             }
 
             if !previousMonths.isEmpty {
-                Divider()
-                    .overlay(palette.textTertiary.color.opacity(0.16))
+                LinkWaveHairlineDivider()
                 previousMonthsDrawer
             }
 
@@ -506,9 +510,7 @@ private struct UsageTotalsCard: View {
                     ForEach(Array(previousMonths.enumerated()), id: \.element.id) { index, month in
                         previousMonthRow(month)
                         if index < previousMonths.count - 1 {
-                            Divider()
-                                .overlay(palette.textTertiary.color.opacity(0.12))
-                                .padding(.leading, 8)
+                            LinkWaveHairlineDivider(leading: 8)
                         }
                     }
 
@@ -775,7 +777,7 @@ private struct DailyUsageHistoryCard: View {
             Chart {
                 ForEach(monthPoints) { point in
                     let totalGB = Double(point.totalBytes ?? 0) / 1_000_000_000
-                    let baselineCapGB = chartTopGB * 0.018
+                    let baselineCapGB = chartTopGB * 0.009
                     let isRecorded = point.totalBytes != nil
                     let plottedValue = isRecorded ? max(totalGB, baselineCapGB) : baselineCapGB
                     let isSelected = calendar.isDate(point.date, inSameDayAs: selectedDate)
@@ -789,8 +791,8 @@ private struct DailyUsageHistoryCard: View {
                     )
                     .foregroundStyle(
                         isRecorded
-                            ? palette.textAccent.opacity(isSelected ? 1 : 0.62)
-                            : palette.textTertiary.color.opacity(0.38)
+                            ? palette.textAccent.opacity(isSelected ? 1 : 0.36)
+                            : palette.textTertiary.color.opacity(0.24)
                     )
                 }
 
@@ -804,8 +806,8 @@ private struct DailyUsageHistoryCard: View {
             .chartXAxis(.hidden)
             .chartYAxis {
                 AxisMarks(position: .trailing, values: [0, chartTopGB / 2, chartTopGB]) { value in
-                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.75, dash: [2, 3]))
-                        .foregroundStyle(palette.textSecondary.color.opacity(0.28))
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
+                        .foregroundStyle(palette.textSecondary.color.opacity(0.20))
                     AxisValueLabel {
                         if let amount = value.as(Double.self) {
                             Text("\(Int(amount.rounded())) GB")

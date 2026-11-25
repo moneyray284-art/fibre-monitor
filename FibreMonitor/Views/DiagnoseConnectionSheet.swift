@@ -18,7 +18,7 @@ struct DiagnoseConnectionSheet: View {
                         ForEach(Array(diagnosis.checks.enumerated()), id: \.element.id) { index, check in
                             DiagnosisCheckRow(check: check, perform: perform)
                             if index < diagnosis.checks.count - 1 {
-                                Divider().padding(.leading, 42)
+                                LinkWaveHairlineDivider(leading: 42)
                             }
                         }
                     }

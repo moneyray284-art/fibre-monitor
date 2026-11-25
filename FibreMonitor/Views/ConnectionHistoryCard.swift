@@ -22,7 +22,7 @@ struct ConnectionHistoryCard: View {
             } else {
                 ForEach(visibleEvents) { event in
                     interruptionRow(event)
-                    if event.id != visibleEvents.last?.id { Divider() }
+                    if event.id != visibleEvents.last?.id { LinkWaveHairlineDivider() }
                 }
                 Text("History reflects checks made while the app was polling. Time away from the app may be unknown.")
                     .font(.caption2)

@@ -41,7 +41,7 @@ struct ThemeSettingsView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
         }
-        .background(palette.backgroundPrimary.ignoresSafeArea())
+        .background { LiquidGlassBackground() }
         .environment(\.linkWaveThemePalette, palette)
         .linkWaveText(.primary)
         .navigationTitle("Theme & Colors")
@@ -237,8 +237,7 @@ struct ThemeSettingsView: View {
     }
 
     private var divider: some View {
-        Divider()
-            .overlay(palette.textTertiary.color.opacity(0.12))
+        LinkWaveHairlineDivider()
             .padding(.leading, 50)
     }
 

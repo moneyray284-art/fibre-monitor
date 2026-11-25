@@ -62,8 +62,7 @@ public struct WifiTabView: View {
                                         delete: { Task { await viewModel.deleteWifiNetwork(network) } }
                                     )
                                     if network.id != group.networks.last?.id {
-                                        Divider()
-                                            .padding(.leading, 4)
+                                        LinkWaveHairlineDivider(leading: 4)
                                     }
                                 }
                             }
@@ -167,7 +166,7 @@ public struct WifiTabView: View {
                 }
                 .padding(.vertical, 8)
                 if entry.offset < viewModel.wifi.radios.count - 1 {
-                    Divider().padding(.leading, 40)
+                    LinkWaveHairlineDivider(leading: 40)
                 }
             }
         }
