@@ -1,6 +1,55 @@
 import Charts
 import SwiftUI
 
+private struct UsageMonthSummary: Identifiable, Equatable {
+    let monthStart: Date
+    let downloadBytes: UInt64
+    let uploadBytes: UInt64
+    let activeDaysCount: Int
+
+    var id: Date { monthStart }
+
+    var totalBytes: UInt64 {
+        let (total, overflow) = downloadBytes.addingReportingOverflow(uploadBytes)
+        return overflow ? UInt64.max : total
+    }
+
+    var downloadGB: Double { Double(downloadBytes) / 1_000_000_000 }
+    var uploadGB: Double { Double(uploadBytes) / 1_000_000_000 }
+    var totalGB: Double { Double(totalBytes) / 1_000_000_000 }
+
+    static func previousMonths(
+        from history: [DailyUsagePoint],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> [UsageMonthSummary] {
+        let currentMonth = calendar.dateInterval(of: .month, for: now)?.start ?? calendar.startOfDay(for: now)
+        let recordedPoints = history.filter {
+            $0.date < currentMonth && ($0.totalBytes ?? 0) > 0
+        }
+        let grouped = Dictionary(grouping: recordedPoints) {
+            calendar.dateInterval(of: .month, for: $0.date)?.start ?? calendar.startOfDay(for: $0.date)
+        }
+
+        return grouped.map { monthStart, points in
+            UsageMonthSummary(
+                monthStart: monthStart,
+                downloadBytes: sum(points.compactMap(\.downloadBytes)),
+                uploadBytes: sum(points.compactMap(\.uploadBytes)),
+                activeDaysCount: points.count
+            )
+        }
+        .sorted { $0.monthStart > $1.monthStart }
+    }
+
+    private static func sum(_ values: [UInt64]) -> UInt64 {
+        values.reduce(0) { total, value in
+            let (next, overflow) = total.addingReportingOverflow(value)
+            return overflow ? UInt64.max : next
+        }
+    }
+}
+
 public struct UsageTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
@@ -20,9 +69,17 @@ public struct UsageTabView: View {
                 VStack(spacing: 14) {
                     if settings.isConfigured {
                         SyncStatusCard(summary: settings.dataUsageSummary)
-                        UsageTotalsCard(summary: settings.dataUsageSummary)
+                        UsageTotalsCard(
+                            summary: settings.dataUsageSummary,
+                            selectedMonth: selectedUsageMonth,
+                            selectedMonthSummary: selectedMonthSummary,
+                            previousMonths: previousMonthSummaries,
+                            onSelectMonth: selectUsageMonth
+                        )
                         UsageForecastCard(
                             forecast: selectedMonthForecast,
+                            selectedMonth: selectedUsageMonth,
+                            selectedMonthTotalGB: selectedMonthSummary?.totalGB,
                             onInspect: { date in
                                 selectedUsageMonth = Calendar.current.dateInterval(of: .month, for: date)?.start ?? date
                                 selectedUsageDay = Calendar.current.startOfDay(for: date)
@@ -74,6 +131,34 @@ public struct UsageTabView: View {
         )
     }
 
+    private var previousMonthSummaries: [UsageMonthSummary] {
+        UsageMonthSummary.previousMonths(from: settings.dataUsageSummary.historicalDailyHistory)
+    }
+
+    private var selectedMonthSummary: UsageMonthSummary? {
+        let calendar = Calendar.current
+        return previousMonthSummaries.first {
+            calendar.isDate($0.monthStart, equalTo: selectedUsageMonth, toGranularity: .month)
+        }
+    }
+
+    private func selectUsageMonth(_ month: Date) {
+        let calendar = Calendar.current
+        let monthStart = calendar.dateInterval(of: .month, for: month)?.start ?? month
+        let currentMonth = calendar.dateInterval(of: .month, for: Date())?.start ?? calendar.startOfDay(for: Date())
+        selectedUsageMonth = monthStart
+
+        if calendar.isDate(monthStart, equalTo: currentMonth, toGranularity: .month) {
+            selectedUsageDay = calendar.startOfDay(for: Date())
+            return
+        }
+
+        let recordedDays = settings.dataUsageSummary.historicalDailyHistory.filter {
+            calendar.isDate($0.date, equalTo: monthStart, toGranularity: .month) && ($0.totalBytes ?? 0) > 0
+        }
+        selectedUsageDay = recordedDays.max(by: { $0.date < $1.date })?.date ?? monthStart
+    }
+
     private var noRouterCard: some View {
         VStack(spacing: 12) {
             Image(systemName: "arrow.up.arrow.down.circle")
@@ -96,13 +181,19 @@ public struct UsageTabView: View {
 
 private struct UsageForecastCard: View {
     let forecast: UsageForecast
+    let selectedMonth: Date
+    let selectedMonthTotalGB: Double?
     let onInspect: (Date) -> Void
     @Environment(\.linkWaveThemePalette) private var palette
+
+    private var isCurrentMonth: Bool {
+        Calendar.current.isDate(selectedMonth, equalTo: Date(), toGranularity: .month)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                CardHeader(icon: "chart.line.uptrend.xyaxis", title: "Usage Forecast") {
+                CardHeader(icon: "chart.line.uptrend.xyaxis", title: isCurrentMonth ? "Usage Forecast" : "Monthly Summary") {
                     Text("\(forecast.activeReadingDayCount) reading day\(forecast.activeReadingDayCount == 1 ? "" : "s")")
                         .font(.caption2.weight(.medium))
                         .monospacedDigit()
@@ -112,7 +203,10 @@ private struct UsageForecastCard: View {
 
             HStack(alignment: .top, spacing: 8) {
                 forecastMetric("Daily Average", value: formatGB(forecast.dailyAverageGb))
-                forecastMetric("Projected Month", value: formatGB(forecast.projectedMonthGb))
+                forecastMetric(
+                    isCurrentMonth ? "Projected Month" : "Month Total",
+                    value: isCurrentMonth ? formatGB(forecast.projectedMonthGb) : formatGB(selectedMonthTotalGB)
+                )
                 forecastMetric("Peak Day", value: peakDayValue, subtitle: peakDayDate)
             }
 
@@ -273,8 +367,29 @@ private struct SyncStatusCard: View {
 
 private struct UsageTotalsCard: View {
     let summary: DataUsageSummary
+    let selectedMonth: Date
+    let selectedMonthSummary: UsageMonthSummary?
+    let previousMonths: [UsageMonthSummary]
+    let onSelectMonth: (Date) -> Void
     @Environment(\.linkWaveThemePalette) private var palette
     @State private var showsUsageDetails = false
+    @State private var isPreviousMonthsExpanded = false
+
+    private var isCurrentMonth: Bool {
+        Calendar.current.isDate(selectedMonth, equalTo: Date(), toGranularity: .month)
+    }
+
+    private var selectedMonthDownloadBytes: UInt64 {
+        isCurrentMonth ? summary.monthDownloadBytes : (selectedMonthSummary?.downloadBytes ?? 0)
+    }
+
+    private var selectedMonthUploadBytes: UInt64 {
+        isCurrentMonth ? summary.monthUploadBytes : (selectedMonthSummary?.uploadBytes ?? 0)
+    }
+
+    private var selectedMonthTitle: String {
+        selectedMonth.formatted(.dateTime.month(.wide).year())
+    }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -297,13 +412,24 @@ private struct UsageTotalsCard: View {
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(Self.format(Self.total(summary.monthDownloadBytes, summary.monthUploadBytes)))
+                Text(Self.format(Self.total(selectedMonthDownloadBytes, selectedMonthUploadBytes)))
                     .font(.system(.largeTitle, design: .rounded).weight(.bold))
                     .monospacedDigit()
-                Text("this month")
+                Text(isCurrentMonth ? "this month" : "in \(selectedMonthTitle)")
                     .font(.caption)
                     .linkWaveText(.secondary)
                 Spacer(minLength: 0)
+            }
+
+            if !isCurrentMonth {
+                Button {
+                    onSelectMonth(Date())
+                } label: {
+                    Label("Back to this month", systemImage: "arrow.uturn.backward")
+                        .font(.caption.weight(.medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(palette.textAccent)
             }
 
             HStack {
@@ -317,9 +443,20 @@ private struct UsageTotalsCard: View {
             .font(.caption2.weight(.medium))
             .linkWaveText(.secondary)
 
-            usageRow("Today", download: summary.todayDownloadBytes, upload: summary.todayUploadBytes)
-            usageRow("This month", download: summary.monthDownloadBytes, upload: summary.monthUploadBytes)
-            if !sinceTrackingMatchesMonth {
+            if isCurrentMonth {
+                usageRow("Today", download: summary.todayDownloadBytes, upload: summary.todayUploadBytes)
+                usageRow("This month", download: summary.monthDownloadBytes, upload: summary.monthUploadBytes)
+            } else {
+                usageRow(selectedMonthTitle, download: selectedMonthDownloadBytes, upload: selectedMonthUploadBytes)
+            }
+
+            if !previousMonths.isEmpty {
+                Divider()
+                    .overlay(palette.textTertiary.color.opacity(0.16))
+                previousMonthsDrawer
+            }
+
+            if isCurrentMonth && !sinceTrackingMatchesMonth {
                 usageRow("Since tracking", download: summary.totalDownloadBytes, upload: summary.totalUploadBytes)
             }
 
@@ -333,6 +470,107 @@ private struct UsageTotalsCard: View {
         }
         .linkWaveGlassCard()
         .accessibilityElement(children: .contain)
+    }
+
+    private var previousMonthsDrawer: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                    isPreviousMonthsExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text("Previous Months")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(palette.textPrimary.color)
+                    Spacer(minLength: 6)
+                    if let latest = previousMonths.first {
+                        Text("\(latest.monthStart.formatted(.dateTime.month(.abbreviated).year())) · \(formatGB(latest.totalBytes))")
+                            .font(.caption.monospacedDigit())
+                            .linkWaveText(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                    Image(systemName: isPreviousMonthsExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.textTertiary.color)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(isPreviousMonthsExpanded ? "Collapse previous months" : "Show previous months")
+
+            if isPreviousMonthsExpanded {
+                VStack(spacing: 0) {
+                    ForEach(Array(previousMonths.enumerated()), id: \.element.id) { index, month in
+                        previousMonthRow(month)
+                        if index < previousMonths.count - 1 {
+                            Divider()
+                                .overlay(palette.textTertiary.color.opacity(0.12))
+                                .padding(.leading, 8)
+                        }
+                    }
+
+                    Text("Only months with synced readings are stored. Tap any month to inspect its daily breakdown.")
+                        .font(.caption2)
+                        .linkWaveText(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                        .padding(.top, 9)
+                }
+                .padding(.top, 8)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private func previousMonthRow(_ month: UsageMonthSummary) -> some View {
+        let isViewing = Calendar.current.isDate(month.monthStart, equalTo: selectedMonth, toGranularity: .month)
+
+        return Button {
+            onSelectMonth(month.monthStart)
+        } label: {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(month.monthStart.formatted(.dateTime.month(.wide).year()))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(palette.textPrimary.color)
+                            .lineLimit(1)
+                        if isViewing {
+                            Text("Viewing")
+                                .font(.caption2.weight(.medium))
+                                .linkWaveText(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(palette.backgroundTertiary.color.opacity(0.55), in: Capsule())
+                        }
+                    }
+                    Text("↓ \(Self.format(month.downloadBytes)) · ↑ \(Self.format(month.uploadBytes)) · \(month.activeDaysCount) active days")
+                        .font(.caption2.monospacedDigit())
+                        .linkWaveText(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
+                Spacer(minLength: 4)
+                HStack(spacing: 6) {
+                    Text(formatGB(month.totalBytes))
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(palette.textPrimary.color)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(palette.textTertiary.color)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var sinceTrackingMatchesMonth: Bool {
@@ -365,6 +603,10 @@ private struct UsageTotalsCard: View {
     private static func format(_ bytes: UInt64) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
     }
+
+    private func formatGB(_ bytes: UInt64) -> String {
+        String(format: "%.2f GB", Double(bytes) / 1_000_000_000)
+    }
 }
 
 private struct DailyUsageHistoryCard: View {
@@ -387,7 +629,10 @@ private struct DailyUsageHistoryCard: View {
     }
 
     private var monthOptions: [Date] {
-        let recordedMonths = history.compactMap { calendar.dateInterval(of: .month, for: $0.date)?.start }
+        let recordedMonths = history.compactMap { point -> Date? in
+            guard point.date < currentMonth, (point.totalBytes ?? 0) > 0 else { return nil }
+            return calendar.dateInterval(of: .month, for: point.date)?.start
+        }
         return Array(Set(recordedMonths + [currentMonth])).sorted(by: >)
     }
 
