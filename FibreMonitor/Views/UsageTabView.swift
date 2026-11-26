@@ -446,7 +446,8 @@ private struct SyncStatusCard: View {
 
     private var syncStatus: String {
         guard let syncDate = summary.lastSuccessfulSyncAt else { return "Synced —" }
-        return "Synced \(syncDate, style: .relative)"
+        let relativeDate = RelativeDateTimeFormatter().localizedString(for: syncDate, relativeTo: Date())
+        return "Synced \(relativeDate)"
     }
 }
 
