@@ -83,6 +83,7 @@ public struct UsageTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @ObservedObject var settings: SettingsStore
     @Environment(\.linkWaveThemePalette) private var palette
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var showSettings = false
     @State private var selectedUsageDay: Date
     @State private var selectedUsageMonth: Date
@@ -104,42 +105,38 @@ public struct UsageTabView: View {
 
     public var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 14) {
-                    if settings.isConfigured {
-                        SyncStatusCard(summary: settings.dataUsageSummary)
-                        UsageTotalsCard(
-                            summary: settings.dataUsageSummary,
-                            selectedMonth: selectedUsageMonth,
-                            selectedMonthSummary: selectedMonthSummary,
-                            previousMonths: previousMonthSummaries,
-                            onSelectMonth: selectUsageMonth
-                        )
-                        UsageForecastCard(
-                            forecast: selectedMonthForecast,
-                            selectedMonth: selectedUsageMonth,
-                            selectedMonthTotalGB: selectedMonthSummary?.totalGB,
-                            onInspect: { date in
-                                selectedUsageMonth = Calendar.current.dateInterval(of: .month, for: date)?.start ?? date
-                                selectedUsageDay = Calendar.current.startOfDay(for: date)
-                            }
-                        )
-                        DailyUsageHistoryCard(
-                            history: settings.dataUsageSummary.historicalDailyHistory,
-                            historyRevision: settings.usageHistoryRevision,
-                            todayDownloadBytes: settings.dataUsageSummary.todayDownloadBytes,
-                            todayUploadBytes: settings.dataUsageSummary.todayUploadBytes,
-                            onLocalDayRollover: { settings.refreshUsageSummaryForCurrentLocalDay() },
-                            selectedDate: $selectedUsageDay,
-                            selectedMonth: $selectedUsageMonth
-                        )
-                    } else {
-                        noRouterCard
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    VStack(spacing: 14) {
+                        if settings.isConfigured {
+                            SyncStatusCard(
+                                summary: settings.dataUsageSummary,
+                                isChecking: viewModel.isRefreshing,
+                                checkNow: { Task { await viewModel.refreshAll(forceReauthIfNeeded: true) } }
+                            )
+                            UsageAnalyticsHeroCard(
+                                summary: settings.dataUsageSummary,
+                                selectedMonthSummary: selectedMonthSummary,
+                                history: settings.dataUsageSummary.historicalDailyHistory,
+                                historyRevision: settings.usageHistoryRevision,
+                                todayDownloadBytes: settings.dataUsageSummary.todayDownloadBytes,
+                                todayUploadBytes: settings.dataUsageSummary.todayUploadBytes,
+                                onLocalDayRollover: { settings.refreshUsageSummaryForCurrentLocalDay() },
+                                selectedDate: $selectedUsageDay,
+                                selectedMonth: $selectedUsageMonth,
+                                onBackToCurrentMonth: { selectUsageMonth(Date()) }
+                            )
+                            .id("usage-chart")
+
+                            supportCards(scrollProxy: scrollProxy)
+                        } else {
+                            noRouterCard
+                        }
                     }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .padding(.bottom, 24)
                 }
-                .padding(.horizontal)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
             }
             .background { LiquidGlassBackground() }
             .liquidGlassScrollEdges()
@@ -169,6 +166,41 @@ public struct UsageTabView: View {
                 selectedMonth: month
             )
             refreshForecast()
+        }
+    }
+
+    @ViewBuilder
+    private func supportCards(scrollProxy: ScrollViewProxy) -> some View {
+        let forecastCard = UsageForecastCard(
+            forecast: selectedMonthForecast,
+            selectedMonth: selectedUsageMonth,
+            selectedMonthTotalGB: selectedMonthSummary?.totalGB,
+            onInspect: { date in
+                selectedUsageMonth = Calendar.current.dateInterval(of: .month, for: date)?.start ?? date
+                selectedUsageDay = Calendar.current.startOfDay(for: date)
+                withAnimation(.easeInOut(duration: 0.28)) {
+                    scrollProxy.scrollTo("usage-chart", anchor: .top)
+                }
+            }
+        )
+        let periodCard = PeriodBreakdownCard(
+            summary: settings.dataUsageSummary,
+            selectedMonth: selectedUsageMonth,
+            selectedMonthSummary: selectedMonthSummary,
+            previousMonths: previousMonthSummaries,
+            onSelectMonth: selectUsageMonth
+        )
+
+        if horizontalSizeClass == .regular {
+            HStack(alignment: .top, spacing: 14) {
+                forecastCard.frame(maxWidth: .infinity, alignment: .top)
+                periodCard.frame(maxWidth: .infinity, alignment: .top)
+            }
+        } else {
+            VStack(spacing: 14) {
+                forecastCard
+                periodCard
+            }
         }
     }
 
@@ -255,21 +287,22 @@ private struct UsageForecastCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                CardHeader(icon: "chart.line.uptrend.xyaxis", title: isCurrentMonth ? "Usage Forecast" : "Monthly Summary") {
-                    Text("\(forecast.activeReadingDayCount) reading day\(forecast.activeReadingDayCount == 1 ? "" : "s")")
-                        .font(.caption2.weight(.medium))
-                        .monospacedDigit()
-                        .linkWaveText(.secondary)
-                }
+            CardHeader(icon: "chart.line.uptrend.xyaxis", title: isCurrentMonth ? "Usage Forecast" : "Monthly Summary") {
+                Text(selectedMonth.formatted(.dateTime.month(.abbreviated)))
+                    .font(.caption2.monospacedDigit())
+                    .linkWaveText(.secondary)
             }
 
             HStack(alignment: .top, spacing: 8) {
                 forecastMetric("Daily Average", value: formatGB(forecast.dailyAverageGb))
+                LinkWaveHairlineDivider()
+                    .frame(width: 0.5, height: 48)
                 forecastMetric(
                     isCurrentMonth ? "Projected Month" : "Month Total",
                     value: isCurrentMonth ? formatGB(forecast.projectedMonthGb) : formatGB(selectedMonthTotalGB)
                 )
+                LinkWaveHairlineDivider()
+                    .frame(width: 0.5, height: 48)
                 forecastMetric("Peak Day", value: peakDayValue, subtitle: peakDayDate)
             }
 
@@ -278,19 +311,15 @@ private struct UsageForecastCard: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                         .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Spike Detected")
-                            .font(.subheadline.weight(.semibold))
-                        Text("\(spike.date.formatted(.dateTime.month(.abbreviated).day())) · \(formatGB(spike.totalGb)) · \(String(format: "%.2f×", spike.multiplier)) average")
-                            .font(.caption.monospacedDigit())
-                            .linkWaveText(.secondary)
-                            .lineLimit(2)
-                    }
+                    Text("Spike (\(String(format: "%.1f×", spike.multiplier))) · \(spike.date.formatted(.dateTime.month(.abbreviated).day())) (\(formatGB(spike.totalGb)))")
+                        .font(.caption.monospacedDigit())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
                     Spacer(minLength: 4)
                     Button {
                         onInspect(spike.date)
                     } label: {
-                        Text("Inspect \(spike.date.formatted(.dateTime.month(.abbreviated).day()))")
+                        Text("Inspect")
                             .font(.caption.weight(.semibold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
@@ -301,6 +330,7 @@ private struct UsageForecastCard: View {
                 .padding(.top, 2)
             }
 
+            LinkWaveHairlineDivider()
             Text(forecast.paceNote)
                 .font(.caption)
                 .linkWaveText(.secondary)
@@ -354,12 +384,21 @@ private struct UsageForecastCard: View {
 
 private struct SyncStatusCard: View {
     let summary: DataUsageSummary
+    let isChecking: Bool
+    let checkNow: () -> Void
     @Environment(\.linkWaveThemePalette) private var palette
     @State private var showsSyncGapDetails = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            CardHeader(icon: "arrow.triangle.2.circlepath", title: "Router Sync") {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text(syncStatus)
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                Spacer(minLength: 4)
                 Button {
                     showsSyncGapDetails.toggle()
                 } label: {
@@ -369,41 +408,21 @@ private struct SyncStatusCard: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(showsSyncGapDetails ? "Hide sync gap information" : "Show sync gap information")
+                Button(isChecking ? "Checking…" : "Check Now", action: checkNow)
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(palette.textAccent)
+                    .buttonStyle(.plain)
+                    .disabled(isChecking)
             }
 
-            if let syncDate = summary.lastSuccessfulSyncAt {
-                Text("Last successful check: \(syncDate.formatted(date: .abbreviated, time: .shortened))")
-                    .font(.caption)
-                    .linkWaveText(.secondary)
-            } else {
-                Text("No successful router check has been recorded yet.")
-                    .font(.caption)
-                    .linkWaveText(.secondary)
-            }
-
-            if summary.missingHistoryDayCount > 0 {
-                if hasPartialTodayUsage {
-                    Label(
-                        "Today is partial; \(incompletePreviousDayCount) of the previous 6 days incomplete",
-                        systemImage: "exclamationmark.circle.fill"
-                    )
-                    .font(.caption.weight(.medium))
-                    .foregroundColor(.orange)
-                } else {
-                    Label(
-                        "No complete reading for \(summary.missingHistoryDayCount) of the last 7 days",
-                        systemImage: "exclamationmark.circle.fill"
-                    )
-                    .font(.caption.weight(.medium))
-                    .foregroundColor(.orange)
-                }
-            } else {
-                Label("Daily history has readings for the last 7 days", systemImage: "checkmark.circle.fill")
-                    .font(.caption.weight(.medium))
-                    .foregroundColor(palette.textAccent)
-            }
+            Text("\(activeDayCount) active day\(activeDayCount == 1 ? "" : "s") recorded in \(currentMonth.formatted(.dateTime.month(.abbreviated)))")
+                .font(.caption2.monospacedDigit())
+                .linkWaveText(.secondary)
+                .lineLimit(1)
 
             if showsSyncGapDetails {
+                LinkWaveHairlineDivider()
                 Text("The iPhone checks the router while LinkWave is active. A long gap can leave the daily split incomplete.")
                     .font(.caption2)
                     .linkWaveText(.secondary)
@@ -415,28 +434,29 @@ private struct SyncStatusCard: View {
         .accessibilityElement(children: .contain)
     }
 
-    private var hasPartialTodayUsage: Bool {
-        let hasTraffic = summary.todayDownloadBytes > 0 || summary.todayUploadBytes > 0
-        guard hasTraffic,
-              let today = summary.dailyHistory.first(where: { Calendar.current.isDateInToday($0.date) }) else {
-            return false
-        }
-        return today.totalBytes == nil
+    private var currentMonth: Date {
+        Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date()
     }
 
-    private var incompletePreviousDayCount: Int {
-        max(0, summary.missingHistoryDayCount - (hasPartialTodayUsage ? 1 : 0))
+    private var activeDayCount: Int {
+        summary.historicalDailyHistory.filter {
+            Calendar.current.isDate($0.date, equalTo: currentMonth, toGranularity: .month) && $0.totalBytes != nil
+        }.count
+    }
+
+    private var syncStatus: String {
+        guard let syncDate = summary.lastSuccessfulSyncAt else { return "Synced —" }
+        return "Synced \(syncDate, style: .relative)"
     }
 }
 
-private struct UsageTotalsCard: View {
+private struct PeriodBreakdownCard: View {
     let summary: DataUsageSummary
     let selectedMonth: Date
     let selectedMonthSummary: UsageMonthSummary?
     let previousMonths: [UsageMonthSummary]
     let onSelectMonth: (Date) -> Void
     @Environment(\.linkWaveThemePalette) private var palette
-    @State private var showsUsageDetails = false
     @State private var isPreviousMonthsExpanded = false
 
     private var isCurrentMonth: Bool {
@@ -457,44 +477,10 @@ private struct UsageTotalsCard: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            HStack {
-                Label("Data Usage", systemImage: "arrow.up.arrow.down.circle")
-                    .font(.headline)
-                Spacer()
-                Text("UNLIMITED PLAN")
-                    .font(.caption2.weight(.bold))
+            CardHeader(icon: "calendar", title: "Period Breakdown") {
+                Text(isCurrentMonth ? "This month" : selectedMonth.formatted(.dateTime.month(.abbreviated)))
+                    .font(.caption2.monospacedDigit())
                     .linkWaveText(.secondary)
-                Button {
-                    showsUsageDetails.toggle()
-                } label: {
-                    Image(systemName: "info.circle")
-                        .font(.subheadline)
-                        .foregroundStyle(palette.textSecondary.color)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(showsUsageDetails ? "Hide data usage information" : "Show data usage information")
-            }
-
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(Self.format(Self.total(selectedMonthDownloadBytes, selectedMonthUploadBytes)))
-                    .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                    .monospacedDigit()
-                    .tracking(-0.45)
-                Text(isCurrentMonth ? "this month" : "in \(selectedMonthTitle)")
-                    .font(.caption)
-                    .linkWaveText(.secondary)
-                Spacer(minLength: 0)
-            }
-
-            if !isCurrentMonth {
-                Button {
-                    onSelectMonth(Date())
-                } label: {
-                    Label("Back to this month", systemImage: "arrow.uturn.backward")
-                        .font(.caption.weight(.medium))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(palette.textAccent)
             }
 
             HStack {
@@ -518,21 +504,14 @@ private struct UsageTotalsCard: View {
                 usageRow(selectedMonthTitle, download: selectedMonthDownloadBytes, upload: selectedMonthUploadBytes)
             }
 
-            if !previousMonths.isEmpty {
-                LinkWaveHairlineDivider()
-                previousMonthsDrawer
-            }
-
             if isCurrentMonth && !sinceTrackingMatchesMonth {
+                LinkWaveHairlineDivider(leading: 8)
                 usageRow("Since tracking", download: summary.totalDownloadBytes, upload: summary.totalUploadBytes)
             }
 
-            if showsUsageDetails {
-                Text("Totals start from the first counter check. Long sync gaps or router counter resets can affect date allocation.")
-                    .font(.caption2)
-                    .linkWaveText(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .transition(.opacity)
+            if !previousMonths.isEmpty {
+                LinkWaveHairlineDivider()
+                previousMonthsDrawer
             }
         }
         .linkWaveGlassCard()
@@ -608,9 +587,6 @@ private struct UsageTotalsCard: View {
                             Text("Viewing")
                                 .font(.caption2.weight(.medium))
                                 .linkWaveText(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(palette.backgroundTertiary.opacity(0.55), in: Capsule())
                         }
                     }
                     Text("↓ \(Self.format(month.downloadBytes)) · ↑ \(Self.format(month.uploadBytes)) · \(month.activeDaysCount) active days")
@@ -728,31 +704,41 @@ private struct DailyUsageChartData {
     }
 }
 
-private struct DailyUsageHistoryCard: View {
+private struct UsageAnalyticsHeroCard: View {
+    let summary: DataUsageSummary
+    let selectedMonthSummary: UsageMonthSummary?
     let history: [DailyUsagePoint]
     let historyRevision: Int
     let todayDownloadBytes: UInt64
     let todayUploadBytes: UInt64
     let onLocalDayRollover: () -> Void
+    let onBackToCurrentMonth: () -> Void
     @Binding var selectedDate: Date
     @Binding var selectedMonth: Date
     @Environment(\.linkWaveThemePalette) private var palette
     @State private var chartData: DailyUsageChartData
+    @State private var showsCounterNote = false
 
     init(
+        summary: DataUsageSummary,
+        selectedMonthSummary: UsageMonthSummary?,
         history: [DailyUsagePoint],
         historyRevision: Int,
         todayDownloadBytes: UInt64,
         todayUploadBytes: UInt64,
         onLocalDayRollover: @escaping () -> Void,
         selectedDate: Binding<Date>,
-        selectedMonth: Binding<Date>
+        selectedMonth: Binding<Date>,
+        onBackToCurrentMonth: @escaping () -> Void
     ) {
+        self.summary = summary
+        self.selectedMonthSummary = selectedMonthSummary
         self.history = history
         self.historyRevision = historyRevision
         self.todayDownloadBytes = todayDownloadBytes
         self.todayUploadBytes = todayUploadBytes
         self.onLocalDayRollover = onLocalDayRollover
+        self.onBackToCurrentMonth = onBackToCurrentMonth
         self._selectedDate = selectedDate
         self._selectedMonth = selectedMonth
         _chartData = State(initialValue: DailyUsageChartData.make(
@@ -771,6 +757,29 @@ private struct DailyUsageHistoryCard: View {
 
     private var selectedMonthStart: Date {
         calendar.dateInterval(of: .month, for: selectedMonth)?.start ?? currentMonth
+    }
+
+    private var isCurrentMonth: Bool {
+        calendar.isDate(selectedMonthStart, equalTo: currentMonth, toGranularity: .month)
+    }
+
+    private var selectedDownloadBytes: UInt64 {
+        isCurrentMonth ? summary.monthDownloadBytes : (selectedMonthSummary?.downloadBytes ?? 0)
+    }
+
+    private var selectedUploadBytes: UInt64 {
+        isCurrentMonth ? summary.monthUploadBytes : (selectedMonthSummary?.uploadBytes ?? 0)
+    }
+
+    private var selectedTotalBytes: UInt64 {
+        let (total, overflow) = selectedDownloadBytes.addingReportingOverflow(selectedUploadBytes)
+        return overflow ? UInt64.max : total
+    }
+
+    private var downloadShare: CGFloat {
+        guard selectedTotalBytes > 0 else { return 0.5 }
+        let raw = CGFloat(Double(selectedDownloadBytes) / Double(selectedTotalBytes))
+        return min(0.97, max(0.03, raw))
     }
 
     private var monthOptions: [Date] {
@@ -797,11 +806,57 @@ private struct DailyUsageHistoryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            CardHeader(icon: "chart.bar.fill", title: "Daily Usage") {
+            HStack(spacing: 7) {
+                Image(systemName: "chart.bar.fill")
+                    .foregroundStyle(palette.textAccent)
+                Text("Data Usage")
+                    .font(.subheadline.weight(.bold))
+                Button {
+                    showsCounterNote.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(palette.textSecondary.color)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(showsCounterNote ? "Hide counter information" : "Show counter information")
+                Spacer(minLength: 4)
                 monthMenu
             }
 
+            if showsCounterNote {
+                Text("Usage is allocated from cumulative router counters and stays available across month changes.")
+                    .font(.caption2)
+                    .linkWaveText(.secondary)
+                    .transition(.opacity)
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(Self.format(selectedTotalBytes))
+                    .font(.system(.largeTitle, design: .rounded).weight(.bold))
+                    .monospacedDigit()
+                    .tracking(-0.45)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Text(isCurrentMonth ? "this month" : "in \(selectedMonthStart.formatted(.dateTime.month(.wide).year()))")
+                    .font(.caption)
+                    .linkWaveText(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+
+            if !isCurrentMonth {
+                Button("Back to this month", action: onBackToCurrentMonth)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(palette.textAccent)
+                    .buttonStyle(.plain)
+            }
+
+            proportionalSplit
+            splitLegend
+            LinkWaveHairlineDivider()
             monthlyChart
+            LinkWaveHairlineDivider()
             selectedUsageDetails
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -830,6 +885,41 @@ private struct DailyUsageHistoryCard: View {
                 selectedMonth = currentMonth
                 selectedDate = calendar.startOfDay(for: Date())
             }
+        }
+    }
+
+    private var proportionalSplit: some View {
+        GeometryReader { proxy in
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(palette.textAccent)
+                    .frame(width: proxy.size.width * downloadShare)
+                Rectangle()
+                    .fill(.green)
+                    .frame(width: proxy.size.width * (1 - downloadShare))
+            }
+            .clipShape(Capsule())
+        }
+        .frame(height: 6)
+        .accessibilityLabel("Download \(Int((downloadShare * 100).rounded())) percent, upload \(Int(((1 - downloadShare) * 100).rounded())) percent")
+    }
+
+    private var splitLegend: some View {
+        HStack(spacing: 10) {
+            legendItem("Download", bytes: selectedDownloadBytes, percentage: downloadShare, tint: palette.textAccent)
+            Spacer(minLength: 4)
+            legendItem("Upload", bytes: selectedUploadBytes, percentage: 1 - downloadShare, tint: .green)
+        }
+    }
+
+    private func legendItem(_ title: String, bytes: UInt64, percentage: CGFloat, tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(tint).frame(width: 6, height: 6)
+            Text("\(title) \(Self.format(bytes)) (\(Int((percentage * 100).rounded()))%)")
+                .font(.caption2.monospacedDigit())
+                .linkWaveText(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
         }
     }
 
@@ -1048,7 +1138,11 @@ private struct DailyUsageHistoryCard: View {
 
             HStack(spacing: 8) {
                 usageValue("Download", bytes: selectedPoint?.downloadBytes)
+                LinkWaveHairlineDivider()
+                    .frame(width: 0.5, height: 36)
                 usageValue("Upload", bytes: selectedPoint?.uploadBytes)
+                LinkWaveHairlineDivider()
+                    .frame(width: 0.5, height: 36)
                 usageValue("Total", bytes: selectedPoint?.totalBytes)
             }
         }

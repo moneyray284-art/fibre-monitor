@@ -525,10 +525,15 @@ private struct CompactSpeedCard: View {
     var uploadOverrideMbps: Double? = nil
     @State private var idleDownloadMbps = 0.0
     @State private var idleUploadMbps = 0.0
+    @State private var previousLiveDownloadKbps: Int?
+    @State private var previousLiveUploadKbps: Int?
+    @State private var downloadTrendKbps: Int?
+    @State private var uploadTrendKbps: Int?
     @Environment(\.linkWaveThemePalette) private var palette
 
     private var displayedDownloadMbps: Double { downloadOverrideMbps ?? idleDownloadMbps }
     private var displayedUploadMbps: Double { uploadOverrideMbps ?? idleUploadMbps }
+    private var isSpeedTestOverriding: Bool { downloadOverrideMbps != nil || uploadOverrideMbps != nil }
 
     var body: some View {
         HStack(spacing: 13) {
@@ -537,7 +542,8 @@ private struct CompactSpeedCard: View {
                 value: displayedDownloadMbps,
                 icon: "arrow.down",
                 tint: palette.textAccent,
-                isInterpolated: downloadOverrideMbps != nil
+                isInterpolated: downloadOverrideMbps != nil,
+                trendKbps: isSpeedTestOverriding ? nil : downloadTrendKbps
             )
 
             Rectangle()
@@ -549,7 +555,8 @@ private struct CompactSpeedCard: View {
                 value: displayedUploadMbps,
                 icon: "arrow.up",
                 tint: palette.textAccent.opacity(0.72),
-                isInterpolated: uploadOverrideMbps != nil
+                isInterpolated: uploadOverrideMbps != nil,
+                trendKbps: isSpeedTestOverriding ? nil : uploadTrendKbps
             )
         }
         .padding(.vertical, 2)
@@ -561,28 +568,40 @@ private struct CompactSpeedCard: View {
         .onAppear {
             if downloadOverrideMbps == nil { idleDownloadMbps = traffic.downloadMbps }
             if uploadOverrideMbps == nil { idleUploadMbps = traffic.uploadMbps }
+            previousLiveDownloadKbps = Self.kbps(traffic.downloadMbps)
+            previousLiveUploadKbps = Self.kbps(traffic.uploadMbps)
         }
         .onChange(of: traffic.downloadMbps) { sample in
-            guard downloadOverrideMbps == nil else { return }
+            guard !isSpeedTestOverriding else {
+                clearLiveTrends()
+                return
+            }
+            updateDownloadTrend(with: sample)
             withAnimation(.linear(duration: 0.24)) {
                 idleDownloadMbps = smoothedIdleValue(sample, previous: idleDownloadMbps)
             }
         }
         .onChange(of: traffic.uploadMbps) { sample in
-            guard uploadOverrideMbps == nil else { return }
+            guard !isSpeedTestOverriding else {
+                clearLiveTrends()
+                return
+            }
+            updateUploadTrend(with: sample)
             withAnimation(.linear(duration: 0.24)) {
                 idleUploadMbps = smoothedIdleValue(sample, previous: idleUploadMbps)
             }
         }
         .onChange(of: downloadOverrideMbps) { override in
             if override == nil { idleDownloadMbps = traffic.downloadMbps }
+            resetLiveTrendBaselineIfNeeded()
         }
         .onChange(of: uploadOverrideMbps) { override in
             if override == nil { idleUploadMbps = traffic.uploadMbps }
+            resetLiveTrendBaselineIfNeeded()
         }
     }
 
-    private func speedMetric(title: String, value: Double, icon: String, tint: Color, isInterpolated: Bool) -> some View {
+    private func speedMetric(title: String, value: Double, icon: String, tint: Color, isInterpolated: Bool, trendKbps: Int?) -> some View {
         HStack(spacing: 9) {
             Image(systemName: icon)
                 .font(.subheadline.weight(.bold))
@@ -603,6 +622,9 @@ private struct CompactSpeedCard: View {
                     Text(value >= 1 ? "Mbps" : "Kbps")
                         .font(.caption2.weight(.medium))
                         .linkWaveText(.secondary)
+                    if let trendKbps, trendKbps != 0 {
+                        InlineTrend(delta: trendKbps, negativeColor: .orange)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -617,6 +639,46 @@ private struct CompactSpeedCard: View {
     private func smoothedIdleValue(_ sample: Double, previous: Double) -> Double {
         if sample <= 0 { return 0 }
         return previous == 0 ? sample : previous * 0.72 + sample * 0.28
+    }
+
+    private func updateDownloadTrend(with sample: Double) {
+        let current = Self.kbps(sample)
+        if let previous = previousLiveDownloadKbps {
+            let delta = current - previous
+            downloadTrendKbps = delta == 0 ? nil : delta
+        }
+        previousLiveDownloadKbps = current
+    }
+
+    private func updateUploadTrend(with sample: Double) {
+        let current = Self.kbps(sample)
+        if let previous = previousLiveUploadKbps {
+            let delta = current - previous
+            uploadTrendKbps = delta == 0 ? nil : delta
+        }
+        previousLiveUploadKbps = current
+    }
+
+    private static func kbps(_ mbps: Double) -> Int {
+        Int((max(0, mbps) * 1_000).rounded())
+    }
+
+    private func clearLiveTrends() {
+        previousLiveDownloadKbps = nil
+        previousLiveUploadKbps = nil
+        downloadTrendKbps = nil
+        uploadTrendKbps = nil
+    }
+
+    private func resetLiveTrendBaselineIfNeeded() {
+        guard !isSpeedTestOverriding else {
+            clearLiveTrends()
+            return
+        }
+        previousLiveDownloadKbps = Self.kbps(traffic.downloadMbps)
+        previousLiveUploadKbps = Self.kbps(traffic.uploadMbps)
+        downloadTrendKbps = nil
+        uploadTrendKbps = nil
     }
 }
 
@@ -1353,6 +1415,27 @@ private struct HomeSummaryRow: View {
         return overflow ? UInt64.max : total
     }
 
+    private var currentDayReading: DailyUsagePoint? {
+        summary.historicalDailyHistory.first {
+            Calendar.current.isDateInToday($0.date) && $0.totalBytes != nil
+        }
+    }
+
+    private var previousRecordedDay: DailyUsagePoint? {
+        let calendar = Calendar.current
+        return summary.historicalDailyHistory
+            .filter { !calendar.isDateInToday($0.date) && $0.totalBytes != nil }
+            .max(by: { $0.date < $1.date })
+    }
+
+    private var completedReadingPair: (DailyUsagePoint, DailyUsagePoint)? {
+        let readings = summary.historicalDailyHistory
+            .filter { $0.totalBytes != nil && !$0.isPartial }
+            .sorted { $0.date > $1.date }
+        guard readings.count >= 2 else { return nil }
+        return (readings[0], readings[1])
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Button(action: openUsage) {
@@ -1362,21 +1445,48 @@ private struct HomeSummaryRow: View {
                         .linkWaveText(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                    Text(Self.format(todayTotalBytes))
-                        .font(.system(.title3, design: .rounded).weight(.bold))
-                        .monospacedDigit()
-                        .tracking(-0.3)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                        .contentTransition(.numericText())
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text(Self.format(todayTotalBytes))
+                            .font(.system(.title3, design: .rounded).weight(.bold))
+                            .monospacedDigit()
+                            .tracking(-0.3)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                            .contentTransition(.numericText())
+                        if let delta = percentageDelta(todayTotalBytes, previousRecordedDay?.totalBytes), currentDayReading != nil {
+                            InlineTrend(delta: delta, suffix: "%", negativeColor: .orange)
+                        }
+                    }
                     HStack(spacing: 7) {
-                        Label(Self.format(summary.todayDownloadBytes), systemImage: "arrow.down")
-                            .foregroundStyle(palette.textAccent)
-                        Label(Self.format(summary.todayUploadBytes), systemImage: "arrow.up")
-                            .foregroundStyle(palette.textSecondary.color)
+                        usageLine(
+                            value: Self.formatGB(summary.todayDownloadBytes),
+                            icon: "arrow.down",
+                            tint: palette.textAccent,
+                            delta: percentageDelta(summary.todayDownloadBytes, previousRecordedDay?.downloadBytes),
+                            negativeColor: palette.textSecondary.color
+                        )
+                        usageLine(
+                            value: Self.formatUpload(summary.todayUploadBytes),
+                            icon: "arrow.up",
+                            tint: palette.textSecondary.color,
+                            delta: percentageDelta(summary.todayUploadBytes, previousRecordedDay?.uploadBytes),
+                            negativeColor: palette.textSecondary.color
+                        )
                     }
                     .font(.system(size: 9, weight: .medium, design: .rounded))
                     .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text("Month: \(Self.formatGB(monthTotalBytes))")
+                            .font(.caption2.monospacedDigit())
+                            .linkWaveText(.secondary)
+                            .lineLimit(1)
+                        if let pair = completedReadingPair,
+                           let current = pair.0.totalBytes,
+                           let previous = pair.1.totalBytes,
+                           let delta = percentageDelta(current, previous) {
+                            InlineTrend(delta: delta, suffix: "%", negativeColor: .orange)
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, minHeight: 108, maxHeight: .infinity, alignment: .topLeading)
                 .linkWaveGlassCard()
@@ -1422,6 +1532,58 @@ private struct HomeSummaryRow: View {
 
     private static func format(_ bytes: UInt64) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
+    }
+
+    private static func formatGB(_ bytes: UInt64) -> String {
+        String(format: "%.2f GB", Double(bytes) / 1_000_000_000)
+    }
+
+    private static func formatUpload(_ bytes: UInt64) -> String {
+        if bytes < 1_000_000_000 {
+            return String(format: "%.0f MB", Double(bytes) / 1_000_000)
+        }
+        return formatGB(bytes)
+    }
+
+    private var monthTotalBytes: UInt64 {
+        let (total, overflow) = summary.monthDownloadBytes.addingReportingOverflow(summary.monthUploadBytes)
+        return overflow ? UInt64.max : total
+    }
+
+    private func percentageDelta(_ current: UInt64, _ previous: UInt64?) -> Int? {
+        guard let previous, previous > 0 else { return nil }
+        return Int((((Double(current) - Double(previous)) / Double(previous)) * 100).rounded())
+    }
+
+    private func usageLine(value: String, icon: String, tint: Color, delta: Int?, negativeColor: Color) -> some View {
+        HStack(spacing: 3) {
+            Label(value, systemImage: icon)
+                .foregroundStyle(tint)
+            if let delta, currentDayReading != nil {
+                InlineTrend(delta: delta, suffix: "%", negativeColor: negativeColor)
+            }
+        }
+    }
+}
+
+private struct InlineTrend: View {
+    let delta: Int
+    var suffix: String = ""
+    var negativeColor: Color
+
+    private var isPositive: Bool { delta >= 0 }
+
+    var body: some View {
+        HStack(spacing: 1) {
+            Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
+            Text("\(delta >= 0 ? "+" : "")\(delta)\(suffix)")
+                .monospacedDigit()
+        }
+        .font(.system(size: 9, weight: .semibold, design: .rounded))
+        .foregroundStyle(isPositive ? Color.green : negativeColor)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .accessibilityLabel("\(isPositive ? "Up" : "Down") \(abs(delta))\(suffix)")
     }
 }
 
