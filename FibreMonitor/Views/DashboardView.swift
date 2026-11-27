@@ -198,7 +198,7 @@ private struct RouterHeaderCard: View {
     @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
 
     private var darkPalette: ThemePalette { settings.themePalette(for: .dark) }
-    private var activeAccent: Color { darkPalette.textAccent }
+    private var activeAccent: Color { settings.themePalette(for: colorScheme).textAccent }
     private var darkBase: Color { darkPalette.backgroundPrimary }
     private var heroPrimary: Color { .white }
     private var heroSecondary: Color { .white.opacity(0.68) }
