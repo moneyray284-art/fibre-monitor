@@ -195,23 +195,13 @@ private struct RouterHeaderCard: View {
     let testUploadMbps: Double?
     let testPhase: SpeedTestPhase?
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.linkWaveThemePalette) private var palette
+    @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
 
     private var darkPalette: ThemePalette { settings.themePalette(for: .dark) }
-    private var lightPalette: ThemePalette { settings.themePalette(for: .light) }
-    private var activeAccent: Color {
-        colorScheme == .dark ? darkPalette.textAccent : lightPalette.textAccent
-    }
+    private var activeAccent: Color { darkPalette.textAccent }
     private var darkBase: Color { darkPalette.backgroundPrimary }
-    private var heroPrimary: Color {
-        colorScheme == .dark ? .white : lightPalette.textPrimary.color
-    }
-    private var heroSecondary: Color {
-        colorScheme == .dark ? Color.white.opacity(0.66) : lightPalette.textSecondary.color
-    }
-    private var heroSurfaceBase: Color {
-        colorScheme == .dark ? darkBase : lightPalette.backgroundSecondary
-    }
+    private var heroPrimary: Color { .white }
+    private var heroSecondary: Color { .white.opacity(0.68) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -225,7 +215,7 @@ private struct RouterHeaderCard: View {
                 accent: activeAccent,
                 primary: heroPrimary,
                 secondary: heroSecondary,
-                isDark: colorScheme == .dark
+                isDark: true
             )
             Rectangle()
                 .fill(heroPrimary.opacity(colorScheme == .dark ? 0.13 : 0.10))
@@ -253,50 +243,92 @@ private struct RouterHeaderCard: View {
         }
         .padding(16)
         .background {
-            gatewayAtmosphere
+            gatewaySurface
         }
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .linkWaveGlassCard(padding: 0)
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(activeAccent.opacity(colorScheme == .dark ? 0.30 : 0.16), lineWidth: 0.8)
+                .stroke(gatewayBorder, lineWidth: 1)
         }
-        .shadow(color: activeAccent.opacity(colorScheme == .dark ? 0.11 : 0.06), radius: 18, y: 7)
+        .overlay(alignment: .top) {
+            if surfaceStyle != .cleanSolid {
+                Rectangle()
+                    .fill(Color.white.opacity(colorScheme == .light
+                        ? (surfaceStyle == .frosted ? 0.14 : 0.28)
+                        : (surfaceStyle == .frosted ? 0.11 : 0.22)))
+                    .frame(height: 1)
+                    .padding(.horizontal, 22)
+                    .padding(.top, 1)
+                    .allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if surfaceStyle == .liquidGlass {
+                Rectangle()
+                    .fill(Color.white.opacity(colorScheme == .light ? 0.08 : 0.06))
+                    .frame(height: 1)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 1)
+                    .allowsHitTesting(false)
+            }
+        }
+        .shadow(
+            color: Color.black.opacity(surfaceStyle == .liquidGlass ? 0.28 : 0.18),
+            radius: surfaceStyle == .liquidGlass ? 18 : 10,
+            y: surfaceStyle == .liquidGlass ? 8 : 5
+        )
+        .animation(.easeInOut(duration: 0.18), value: surfaceStyle)
+        .animation(.easeInOut(duration: 0.18), value: colorScheme)
         .accessibilityElement(children: .combine)
     }
 
-    private var gatewayAtmosphere: some View {
-        GeometryReader { geometry in
+    @ViewBuilder
+    private var gatewaySurface: some View {
+        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+        switch surfaceStyle {
+        case .cleanSolid:
+            shape.fill(darkBase.opacity(0.92))
+        case .frosted:
             ZStack {
-                if colorScheme == .dark {
-                    darkBase
-                } else {
-                    Color.clear
-                }
-                RadialGradient(
-                    colors: [activeAccent.opacity(colorScheme == .dark ? 0.25 : 0.10), .clear],
-                    center: .topLeading,
-                    startRadius: 0,
-                    endRadius: geometry.size.width * 0.78
-                )
-                RadialGradient(
-                    colors: [activeAccent.opacity(colorScheme == .dark ? 0.18 : 0.075), .clear],
-                    center: .bottomTrailing,
-                    startRadius: 0,
-                    endRadius: geometry.size.width * 0.68
-                )
-                GatewayWave()
-                    .fill(LinearGradient(
-                        colors: [
-                            activeAccent.opacity(colorScheme == .dark ? 0.09 : 0.045),
-                            heroSurfaceBase.opacity(colorScheme == .dark ? 0.48 : 0.12)
+                shape.fill(.ultraThinMaterial)
+                shape.fill(darkBase.opacity(colorScheme == .light ? 0.80 : 0.74))
+            }
+        case .liquidGlass:
+            ZStack {
+                shape.fill(.regularMaterial)
+                shape.fill(darkBase.opacity(colorScheme == .light ? 0.72 : 0.60))
+                shape.fill(LinearGradient(
+                    stops: colorScheme == .light
+                        ? [
+                            .init(color: .white.opacity(0.15), location: 0),
+                            .init(color: .white.opacity(0.03), location: 0.5),
+                            .init(color: .white.opacity(0.07), location: 1)
+                        ]
+                        : [
+                            .init(color: .white.opacity(0.12), location: 0),
+                            .init(color: .white.opacity(0.02), location: 0.5),
+                            .init(color: .white.opacity(0.06), location: 1)
                         ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
+                    startPoint: .top,
+                    endPoint: .bottom
+                ))
             }
         }
-        .accessibilityHidden(true)
+    }
+
+    private var gatewayBorder: AnyShapeStyle {
+        switch surfaceStyle {
+        case .cleanSolid:
+            AnyShapeStyle(LinearGradient(
+                colors: [activeAccent.opacity(0.18), Color.white.opacity(0.10)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ))
+        case .frosted:
+            AnyShapeStyle(Color.white.opacity(colorScheme == .light ? 0.14 : 0.12))
+        case .liquidGlass:
+            AnyShapeStyle(Color.white.opacity(colorScheme == .light ? 0.22 : 0.18))
+        }
     }
 
     private var heroHeader: some View {
@@ -305,11 +337,10 @@ private struct RouterHeaderCard: View {
                 isOnline: viewModel.isConnected,
                 wifiOnline: wifiOnline,
                 accent: activeAccent,
-                surfaceBase: heroSurfaceBase,
-                chassisTop: palette.backgroundElevated,
-                chassisBottom: palette.backgroundTertiary,
+                chassisTop: darkPalette.backgroundElevated,
+                chassisBottom: darkPalette.backgroundTertiary,
                 foreground: heroPrimary,
-                isDark: colorScheme == .dark
+                isDark: true
             )
             .frame(width: 70, height: 70)
             .accessibilityHidden(true)
@@ -319,7 +350,6 @@ private struct RouterHeaderCard: View {
                     Circle()
                         .fill(statusColor)
                         .frame(width: 6, height: 6)
-                        .shadow(color: statusColor.opacity(0.8), radius: 3)
                     Text(statusText)
                         .font(.system(size: 9, weight: .bold, design: .rounded))
                         .foregroundStyle(statusColor)
@@ -385,22 +415,6 @@ private struct RouterHeaderCard: View {
     private var wifiOnline: Bool {
         let reportedStates = viewModel.wifi.radios.map(\.enabled) + viewModel.wifi.networks.map(\.enabled)
         return reportedStates.isEmpty ? viewModel.isConnected : reportedStates.contains(true)
-    }
-}
-
-private struct GatewayWave: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.height * 0.82))
-        path.addCurve(
-            to: CGPoint(x: rect.maxX, y: rect.height * 0.70),
-            control1: CGPoint(x: rect.width * 0.34, y: rect.height * 0.62),
-            control2: CGPoint(x: rect.width * 0.68, y: rect.height * 0.98)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.closeSubpath()
-        return path
     }
 }
 
@@ -483,7 +497,6 @@ private struct HuaweiOptiXstarIllustration: View {
     let isOnline: Bool
     let wifiOnline: Bool
     let accent: Color
-    let surfaceBase: Color
     let chassisTop: Color
     let chassisBottom: Color
     let foreground: Color
@@ -494,31 +507,13 @@ private struct HuaweiOptiXstarIllustration: View {
 
     var body: some View {
         ZStack {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .stroke(accent.opacity(0.17 - Double(index) * 0.04), lineWidth: 0.8)
-                    .frame(width: CGFloat(42 + index * 13), height: CGFloat(42 + index * 13))
-                    .offset(y: 3)
-            }
-
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [accent.opacity(0.14), surfaceBase.opacity(0.06), .clear],
-                        center: .center,
-                        startRadius: 0,
-                        endRadius: 35
-                    )
-                )
-                .frame(width: 70, height: 70)
-
             Capsule()
-                .fill(LinearGradient(colors: [accent.opacity(0.88), accent.opacity(0.38)], startPoint: .leading, endPoint: .trailing))
+                .fill(accent.opacity(0.78))
                 .frame(width: 2, height: 22)
                 .rotationEffect(.degrees(-12))
                 .offset(x: -20, y: -16)
             Capsule()
-                .fill(LinearGradient(colors: [accent.opacity(0.88), accent.opacity(0.38)], startPoint: .leading, endPoint: .trailing))
+                .fill(accent.opacity(0.78))
                 .frame(width: 2, height: 22)
                 .rotationEffect(.degrees(12))
                 .offset(x: 20, y: -16)
@@ -541,9 +536,7 @@ private struct HuaweiOptiXstarIllustration: View {
                 .overlay(alignment: .bottomLeading) {
                     HStack(spacing: 5) {
                         Circle().fill(ponLight).frame(width: 4, height: 4)
-                            .shadow(color: ponLight.opacity(0.9), radius: 2)
                         Circle().fill(wlanLight).frame(width: 4, height: 4)
-                            .shadow(color: wlanLight.opacity(0.9), radius: 2)
                     }
                     .padding(.leading, 9)
                     .padding(.bottom, 5)
@@ -564,7 +557,6 @@ private struct HuaweiOptiXstarIllustration: View {
                         .padding(.horizontal, 8)
                         .offset(y: 1)
                 }
-                .shadow(color: foreground.opacity(isDark ? 0.20 : 0.09), radius: 5, y: 3)
         }
         .frame(width: 70, height: 70)
         .accessibilityLabel("Huawei OptiXstar HG8145X6 router with PON and WLAN status lights")

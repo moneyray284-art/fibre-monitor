@@ -156,7 +156,7 @@ public struct MainTabView: View {
     }
 
     private var isBackgroundPulsing: Bool {
-        viewModel.isRefreshing || speedTestCoordinator.phase != .idle || viewModel.isDiagnosing
+        speedTestCoordinator.phase != .idle
     }
 
     private var routerPickerBinding: Binding<Bool> {
