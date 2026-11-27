@@ -25,9 +25,9 @@ struct AmbientWaveArtView: View {
     private var darkBaseTintOpacity: Double {
         guard colorScheme == .dark else { return 0 }
         switch surfaceStyle {
-        case .liquidGlass: 0.20
-        case .frosted: 0.14
-        case .cleanSolid: 0.08
+        case .liquidGlass: return 0.20
+        case .frosted: return 0.14
+        case .cleanSolid: return 0.08
         }
     }
 
