@@ -200,6 +200,7 @@ private struct RouterHeaderCard: View {
 
     private var darkPalette: ThemePalette { settings.themePalette(for: .dark) }
     private var darkAccent: Color { darkPalette.textAccent }
+    private var darkBase: Color { darkPalette.backgroundPrimary }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -241,15 +242,15 @@ private struct RouterHeaderCard: View {
             ZStack {
                 LinearGradient(
                     colors: [
-                        darkPalette.backgroundPrimary,
+                        darkBase,
                         darkPalette.backgroundSecondary,
-                        darkPalette.backgroundPrimary
+                        darkBase
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
                 RadialGradient(
-                    colors: [darkAccent.opacity(0.24), .clear],
+                    colors: [darkAccent.opacity(0.30), darkBase.opacity(0.12), .clear],
                     center: .center,
                     startRadius: 0,
                     endRadius: 170
@@ -257,7 +258,7 @@ private struct RouterHeaderCard: View {
                 .frame(width: 260, height: 220)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 RadialGradient(
-                    colors: [darkAccent.opacity(0.17), .clear],
+                    colors: [darkAccent.opacity(0.22), darkBase.opacity(0.10), .clear],
                     center: .center,
                     startRadius: 0,
                     endRadius: 155
@@ -266,7 +267,7 @@ private struct RouterHeaderCard: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                 GatewayWave()
                     .fill(LinearGradient(
-                        colors: [Color.white.opacity(0.035), darkAccent.opacity(0.045)],
+                        colors: [darkBase.opacity(0.36), darkAccent.opacity(0.10)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ))
@@ -286,7 +287,8 @@ private struct RouterHeaderCard: View {
             HuaweiOptiXstarIllustration(
                 isOnline: viewModel.isConnected,
                 wifiOnline: wifiOnline,
-                accent: darkAccent
+                accent: darkAccent,
+                darkBase: darkBase
             )
             .frame(width: 70, height: 70)
             .accessibilityHidden(true)
@@ -455,6 +457,7 @@ private struct HuaweiOptiXstarIllustration: View {
     let isOnline: Bool
     let wifiOnline: Bool
     let accent: Color
+    let darkBase: Color
 
     private var ponLight: Color { isOnline ? .green : .red }
     private var wlanLight: Color { isOnline && wifiOnline ? accent : .orange }
@@ -463,10 +466,21 @@ private struct HuaweiOptiXstarIllustration: View {
         ZStack {
             ForEach(0..<3, id: \.self) { index in
                 Circle()
-                    .stroke(Color.white.opacity(0.07 - Double(index) * 0.015), lineWidth: 0.8)
+                    .stroke(accent.opacity(0.17 - Double(index) * 0.04), lineWidth: 0.8)
                     .frame(width: CGFloat(42 + index * 13), height: CGFloat(42 + index * 13))
                     .offset(y: 3)
             }
+
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [accent.opacity(0.14), darkBase.opacity(0.06), .clear],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: 35
+                    )
+                )
+                .frame(width: 70, height: 70)
 
             Capsule()
                 .fill(LinearGradient(colors: [Color(red: 0.82, green: 0.86, blue: 0.90), Color(red: 0.43, green: 0.49, blue: 0.57)], startPoint: .leading, endPoint: .trailing))
@@ -698,6 +712,8 @@ private struct SpeedTestCard: View {
     @Binding var activePhase: SpeedTestProgress.Phase?
     @Binding var startRequested: Bool
     @State private var pendingResult: SpeedTestResult?
+    @State private var completedRecord: SpeedTestRecord?
+    @State private var hasCompletedRun = false
     @State private var progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
     @State private var errorMessage: String?
     @State private var isRunning = false
@@ -721,13 +737,18 @@ private struct SpeedTestCard: View {
     @State private var inspectedHistoryID: UUID?
     @State private var selectedActivity: SpeedTestActivity?
     @Environment(\.linkWaveThemePalette) private var palette
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var instrumentAccentOpacity: Double {
+        colorScheme == .dark ? 0.12 : 0.08
+    }
 
     private var inspectedRecord: SpeedTestRecord? {
         viewModel.speedHistory.first { $0.id == inspectedHistoryID }
     }
 
     private var displayedRecord: SpeedTestRecord? {
-        inspectedRecord ?? (pendingResult == nil ? viewModel.activeSpeedTestRecord : nil)
+        inspectedRecord ?? completedRecord ?? (pendingResult == nil ? viewModel.activeSpeedTestRecord : nil)
     }
 
     private var isInspectingSavedRun: Bool { inspectedRecord != nil }
@@ -839,6 +860,10 @@ private struct SpeedTestCard: View {
                     Text(primarySpeedTitle)
                         .font(.caption2.weight(.semibold))
                         .linkWaveText(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(height: 14, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(primarySpeedValue)
                         .font(.system(.title2, design: .rounded).weight(.bold))
                         .monospacedDigit()
@@ -866,14 +891,18 @@ private struct SpeedTestCard: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(LinearGradient(
-                        colors: [palette.textAccent.opacity(0.10), palette.textAccent.opacity(0.025), .clear],
+                        colors: [
+                            palette.textAccent.opacity(instrumentAccentOpacity),
+                            palette.textAccent.opacity(instrumentAccentOpacity * 0.25),
+                            .clear
+                        ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ))
                 SpeedTestMicroGrid(accent: palette.textAccent)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 RadialGradient(
-                    colors: [palette.textAccent.opacity(0.10), .clear],
+                    colors: [palette.textAccent.opacity(instrumentAccentOpacity), .clear],
                     center: .topTrailing,
                     startRadius: 0,
                     endRadius: 150
@@ -913,7 +942,7 @@ private struct SpeedTestCard: View {
             }
         } else if let inspectedRecord {
             return "Saved · \(Self.formattedTime(inspectedRecord.timestamp))"
-        } else if displayedRecord != nil {
+        } else if hasCompletedRun || displayedRecord != nil {
             return "Benchmark complete"
         } else {
             return "Ready to benchmark"
@@ -923,9 +952,9 @@ private struct SpeedTestCard: View {
     private var primarySpeedTitle: String {
         guard isRunning else { return "Peak Download" }
         switch progress.phase {
-        case .ping: return "Live speed"
-        case .download: return "Download"
-        case .upload: return "Upload"
+        case .ping: return "Throughput"
+        case .download: return "Live Download"
+        case .upload: return "Live Upload"
         }
     }
 
@@ -984,9 +1013,12 @@ private struct SpeedTestCard: View {
                 if phase == .download {
                     fraction = min(max(displayedDownloadMbps / 1_000, 0), 1)
                     status = hasDownloadReading ? String(format: "%.1f Mbps", displayedDownloadMbps) : "Preparing..."
-                } else {
+                } else if hasUploadReading {
                     fraction = progress.fraction
                     status = "Live"
+                } else {
+                    fraction = progress.fraction
+                    status = "Measuring..."
                 }
             }
         }
@@ -1012,9 +1044,9 @@ private struct SpeedTestCard: View {
                         .frame(width: geometry.size.width * CGFloat(min(max(fraction, 0), 1)), height: 10)
                     ForEach([0.25, 0.5, 0.75], id: \.self) { tick in
                         Rectangle()
-                            .fill(palette.backgroundPrimary.opacity(0.72))
-                            .frame(width: 1, height: 14)
-                            .position(x: geometry.size.width * CGFloat(tick), y: 7)
+                            .fill(palette.textSecondary.color.opacity(0.34))
+                            .frame(width: 1, height: 10)
+                            .position(x: geometry.size.width * CGFloat(tick), y: 5)
                     }
                 }
             }
@@ -1395,6 +1427,8 @@ private struct SpeedTestCard: View {
         isRunning = true
         viewModel.clearActiveSpeedTestRecord()
         pendingResult = nil
+        completedRecord = nil
+        hasCompletedRun = false
         inspectedHistoryID = nil
         isHistoryExpanded = false
         selectedActivity = nil
@@ -1421,12 +1455,13 @@ private struct SpeedTestCard: View {
         viewModel.setSpeedTestRunning(true)
 
         testTask = Task { @MainActor in
+            var didComplete = false
             defer {
-                isRunning = false
-                viewModel.setSpeedTestRunning(false)
-                activePhase = nil
                 testTask = nil
-                if pendingResult == nil {
+                if !didComplete {
+                    isRunning = false
+                    viewModel.setSpeedTestRunning(false)
+                    activePhase = nil
                     targetDownloadMbps = 0
                     targetUploadMbps = 0
                     scheduleInterpolation()
@@ -1436,12 +1471,24 @@ private struct SpeedTestCard: View {
                 let completedResult = try await SpeedTestService.run { update in
                     receiveProgress(update)
                 }
-                viewModel.completeSpeedTest(completedResult)
-                pendingResult = completedResult
-                targetDownloadMbps = completedResult.downloadMbps
-                targetUploadMbps = completedResult.uploadMbps
-                hasDownloadReading = true
-                hasUploadReading = true
+                withAnimation(.easeOut(duration: 0.18)) {
+                    let record = viewModel.completeSpeedTest(completedResult)
+                    completedRecord = record
+                    hasCompletedRun = true
+                    pendingResult = completedResult
+                    testDownloadMbps = completedResult.downloadMbps
+                    testUploadMbps = completedResult.uploadMbps
+                    measuredPingMs = completedResult.pingMs
+                    measuredJitterMs = completedResult.jitterMs
+                    targetDownloadMbps = completedResult.downloadMbps
+                    targetUploadMbps = completedResult.uploadMbps
+                    hasDownloadReading = true
+                    hasUploadReading = true
+                    isRunning = false
+                    viewModel.setSpeedTestRunning(false)
+                    activePhase = nil
+                }
+                didComplete = true
                 scheduleInterpolation()
             } catch is CancellationError {
                 if errorMessage == nil { errorMessage = "Speed test stopped." }
@@ -1586,7 +1633,9 @@ private struct HomeSummaryRow: View {
                     HStack(spacing: 7) {
                         CircularStatRing(
                             progress: monthTotalBytes == 0 ? 0 : Double(todayTotalBytes) / Double(monthTotalBytes),
-                            tint: palette.textAccent
+                            tint: palette.textAccent,
+                            showsUsageBars: true,
+                            foreground: palette.textPrimary.color
                         )
                         Text(Self.formatGB(todayTotalBytes))
                             .font(.system(.title3, design: .rounded).weight(.bold))
@@ -1717,6 +1766,8 @@ private struct CircularStatRing: View {
     let progress: Double
     let tint: Color
     var symbol: String?
+    var showsUsageBars = false
+    var foreground: Color = .primary
 
     var body: some View {
         ZStack {
@@ -1726,7 +1777,15 @@ private struct CircularStatRing: View {
                 .trim(from: 0, to: min(max(progress, 0), 1))
                 .stroke(tint, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            if let symbol {
+            if showsUsageBars {
+                HStack(alignment: .bottom, spacing: 2) {
+                    ForEach(0..<3, id: \.self) { index in
+                        Capsule()
+                            .fill(foreground)
+                            .frame(width: 3, height: CGFloat(6 + index * 3))
+                    }
+                }
+            } else if let symbol {
                 Image(systemName: symbol)
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(tint)
