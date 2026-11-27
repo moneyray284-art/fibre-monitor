@@ -171,8 +171,11 @@ public struct LiquidGlassBackground: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.linkWaveThemePalette) private var palette
     @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
+    private let artVariant: AmbientWaveArtView.Variant
 
-    public init() {}
+    public init(isSheet: Bool = false) {
+        artVariant = isSheet ? .sheet : .canvas
+    }
 
     public var body: some View {
         GeometryReader { geometry in
@@ -183,6 +186,8 @@ public struct LiquidGlassBackground: View {
                 } else {
                     palette.backgroundPrimary
                 }
+
+                AmbientWaveArtView(variant: artVariant)
 
                 if surfaceStyle != .cleanSolid {
                     ZStack(alignment: .top) {
@@ -230,7 +235,7 @@ private struct LinkWaveThemedListSurfaceModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .scrollContentBackground(.hidden)
-            .background { LiquidGlassBackground() }
+            .background { LiquidGlassBackground(isSheet: true) }
             .listRowBackground(rowBackground)
             .listRowSeparatorTint(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.09))
             .foregroundStyle(palette.textPrimary.color)

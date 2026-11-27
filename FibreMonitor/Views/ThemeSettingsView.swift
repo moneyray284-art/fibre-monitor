@@ -41,7 +41,7 @@ struct ThemeSettingsView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
         }
-        .background { LiquidGlassBackground() }
+        .background { LiquidGlassBackground(isSheet: true) }
         .environment(\.linkWaveThemePalette, palette)
         .linkWaveText(.primary)
         .navigationTitle("Theme & Colors")

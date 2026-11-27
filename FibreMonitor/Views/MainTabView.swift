@@ -22,6 +22,8 @@ public struct MainTabView: View {
 
     public var body: some View {
         ZStack {
+            AmbientWaveArtView(variant: .canvas)
+
             TabView(selection: $viewModel.selectedTab) {
                 DashboardView(viewModel: viewModel)
                     .tabItem {

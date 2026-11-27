@@ -5,6 +5,7 @@ import UIKit
 public struct WifiTabView: View {
     @ObservedObject var viewModel: MonitorViewModel
     @Environment(\.linkWaveThemePalette) private var palette
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var pendingRadio: (radio: WifiRadio, enable: Bool)?
     @State private var activeSheet: WifiSheetRoute?
 
@@ -28,6 +29,11 @@ public struct WifiTabView: View {
                             )
                         } else {
                             radiosCard
+                            LazyVGrid(columns: bandColumns, alignment: .leading, spacing: 12) {
+                                ForEach(WifiFrequencyBand.allCases) { band in
+                                    bandCard(for: band)
+                                }
+                            }
                         }
 
                         if let status = viewModel.wifiMutationStatus {
@@ -45,29 +51,6 @@ public struct WifiTabView: View {
                             .linkWaveGlassCard(padding: 12)
                         }
 
-                        ForEach(groupedNetworks, id: \.title) { group in
-                            VStack(alignment: .leading, spacing: 10) {
-                                CardHeader(icon: "dot.radiowaves.left.and.right", title: group.title) {
-                                    Pill(text: "\(group.networks.count) SSID\(group.networks.count == 1 ? "" : "s")", color: .secondary)
-                                }
-
-                                ForEach(group.networks) { network in
-                                    WifiNetworkRow(
-                                        network: network,
-                                        isEditDisabled: viewModel.isWifiSaving || !viewModel.isConnected,
-                                        isSecondary: Self.isSecondary(network.ssidIndex),
-                                        openEdit: { activeSheet = .edit(network) },
-                                        openQr: { activeSheet = .qr(network) },
-                                        setEnabled: { enabled in Task { await viewModel.setWifiNetwork(network, enabled: enabled) } },
-                                        delete: { Task { await viewModel.deleteWifiNetwork(network) } }
-                                    )
-                                    if network.id != group.networks.last?.id {
-                                        LinkWaveHairlineDivider(leading: 4)
-                                    }
-                                }
-                            }
-                            .linkWaveGlassCard()
-                        }
                     }
                 }
                 .padding(.horizontal)
@@ -115,8 +98,8 @@ public struct WifiTabView: View {
             case .qr(let network):
                 WifiQrSheet(viewModel: viewModel, network: network)
                     .toolbar(.hidden, for: .tabBar)
-            case .edit(let network):
-                WifiEditSheet(viewModel: viewModel, network: network)
+            case .edit(let network, let initialSsid):
+                WifiEditSheet(viewModel: viewModel, network: network, initialSsid: initialSsid)
                     .toolbar(.hidden, for: .tabBar)
             }
         }
@@ -132,62 +115,201 @@ public struct WifiTabView: View {
     }
 
     private var radiosCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CardHeader(icon: "wifi", title: "Radios") {
-                if viewModel.isWifiSaving { ProgressView() }
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.textAccent)
+                    .frame(width: 38, height: 38)
+                    .background(palette.textAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Wi-Fi Networks")
+                        .font(.headline.weight(.bold))
+                    Text("\(activeRadioCount)/2 radios active · \(broadcastingSSIDCount)/\(viewModel.wifi.networks.count) SSIDs broadcasting")
+                        .font(.caption2.monospacedDigit())
+                        .linkWaveText(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                Spacer(minLength: 3)
+                if viewModel.isWifiSaving { ProgressView().controlSize(.small) }
             }
-            ForEach(Array(viewModel.wifi.radios.enumerated()), id: \.offset) { entry in
-                let radio = entry.element
-                HStack(spacing: 12) {
-                    Image(systemName: radio.enabled ? "wifi" : "wifi.slash")
-                        .foregroundColor(radio.enabled ? palette.textAccent : palette.textSecondary.color)
-                        .frame(width: 28)
-                        .accessibilityHidden(true)
+            .padding(14)
+            .background {
+                ZStack {
+                    LinearGradient(
+                        colors: [palette.textAccent.opacity(0.09), palette.textAccent.opacity(0.025), .clear],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    RadialGradient(
+                        colors: [palette.textAccent.opacity(0.16), .clear],
+                        center: .topTrailing,
+                        startRadius: 0,
+                        endRadius: 135
+                    )
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            }
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(MonitorViewModel.bandName(radio.band))
-                            .font(.subheadline.weight(.semibold))
-                        let names = viewModel.wifi.networks(on: radio).map(\.name).filter { !$0.isEmpty }
-                        Text(radio.enabled ? (names.isEmpty ? "On" : names.joined(separator: " · ")) : "Off")
-                            .font(.caption)
+            GeometryReader { geometry in
+                let twoPointFourCount = onlineNetworkCount(in: .twoPointFour)
+                let fiveCount = onlineNetworkCount(in: .five)
+                let total = twoPointFourCount + fiveCount
+                let availableWidth = max(0, geometry.size.width - 2)
+                let twoPointFourFraction = total == 0 ? 0.5 : CGFloat(twoPointFourCount) / CGFloat(total)
+                let fiveFraction = total == 0 ? 0.5 : CGFloat(fiveCount) / CGFloat(total)
+                HStack(spacing: 2) {
+                    Capsule()
+                        .fill(Color.green.opacity(twoPointFourCount > 0 ? 0.9 : 0.2))
+                        .frame(width: availableWidth * twoPointFourFraction)
+                    Capsule()
+                        .fill(palette.textAccent.opacity(fiveCount > 0 ? 0.9 : 0.2))
+                        .frame(width: availableWidth * fiveFraction)
+                }
+            }
+            .frame(height: 4)
+            .padding(.horizontal, 14)
+
+            LinkWaveHairlineDivider()
+                .padding(.horizontal, 14)
+
+            HStack(spacing: 0) {
+                bandSummary(WifiFrequencyBand.twoPointFour)
+                Rectangle()
+                    .fill(palette.textSecondary.color.opacity(0.25))
+                    .frame(width: 0.5, height: 36)
+                bandSummary(WifiFrequencyBand.five)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+        }
+        .linkWaveGlassCard(padding: 0)
+    }
+
+    private var bandColumns: [GridItem] {
+        horizontalSizeClass == .regular
+            ? [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+            : [GridItem(.flexible())]
+    }
+
+    private var activeRadioCount: Int {
+        viewModel.wifi.radios.filter(\.enabled).count
+    }
+
+    private var broadcastingSSIDCount: Int {
+        viewModel.wifi.networks.filter { network in
+            network.enabled && (radio(for: band(for: network))?.enabled ?? true)
+        }.count
+    }
+
+    private func bandSummary(_ band: WifiFrequencyBand) -> some View {
+        let radio = radio(for: band)
+        let liveCount = onlineNetworkCount(in: band)
+        let bandTint = band == .twoPointFour ? Color.green : palette.textAccent
+        return HStack(spacing: 8) {
+            Circle()
+                .fill(bandTint.opacity((radio?.enabled ?? false) && liveCount > 0 ? 1 : 0.35))
+                .frame(width: 6, height: 6)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(band.title)
+                    .font(.caption.weight(.semibold))
+                Text((radio?.enabled ?? false) && liveCount > 0 ? "\(liveCount) Live" : "Off")
+                    .font(.caption2.weight(.medium).monospacedDigit())
+                    .foregroundStyle((radio?.enabled ?? false) && liveCount > 0 ? bandTint : palette.textTertiary.color)
+            }
+            Spacer(minLength: 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, 12)
+    }
+
+    private func onlineNetworkCount(in band: WifiFrequencyBand) -> Int {
+        guard radio(for: band)?.enabled == true else { return 0 }
+        return bandNetworks(band).filter(\.enabled).count
+    }
+
+    private func bandCard(for band: WifiFrequencyBand) -> some View {
+        let radio = radio(for: band)
+        let networks = bandNetworks(band)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 9) {
+                Image(systemName: radio?.enabled == true ? "wifi" : "wifi.slash")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(radio?.enabled == true ? palette.textAccent : palette.textTertiary.color)
+                    .frame(width: 34, height: 34)
+                    .background(
+                        (radio?.enabled == true ? palette.textAccent : palette.textTertiary.color).opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Text(band.title)
+                            .font(.subheadline.weight(.bold))
+                        Text("· \(networks.count) SSIDs")
+                            .font(.caption2.monospacedDigit())
                             .linkWaveText(.secondary)
-                            .lineLimit(2)
                     }
-
-                    Spacer()
-
+                    Text(radio?.enabled == true ? "Wireless radio is active" : "Radio disabled — networks paused")
+                        .font(.caption2)
+                        .linkWaveText(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                Spacer(minLength: 3)
+                if let radio {
                     Toggle(
-                        "\(MonitorViewModel.bandName(radio.band)) Radio",
+                        "\(band.title) Radio",
                         isOn: Binding(get: { radio.enabled }, set: { pendingRadio = (radio, $0) })
                     )
                     .labelsHidden()
-                    .accessibilityLabel("Toggle \(MonitorViewModel.bandName(radio.band)) Wi-Fi")
+                    .accessibilityLabel("Toggle \(band.title) Wi-Fi radio")
                     .disabled(viewModel.isWifiSaving || !viewModel.isConnected)
                 }
-                .padding(.vertical, 8)
-                if entry.offset < viewModel.wifi.radios.count - 1 {
-                    LinkWaveHairlineDivider(leading: 40)
+            }
+            .padding(.bottom, 10)
+
+            if networks.isEmpty {
+                Text("No SSIDs reported for this band.")
+                    .font(.caption)
+                    .linkWaveText(.secondary)
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(networks) { network in
+                    WifiNetworkRow(
+                        network: network,
+                        isEditDisabled: viewModel.isWifiSaving || !viewModel.isConnected,
+                        radioIsEnabled: radio?.enabled ?? true,
+                        canDisable: Self.isSecondary(network.ssidIndex),
+                        canDelete: Self.isSecondary(network.ssidIndex),
+                        openEdit: { initialSsid in activeSheet = .edit(network, initialSsid: initialSsid) },
+                        openQr: { activeSheet = .qr(network) },
+                        setEnabled: { enabled in Task { await viewModel.setWifiNetwork(network, enabled: enabled) } },
+                        delete: { Task { await viewModel.deleteWifiNetwork(network) } }
+                    )
+                    if network.id != networks.last?.id {
+                        LinkWaveHairlineDivider(leading: 2)
+                    }
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .linkWaveGlassCard()
     }
 
-    private var groupedNetworks: [(title: String, networks: [WifiNetwork])] {
-        var groups: [(title: String, networks: [WifiNetwork])] = []
-        var matched = Set<Int>()
-        for radio in viewModel.wifi.radios {
-            let list = viewModel.wifi.allNetworks(on: radio)
-            if !list.isEmpty {
-                list.forEach { matched.insert($0.id) }
-                groups.append((MonitorViewModel.bandName(radio.band), list))
-            }
-        }
-        let remainder = viewModel.wifi.networks.filter { !matched.contains($0.id) }
-        if !remainder.isEmpty {
-            groups.append(("Other Networks", remainder))
-        }
-        return groups
+    private func bandNetworks(_ band: WifiFrequencyBand) -> [WifiNetwork] {
+        viewModel.wifi.networks
+            .filter { self.band(for: $0) == band }
+            .sorted { $0.ssidIndex < $1.ssidIndex }
+    }
+
+    private func band(for network: WifiNetwork) -> WifiFrequencyBand {
+        WifiFrequencyBand(rawValue: network.band) ?? (network.ssidIndex <= 4 ? .twoPointFour : .five)
+    }
+
+    private func radio(for band: WifiFrequencyBand) -> WifiRadio? {
+        viewModel.wifi.radios.first { $0.band == band.rawValue }
     }
 
     private var wifiEmptyMessage: String {
@@ -200,12 +322,12 @@ public struct WifiTabView: View {
 
 private enum WifiSheetRoute: Identifiable {
     case qr(WifiNetwork)
-    case edit(WifiNetwork)
+    case edit(WifiNetwork, initialSsid: String?)
 
     var id: String {
         switch self {
         case .qr(let network): return "qr-\(network.id)"
-        case .edit(let network): return "edit-\(network.id)"
+        case .edit(let network, _): return "edit-\(network.id)"
         }
     }
 }
@@ -213,14 +335,19 @@ private enum WifiSheetRoute: Identifiable {
 private struct WifiNetworkRow: View {
     let network: WifiNetwork
     let isEditDisabled: Bool
-    let isSecondary: Bool
-    let openEdit: () -> Void
+    let radioIsEnabled: Bool
+    let canDisable: Bool
+    let canDelete: Bool
+    let openEdit: (String?) -> Void
     let openQr: () -> Void
     let setEnabled: (Bool) -> Void
     let delete: () -> Void
 
     @State private var optimisticEnabled: Bool?
     @State private var showDeleteConfirmation = false
+    @State private var isEditingName = false
+    @State private var editedName = ""
+    @FocusState private var nameFieldFocused: Bool
     @Environment(\.linkWaveThemePalette) private var palette
 
     private var enabledBinding: Binding<Bool> {
@@ -234,82 +361,144 @@ private struct WifiNetworkRow: View {
     }
 
     var body: some View {
-        VStack(spacing: 9) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
+                    if isEditingName {
+                        HStack(spacing: 6) {
+                            TextField("Network name", text: $editedName)
+                                .font(.subheadline.weight(.semibold))
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .focused($nameFieldFocused)
+                                .onChange(of: editedName) { value in
+                                    if value.count > 32 { editedName = String(value.prefix(32)) }
+                                }
+                            Button {
+                                openEdit(editedName.trimmingCharacters(in: .whitespacesAndNewlines))
+                                isEditingName = false
+                                nameFieldFocused = false
+                            } label: {
+                                Image(systemName: "checkmark")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(palette.textAccent)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isEditDisabled || editedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .accessibilityLabel("Save network name")
+                            Button {
+                                editedName = network.name
+                                isEditingName = false
+                                nameFieldFocused = false
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.caption.weight(.bold))
+                                    .linkWaveText(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Cancel network name edit")
+                        }
+                    } else {
                         Text(network.name.isEmpty ? "SSID \(network.ssidIndex)" : network.name)
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
-                        Pill(text: network.enabled ? "Active" : "Off", color: network.enabled ? .green : .secondary)
                     }
-                    Text("SSID \(network.ssidIndex) · \(MonitorViewModel.bandName(network.band))")
-                        .font(.caption)
-                        .linkWaveText(.secondary)
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(isActive ? Color.green : palette.textTertiary.color)
+                            .frame(width: 6, height: 6)
+                        Text(statusText)
+                            .foregroundStyle(isActive ? Color.green : palette.textTertiary.color)
+                        Text("· SSID \(network.ssidIndex) · \(network.ssidIndex == Self.primaryIndex(for: network) ? "Primary" : "Secondary") network")
+                            .foregroundStyle(palette.textSecondary.color)
+                    }
+                    .font(.caption2.monospacedDigit())
                 }
 
-                Spacer(minLength: 8)
-
+                Spacer(minLength: 6)
             }
 
-            HStack(spacing: 14) {
-                if isSecondary {
-                    HStack(spacing: 5) {
-                        Text(enabledBinding.wrappedValue ? "On" : "Off")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(enabledBinding.wrappedValue ? palette.textAccent : palette.textSecondary.color)
-                        Toggle("SSID \(network.ssidIndex)", isOn: enabledBinding)
-                            .labelsHidden()
-                            .scaleEffect(0.86, anchor: .leading)
-                            .disabled(isEditDisabled)
-                            .accessibilityLabel("Turn \(network.name) \(enabledBinding.wrappedValue ? "off" : "on")")
-                    }
-                }
-                Spacer(minLength: 0)
-                Button(action: openEdit) {
-                    Image(systemName: "pencil")
-                        .font(.subheadline.weight(.medium))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(isEditDisabled)
-                .accessibilityLabel("Edit Wi-Fi name and password for \(network.name)")
-
-                Button(action: openQr) {
-                    Image(systemName: "qrcode")
-                        .font(.subheadline.weight(.medium))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Show QR code and password for \(network.name)")
-
-                if isSecondary {
-                    Button(role: .destructive) {
-                        showDeleteConfirmation = true
+            HStack(spacing: 11) {
+                if canDisable {
+                    Button {
+                        enabledBinding.wrappedValue.toggle()
                     } label: {
-                        Image(systemName: "trash")
-                            .font(.subheadline.weight(.medium))
-                            .frame(width: 32, height: 32)
-                            .contentShape(Circle())
+                        Label(enabledBinding.wrappedValue ? "Enabled" : "Disabled",
+                              systemImage: enabledBinding.wrappedValue ? "checkmark.circle.fill" : "circle")
+                            .font(.caption2.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(enabledBinding.wrappedValue ? Color.green : palette.textSecondary.color)
                     }
                     .buttonStyle(.plain)
                     .disabled(isEditDisabled)
-                    .accessibilityLabel("Delete \(network.name)")
+                }
+                if !isEditingName {
+                    Button {
+                        editedName = network.name
+                        isEditingName = true
+                        nameFieldFocused = true
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(palette.textAccent)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isEditDisabled)
+
+                    Button { openEdit(nil) } label: {
+                        Image(systemName: "key.fill")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(palette.textAccent)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isEditDisabled)
+                    .accessibilityLabel("Edit Wi-Fi password")
+
+                    Button(action: openQr) {
+                        Label("QR", systemImage: "qrcode")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(palette.textAccent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Show Wi-Fi QR code")
+
+                    if canDelete {
+                        Button(role: .destructive) {
+                            showDeleteConfirmation = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isEditDisabled)
+                    }
                 }
             }
-            .foregroundStyle(palette.textAccent)
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 9)
+        .padding(.vertical, 10)
         .onChange(of: network.enabled) { _ in optimisticEnabled = nil }
+        .onChange(of: network.name) { value in
+            if !isEditingName { editedName = value }
+        }
         .alert("Delete extra Wi-Fi network?", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive, action: delete)
         } message: {
             Text("\(network.name) will be removed from the \(MonitorViewModel.bandName(network.band)) network list.")
         }
+    }
+
+    private static func primaryIndex(for network: WifiNetwork) -> Int {
+        WifiFrequencyBand(rawValue: network.band)?.wlanIndices.first ?? (network.ssidIndex <= 4 ? 1 : 5)
+    }
+
+    private var isActive: Bool {
+        radioIsEnabled && network.enabled
+    }
+
+    private var statusText: String {
+        guard radioIsEnabled else { return "Paused" }
+        return network.enabled ? "Active" : "Off"
     }
 }
 
@@ -322,12 +511,14 @@ private struct WifiQrSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.linkWaveThemePalette) private var palette
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var config: WifiSsidConfig?
     @State private var isLoading = false
     @State private var errorText: String?
     @State private var showPassword = false
     @State private var copiedPassword = false
+    @State private var copiedNetworkName = false
 
     var body: some View {
         NavigationStack {
@@ -358,8 +549,8 @@ private struct WifiQrSheet: View {
                 }
                 .padding()
             }
-            .background { LiquidGlassBackground() }
-            .navigationTitle(network.name.isEmpty ? "Wi-Fi Network" : network.name)
+            .background { LiquidGlassBackground(isSheet: true) }
+            .navigationTitle("Wi-Fi Network")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .tabBar)
             .toolbar {
@@ -368,6 +559,7 @@ private struct WifiQrSheet: View {
                 }
             }
         }
+        .presentationDragIndicator(.visible)
         .task { await loadConfig() }
         .onDisappear {
             config = nil
@@ -385,13 +577,14 @@ private struct WifiQrSheet: View {
     @ViewBuilder
     private func content(for cfg: WifiSsidConfig) -> some View {
         VStack(spacing: 16) {
-            VStack(spacing: 8) {
-                HStack {
-                    Text(cfg.ssid.isEmpty ? network.name : cfg.ssid)
-                        .font(.title3.weight(.bold))
-                    Spacer()
-                    Pill(text: cfg.authMode.displayName, color: palette.textAccent)
-                }
+            VStack(alignment: .leading, spacing: 5) {
+                Text("SHARE WI-FI")
+                    .font(.caption2.weight(.bold))
+                    .tracking(1.1)
+                    .foregroundStyle(palette.textAccent)
+                Text(cfg.ssid.isEmpty ? network.name : cfg.ssid)
+                    .font(.title3.weight(.bold))
+                    .lineLimit(2)
                 if cfg.isHidden {
                     HStack {
                         Label("Hidden network", systemImage: "eye.slash")
@@ -401,35 +594,57 @@ private struct WifiQrSheet: View {
                     }
                 }
             }
-            .linkWaveGlassCard()
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             if let payload = cfg.qrPayload, let uiImage = QrImageGenerator.generate(from: payload) {
-                VStack(spacing: 12) {
-                    Image(uiImage: uiImage)
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: 220, maxHeight: 220)
-                        .padding(14)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .accessibilityLabel("Wi-Fi join QR code for \(cfg.ssid)")
-
-                    Text("Scan with iPhone or Android Camera to join \(cfg.ssid).")
-                        .font(.caption)
-                        .linkWaveText(.secondary)
-                        .multilineTextAlignment(.center)
-
-                    let shareImage = Image(uiImage: uiImage)
-                    ShareLink(
-                        item: shareImage,
-                        preview: SharePreview("Join Wi-Fi: \(cfg.ssid)", image: shareImage)
-                    ) {
-                        Label("Share QR Code", systemImage: "square.and.arrow.up")
-                            .frame(maxWidth: .infinity)
+                Image(uiImage: uiImage)
+                    .interpolation(.none)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 220, maxHeight: 220)
+                    .padding(14)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .accessibilityLabel("Wi-Fi join QR code for \(cfg.ssid)")
+                    .frame(maxWidth: .infinity)
+                    .padding(14)
+                    .background(
+                        colorScheme == .dark ? Color.white.opacity(0.96) : Color.white,
+                        in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(Color.black.opacity(0.08), lineWidth: 0.8)
                     }
-                    .liquidGlassActionButton()
+
+                Text("SSID \(network.ssidIndex) · \(MonitorViewModel.bandName(network.band)) · \(cfg.authMode.displayName)")
+                    .font(.caption.monospacedDigit())
+                    .linkWaveText(.secondary)
+
+                Button {
+                    UIPasteboard.general.string = cfg.ssid
+                    Haptics.impact(.light)
+                    copiedNetworkName = true
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        copiedNetworkName = false
+                    }
+                } label: {
+                    Label(copiedNetworkName ? "Network Name Copied" : "Copy Network Name",
+                          systemImage: copiedNetworkName ? "checkmark.circle.fill" : "doc.on.doc")
+                        .foregroundStyle(copiedNetworkName ? Color.green : palette.textAccent)
+                        .frame(maxWidth: .infinity)
                 }
-                .linkWaveGlassCard()
+                .liquidGlassActionButton(tint: palette.textAccent)
+
+                let shareImage = Image(uiImage: uiImage)
+                ShareLink(
+                    item: shareImage,
+                    preview: SharePreview("Join Wi-Fi: \(cfg.ssid)", image: shareImage)
+                ) {
+                    Label("Share QR Code", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                }
+                .liquidGlassSmallButton()
             } else {
                 VStack(spacing: 8) {
                     Image(systemName: "qrcode")
@@ -508,6 +723,7 @@ private struct WifiQrSheet: View {
 private struct WifiEditSheet: View {
     @ObservedObject var viewModel: MonitorViewModel
     let network: WifiNetwork
+    let initialSsid: String?
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -555,7 +771,7 @@ private struct WifiEditSheet: View {
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background { LiquidGlassBackground() }
+                    .background { LiquidGlassBackground(isSheet: true) }
                 } else if let loadError {
                     ScrollView {
                         VStack(spacing: 12) {
@@ -575,7 +791,7 @@ private struct WifiEditSheet: View {
                         .linkWaveGlassCard()
                         .padding()
                     }
-                    .background { LiquidGlassBackground() }
+                    .background { LiquidGlassBackground(isSheet: true) }
                 } else if let config {
                     if !config.authMode.isEditableWpa2Or3Psk {
                         refusalView(
@@ -708,7 +924,7 @@ private struct WifiEditSheet: View {
             .linkWaveGlassCard()
             .padding()
         }
-        .background { LiquidGlassBackground() }
+        .background { LiquidGlassBackground(isSheet: true) }
     }
 
     private func loadConfig() async {
@@ -717,7 +933,7 @@ private struct WifiEditSheet: View {
         do {
             let loaded = try await viewModel.fetchWifiSsidConfig(for: network)
             config = loaded
-            ssidInput = loaded.ssid
+            ssidInput = initialSsid ?? loaded.ssid
             passwordInput = loaded.psk
         } catch {
             loadError = MonitorViewModel.describe(error, host: viewModel.settings.host)

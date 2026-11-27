@@ -566,7 +566,7 @@ private struct DiagnosticsScreen: View {
             DiagnosticsCard(viewModel: viewModel)
                 .padding()
         }
-        .background { LiquidGlassBackground() }
+        .background { LiquidGlassBackground(isSheet: true) }
         .liquidGlassScrollEdges()
         .navigationTitle("Diagnostics")
         .navigationBarTitleDisplayMode(.inline)
@@ -603,7 +603,7 @@ private struct LanScreen: View {
             }
             .padding()
         }
-        .background { LiquidGlassBackground() }
+        .background { LiquidGlassBackground(isSheet: true) }
         .liquidGlassScrollEdges()
         .refreshable { await viewModel.refreshAll(forceReauthIfNeeded: true) }
         .navigationTitle("Home Network")
