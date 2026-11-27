@@ -1,7 +1,8 @@
 import SwiftUI
 
 public struct MainTabView: View {
-    @StateObject private var viewModel = MonitorViewModel()
+    @StateObject private var viewModel: MonitorViewModel
+    @StateObject private var speedTestCoordinator: SpeedTestCoordinator
     @ObservedObject private var settings = SettingsStore.shared
     @AppStorage("linkwave.surfaceStyle") private var surfaceStyleRawValue = LinkWaveSurfaceStyle.liquidGlass.rawValue
     @Environment(\.scenePhase) private var scenePhase
@@ -18,12 +19,16 @@ public struct MainTabView: View {
     @State private var foregroundCleanupTask: Task<Void, Never>?
     @State private var foregroundCleanupID: UUID?
 
-    public init() {}
+    public init() {
+        let viewModel = MonitorViewModel()
+        _viewModel = StateObject(wrappedValue: viewModel)
+        _speedTestCoordinator = StateObject(wrappedValue: SpeedTestCoordinator(viewModel: viewModel))
+    }
 
     public var body: some View {
         ZStack {
             TabView(selection: $viewModel.selectedTab) {
-                DashboardView(viewModel: viewModel)
+                DashboardView(viewModel: viewModel, speedTestCoordinator: speedTestCoordinator)
                     .tabItem {
                         Label("Home", systemImage: "house")
                     }
@@ -151,7 +156,7 @@ public struct MainTabView: View {
     }
 
     private var isBackgroundPulsing: Bool {
-        viewModel.isRefreshing || viewModel.isSpeedTestRunning || viewModel.isDiagnosing
+        viewModel.isRefreshing || speedTestCoordinator.phase != .idle || viewModel.isDiagnosing
     }
 
     private var routerPickerBinding: Binding<Bool> {

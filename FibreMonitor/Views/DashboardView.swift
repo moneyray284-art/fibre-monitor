@@ -2,17 +2,17 @@ import SwiftUI
 
 public struct DashboardView: View {
     @ObservedObject var viewModel: MonitorViewModel
+    @ObservedObject var speedTestCoordinator: SpeedTestCoordinator
     @ObservedObject var settings: SettingsStore
     @State private var showSettings = false
     @State private var showConnectionDiagnosis = false
     @State private var startSpeedTestRequested = false
-    @StateObject private var speedTestCoordinator: SpeedTestCoordinator
     @Environment(\.colorScheme) private var colorScheme
 
-    public init(viewModel: MonitorViewModel) {
+    public init(viewModel: MonitorViewModel, speedTestCoordinator: SpeedTestCoordinator) {
         self.viewModel = viewModel
+        self.speedTestCoordinator = speedTestCoordinator
         self.settings = viewModel.settings
-        _speedTestCoordinator = StateObject(wrappedValue: SpeedTestCoordinator(viewModel: viewModel))
     }
 
     public var body: some View {
@@ -789,19 +789,10 @@ private struct SpeedTestCard: View {
         .animation(.easeOut(duration: 0.28), value: shouldShowResultsDrawer)
         .linkWaveGlassCard()
         .accessibilityElement(children: .contain)
-        .onChange(of: viewModel.canRunSpeedTest) { isAvailable in
-            guard !isAvailable, coordinator.isRunning else { return }
-            coordinator.cancelSpeedTest(message: viewModel.isConnectedToWiFi
-                ? "Speed test stopped because the internet path was lost."
-                : "Speed test stopped because Wi-Fi disconnected.")
-        }
         .onChange(of: startRequested) { requested in
             guard requested else { return }
             startRequested = false
             startTest()
-        }
-        .onDisappear {
-            coordinator.cancelSpeedTest()
         }
     }
 
