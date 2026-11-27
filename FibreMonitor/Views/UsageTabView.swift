@@ -499,7 +499,7 @@ private struct BillingHistoryCard: View {
             HStack(spacing: 10) {
                 ZStack {
                     Circle().fill(palette.textAccent.opacity(0.12))
-                    Image(systemName: "arrow.down.arrow.up")
+                    Image(systemName: "arrow.up.arrow.down")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(palette.textAccent)
                 }

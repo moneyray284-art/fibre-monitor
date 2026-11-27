@@ -75,9 +75,8 @@ private enum ClientSignal {
         guard device.isOnline else { return 0 }
         if device.port.isLan { return 4 }
         guard device.port.isWifi, let rssi = device.rssiDbm else { return 3 }
-        if rssi >= -55 { return 4 }
-        if rssi >= -65 { return 3 }
-        if rssi >= -79 { return 2 }
+        if rssi >= -65 { return 4 }
+        if rssi >= -80 { return 3 }
         return 1
     }
 
@@ -85,14 +84,14 @@ private enum ClientSignal {
         guard device.isOnline else { return neutral }
         guard device.port.isWifi, let rssi = device.rssiDbm else { return accent }
         if rssi >= -65 { return .green }
-        if rssi >= -79 { return .orange }
-        return Color(red: 0.88, green: 0.24, blue: 0.35)
+        if rssi >= -80 { return .cyan }
+        return .orange
     }
 
     static func quality(for device: OntDevice) -> String? {
         guard device.isOnline, device.port.isWifi, let rssi = device.rssiDbm else { return nil }
         if rssi >= -65 { return "Strong" }
-        if rssi >= -79 { return "Fair" }
+        if rssi >= -80 { return "Fair" }
         return "Far"
     }
 
@@ -108,7 +107,7 @@ private enum ClientSignal {
 private enum OnlineClientSort: String, CaseIterable, Identifiable, Hashable {
     case `default` = "Default"
     case strongest = "Strongest"
-    case lowestRSSI = "Lowest RSSI"
+    case weakest = "Weakest"
 
     var id: String { rawValue }
 }
@@ -141,6 +140,7 @@ public struct ClientsTabView: View {
     @State private var selectedDevice: OntDevice?
     @State private var selectedBlockedDevice: BlockedRouterDevice?
     @State private var localWiFiIPv4: String?
+    @State private var expandedDeviceMACs: Set<String> = []
     @State private var isOnlineExpanded = true
     @State private var isOfflineExpanded = false
     @State private var onlineSort: OnlineClientSort = .default
@@ -159,15 +159,7 @@ public struct ClientsTabView: View {
             ScrollView {
                 VStack(spacing: 14) {
                     if viewModel.settings.isConfigured {
-                        HStack {
-                            Text("\(filteredOnline.count) online · \(filteredOffline.count) offline · \(viewModel.blockedDevices.count) blocked")
-                                .font(.caption.weight(.medium))
-                                .linkWaveText(.secondary)
-                                .monospacedDigit()
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 4)
-                        clientFilterTabs
+                        clientsOverviewConsole
                     }
 
                     if !viewModel.settings.isConfigured {
@@ -184,15 +176,19 @@ public struct ClientsTabView: View {
                                 message: "Devices you block from Wi-Fi will appear here."
                             )
                         } else {
-                            LazyVStack(spacing: 10) {
-                                CardHeader(icon: "hand.raised.fill", title: "Blocked") {
-                                    Pill(text: "\(filteredBlockedDevices.count)", color: .red)
-                                }
-                                ForEach(filteredBlockedDevices) { device in
-                                    blockedButton(for: device)
-                                }
-                            }
-                            .linkWaveGlassCard()
+                            BlockedDevicesSectionCard(
+                                count: filteredBlockedDevices.count,
+                                palette: palette,
+                                content: AnyView(
+                                    LazyVStack(spacing: 0) {
+                                        ForEach(filteredBlockedDevices) { device in
+                                            blockedButton(for: device)
+                                        }
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.bottom, 8)
+                                )
+                            )
                         }
                     } else if visibleOnline.isEmpty && visibleOffline.isEmpty {
                         ClientsEmptyCard(
@@ -206,6 +202,23 @@ public struct ClientsTabView: View {
                             action: viewModel.isLoggedOut ? { viewModel.reconnectSession() } : nil
                         )
                     } else {
+                        if (selectedFilter == .all || selectedFilter == .blocked),
+                           !filteredBlockedDevices.isEmpty {
+                            BlockedDevicesSectionCard(
+                                count: filteredBlockedDevices.count,
+                                palette: palette,
+                                content: AnyView(
+                                    LazyVStack(spacing: 0) {
+                                        ForEach(filteredBlockedDevices) { device in
+                                            blockedButton(for: device)
+                                        }
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.bottom, 8)
+                                )
+                            )
+                        }
+
                         if !visibleOnline.isEmpty {
                             ClientDeviceSectionCard(
                                 icon: "wifi",
@@ -223,7 +236,7 @@ public struct ClientsTabView: View {
 
                         if !visibleOffline.isEmpty {
                             ClientDeviceSectionCard(
-                                icon: "moon.zzz.fill",
+                                icon: "wifi.slash",
                                 title: "Offline",
                                 count: visibleOffline.count,
                                 tint: .secondary,
@@ -231,6 +244,14 @@ public struct ClientsTabView: View {
                                 action: {
                                     isOfflineExpanded.toggle()
                                 },
+                                footer: searchText.isEmpty
+                                    ? AnyView(
+                                        Text("Showing \(visibleOffline.count) recent of \(filteredOffline.count) cached offline leases")
+                                            .font(.caption2.monospacedDigit())
+                                            .linkWaveText(.secondary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    )
+                                    : nil,
                                 content: AnyView(clientRows(visibleOffline))
                             )
                         }
@@ -251,7 +272,6 @@ public struct ClientsTabView: View {
                     force: true
                 )
             }
-            .searchable(text: $searchText, prompt: "Search name, IP, MAC, or vendor")
             .navigationTitle("Clients")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -327,23 +347,28 @@ public struct ClientsTabView: View {
 
     private func clientButton(for device: OntDevice) -> some View {
         let thisPhone = isThisPhone(device)
-        return Button {
-            selectedDevice = device
-        } label: {
-            ClientRow(
-                device: device,
-                displayName: resolvedName(for: device),
-                isThisPhone: thisPhone
-            )
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            if !thisPhone && device.port.isWifi {
-                Button(role: .destructive) {
-                    requestBlock(device)
-                } label: {
-                    Label("Block Device", systemImage: "hand.raised.fill")
+        let isExpanded = expandedDeviceMACs.contains(device.mac)
+        return VStack(spacing: 0) {
+            Button {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
+                    if isExpanded {
+                        expandedDeviceMACs.remove(device.mac)
+                    } else {
+                        expandedDeviceMACs.insert(device.mac)
+                    }
                 }
+            } label: {
+                ClientRow(
+                    device: device,
+                    displayName: resolvedName(for: device),
+                    isThisPhone: thisPhone,
+                    isExpanded: isExpanded
+                )
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                clientExpandedDrawer(for: device, isThisPhone: thisPhone)
             }
         }
     }
@@ -355,6 +380,78 @@ public struct ClientsTabView: View {
             onSelect: { selectedBlockedDevice = device },
             onUnblock: { Task { await viewModel.unblockWifiDevice(device) } }
         )
+    }
+
+    @ViewBuilder
+    private func clientExpandedDrawer(for device: OntDevice, isThisPhone: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            let leaseStatus: String = {
+                if viewModel.blockedDevices.contains(where: { $0.mac.caseInsensitiveCompare(device.mac) == .orderedSame }) {
+                    return "WAN access blocked on router"
+                }
+                if device.isOnline {
+                    return "Active DHCP lease"
+                }
+                return "Inactive cached lease"
+            }()
+
+            Text(leaseStatus)
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .foregroundStyle(palette.textAccent)
+
+            if device.isOnline {
+                Text(signalHealthTip(for: device))
+                    .font(.caption)
+                    .linkWaveText(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if !isThisPhone && device.port.isWifi {
+                let isBlocked = viewModel.blockedDevices.contains(where: { $0.mac.caseInsensitiveCompare(device.mac) == .orderedSame })
+                Button {
+                    if isBlocked {
+                        if let blocked = viewModel.blockedDevices.first(where: { $0.mac.caseInsensitiveCompare(device.mac) == .orderedSame }) {
+                            Task { await viewModel.unblockWifiDevice(blocked) }
+                        }
+                    } else {
+                        requestBlock(device)
+                    }
+                } label: {
+                    Label(isBlocked ? "Unblock Device" : "Block Device",
+                          systemImage: isBlocked ? "checkmark.shield.fill" : "shield.slash.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isBlocked ? palette.textAccent : .red)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(
+                            (isBlocked ? palette.textAccent : Color.red).opacity(0.11),
+                            in: Capsule()
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .padding(.leading, 44)
+        .background(palette.backgroundTertiary.opacity(0.42),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    private func signalHealthTip(for device: OntDevice) -> String {
+        guard let rssi = device.rssiDbm else {
+            return "Signal data is not available; check that the router and device remain within range."
+        }
+        if rssi >= -65 {
+            return "Strong signal with reliable capacity for calls, streaming, and downloads."
+        }
+        if rssi >= -80 {
+            return "Fair signal; move closer to the router or reduce nearby interference."
+        }
+        return "Far signal; move closer to the router for a more stable connection."
     }
 
     @ViewBuilder
@@ -416,6 +513,104 @@ public struct ClientsTabView: View {
         .pickerStyle(.segmented)
         .labelsHidden()
         .accessibilityLabel("Sort online clients")
+    }
+
+    private var clientsOverviewConsole: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(palette.textAccent.opacity(0.12))
+                    Image(systemName: "person.2.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.textAccent)
+                }
+                .frame(width: 36, height: 36)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Connected Clients")
+                        .font(.subheadline.weight(.bold))
+                    Text("\(viewModel.devices.count) DHCP leases · \(filteredOnline.count) active now")
+                        .font(.caption2.monospacedDigit())
+                        .linkWaveText(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                }
+                Spacer(minLength: 4)
+                bandDistribution
+            }
+
+            LinkWaveHairlineDivider()
+
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.subheadline)
+                    .foregroundStyle(palette.textSecondary.color)
+                TextField("Search name, IP, or band...", text: $searchText)
+                    .font(.subheadline)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .monospacedDigit()
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(palette.textTertiary.color)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.horizontal, 11)
+            .frame(height: 42)
+            .background(palette.backgroundTertiary.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            clientFilterTabs
+        }
+        .padding(14)
+        .linkWaveGlassCard(padding: 0)
+        .overlay(alignment: .top) {
+            LinearGradient(
+                colors: [palette.textAccent.opacity(0.10), palette.textAccent.opacity(0.035), .clear],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .frame(height: 72)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var bandDistribution: some View {
+        let online = unblockedDeviceRecords.filter(\.isOnline)
+        let fiveCount = online.filter { $0.port == .wifi5(ssidIndex: 0) || $0.port.compactLabel == "5G" }.count
+        let twoCount = online.filter { $0.port == .wifi24(ssidIndex: 0) || $0.port.compactLabel == "2.4G" }.count
+        let total = max(1, fiveCount + twoCount)
+
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 7) {
+                Text("5 GHz")
+                    .font(.caption2.monospacedDigit())
+                Text("\(fiveCount)")
+                    .font(.caption2.weight(.bold).monospacedDigit())
+                    .foregroundStyle(palette.textAccent)
+                Text("·")
+                    .foregroundStyle(palette.textTertiary.color)
+                Text("2.4 GHz")
+                    .font(.caption2.monospacedDigit())
+                Text("\(twoCount)")
+                    .font(.caption2.weight(.bold).monospacedDigit())
+                    .foregroundStyle(.green)
+            }
+            GeometryReader { proxy in
+                HStack(spacing: 2) {
+                    Capsule().fill(palette.textAccent).frame(width: proxy.size.width * CGFloat(fiveCount) / CGFloat(total))
+                    Capsule().fill(.green).frame(width: proxy.size.width * CGFloat(twoCount) / CGFloat(total))
+                }
+            }
+            .frame(width: 118, height: 5)
+        }
     }
 
     private var clientFilterTabs: some View {
@@ -482,10 +677,14 @@ public struct ClientsTabView: View {
     }
 
     private var visibleOffline: [OntDevice] {
-        selectedFilter == .all || selectedFilter == .offline ? filteredOffline : []
+        guard selectedFilter == .all || selectedFilter == .offline else { return [] }
+        if selectedFilter == .all && searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return Array(filteredOffline.prefix(10))
+        }
+        return filteredOffline
     }
 
-    private var allCount: Int { filteredOnline.count + filteredOffline.count }
+    private var allCount: Int { filteredOnline.count + filteredOffline.count + filteredBlockedDevices.count }
 
     private var selectedCount: Int {
         switch selectedFilter {
@@ -634,6 +833,48 @@ public struct ClientsTabView: View {
     }
 }
 
+private struct BlockedDevicesSectionCard: View {
+    let count: Int
+    let palette: ThemePalette
+    let content: AnyView
+    @State private var isExpanded = true
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle().fill(Color.red.opacity(0.12))
+                        Image(systemName: "shield.slash.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.red)
+                    }
+                    .frame(width: 36, height: 36)
+                    Text("Blocked Devices")
+                        .font(.subheadline.weight(.bold))
+                        .linkWaveText(.primary)
+                    Spacer()
+                    Pill(text: "\(count)", color: .red)
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .linkWaveText(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if isExpanded { content }
+        }
+        .linkWaveGlassCard(padding: 0)
+    }
+}
+
 private struct ClientDeviceSectionCard: View {
     let icon: String
     let title: String
@@ -642,6 +883,7 @@ private struct ClientDeviceSectionCard: View {
     let isExpanded: Bool
     let action: () -> Void
     let headerAccessory: AnyView?
+    let footer: AnyView?
     let content: AnyView
 
     init(
@@ -652,6 +894,7 @@ private struct ClientDeviceSectionCard: View {
         isExpanded: Bool,
         action: @escaping () -> Void,
         headerAccessory: AnyView? = nil,
+        footer: AnyView? = nil,
         content: AnyView
     ) {
         self.icon = icon
@@ -661,6 +904,7 @@ private struct ClientDeviceSectionCard: View {
         self.isExpanded = isExpanded
         self.action = action
         self.headerAccessory = headerAccessory
+        self.footer = footer
         self.content = content
     }
 
@@ -703,6 +947,11 @@ private struct ClientDeviceSectionCard: View {
 
             if isExpanded {
                 content
+            }
+            if let footer, isExpanded {
+                footer
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -792,6 +1041,7 @@ private struct ClientRow: View {
     let device: OntDevice
     let displayName: String
     var isThisPhone = false
+    var isExpanded = false
     @Environment(\.linkWaveThemePalette) private var palette
 
     private var signalColor: Color {
@@ -800,16 +1050,23 @@ private struct ClientRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: ClientDeviceIcon.symbol(for: device, isThisPhone: isThisPhone))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(device.isOnline ? palette.textAccent : palette.textSecondary.color)
-                .frame(width: 38, height: 38)
-                .background(
-                    (device.isOnline ? palette.textAccent : palette.textSecondary.color)
-                        .opacity(device.isOnline ? 0.14 : 0.1),
-                    in: Circle()
-                )
-                .accessibilityHidden(true)
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: ClientDeviceIcon.symbol(for: device, isThisPhone: isThisPhone))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(device.isOnline ? palette.textAccent : palette.textSecondary.color)
+                    .frame(width: 38, height: 38)
+                    .background(
+                        (device.isOnline ? palette.textAccent : palette.textSecondary.color)
+                            .opacity(device.isOnline ? 0.14 : 0.1),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+                Circle()
+                    .fill(deviceStatusDot)
+                    .frame(width: 8, height: 8)
+                    .overlay(Circle().stroke(palette.backgroundSecondary, lineWidth: 1.5))
+                    .offset(x: 2, y: 2)
+            }
+            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -880,12 +1137,17 @@ private struct ClientRow: View {
             Image(systemName: "chevron.right")
                 .font(.caption2.weight(.semibold))
                 .foregroundColor(palette.textTertiary.color.opacity(0.8))
+                .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 .accessibilityHidden(true)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 10)
         .accessibilityElement(children: .combine)
         .accessibilityHint("Double-tap to inspect device details")
+    }
+
+    private var deviceStatusDot: Color {
+        return device.isOnline ? .green : palette.textTertiary.color
     }
 
     private var isGenericHost: Bool {
