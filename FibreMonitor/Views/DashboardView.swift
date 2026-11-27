@@ -763,6 +763,7 @@ private struct SpeedTestCard: View {
     @State private var hasDownloadReading = false
     @State private var hasUploadReading = false
     @State private var isHistoryExpanded = false
+    @State private var isResultsDrawerExpanded = false
     @State private var inspectedHistoryID: UUID?
     @State private var selectedActivity: SpeedTestActivity?
     @Environment(\.linkWaveThemePalette) private var palette
@@ -782,15 +783,24 @@ private struct SpeedTestCard: View {
 
     private var isInspectingSavedRun: Bool { inspectedRecord != nil }
 
+    private var shouldShowResultsDrawer: Bool {
+        isRunning || activePhase != nil
+            || (isResultsDrawerExpanded && (hasCompletedRun || inspectedRecord != nil))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
             instrumentBay
-            LinkWaveHairlineDivider()
-            telemetryProgressBody
-
-            if !isRunning, pendingResult == nil, let displayedRecord {
+            if shouldShowResultsDrawer {
                 LinkWaveHairlineDivider()
-                activityStrengthSection(for: displayedRecord)
+                VStack(alignment: .leading, spacing: 13) {
+                    telemetryProgressBody
+                    if !isRunning, pendingResult == nil,
+                       let record = inspectedRecord ?? completedRecord {
+                        activityStrengthSection(for: record)
+                    }
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             if let errorMessage {
@@ -805,6 +815,7 @@ private struct SpeedTestCard: View {
                 previousTestsSection
             }
         }
+        .animation(.easeOut(duration: 0.28), value: shouldShowResultsDrawer)
         .linkWaveGlassCard()
         .accessibilityElement(children: .contain)
         .onChange(of: viewModel.canRunSpeedTest) { isAvailable in
@@ -1136,8 +1147,11 @@ private struct SpeedTestCard: View {
                 VStack(spacing: 0) {
                     ForEach(Array(viewModel.speedHistory.enumerated()), id: \.element.id) { index, entry in
                         Button {
-                            inspectedHistoryID = inspectedHistoryID == entry.id ? nil : entry.id
-                            selectedActivity = nil
+                            withAnimation(.easeOut(duration: 0.28)) {
+                                inspectedHistoryID = entry.id
+                                selectedActivity = nil
+                                isResultsDrawerExpanded = true
+                            }
                         } label: {
                             historyRow(entry)
                                 .padding(.horizontal, 8)
@@ -1166,6 +1180,7 @@ private struct SpeedTestCard: View {
                         inspectedHistoryID = nil
                         isHistoryExpanded = false
                         selectedActivity = nil
+                        isResultsDrawerExpanded = false
                     }
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(palette.textAccent)
@@ -1227,14 +1242,18 @@ private struct SpeedTestCard: View {
                     Button("Close") {
                         inspectedHistoryID = nil
                         selectedActivity = nil
+                        isResultsDrawerExpanded = false
                     }
                     .font(.caption.weight(.medium))
                     .foregroundStyle(palette.textAccent)
                     .buttonStyle(.plain)
                 } else {
-                    Text("Tap to inspect")
-                        .font(.caption2)
-                        .linkWaveText(.secondary)
+                    Button("Hide") {
+                        isResultsDrawerExpanded = false
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(palette.textAccent)
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -1462,6 +1481,7 @@ private struct SpeedTestCard: View {
     private func startTest() {
         guard !isRunning, viewModel.canRunSpeedTest else { return }
         isRunning = true
+        isResultsDrawerExpanded = true
         viewModel.clearActiveSpeedTestRecord()
         pendingResult = nil
         completedRecord = nil
