@@ -183,10 +183,9 @@ public struct UsageTabView: View {
                 }
             }
         )
-        let periodCard = PeriodBreakdownCard(
+        let billingCard = BillingHistoryCard(
             summary: settings.dataUsageSummary,
             selectedMonth: selectedUsageMonth,
-            selectedMonthSummary: selectedMonthSummary,
             previousMonths: previousMonthSummaries,
             onSelectMonth: selectUsageMonth
         )
@@ -194,12 +193,12 @@ public struct UsageTabView: View {
         if horizontalSizeClass == .regular {
             HStack(alignment: .top, spacing: 14) {
                 forecastCard.frame(maxWidth: .infinity, alignment: .top)
-                periodCard.frame(maxWidth: .infinity, alignment: .top)
+                billingCard.frame(maxWidth: .infinity, alignment: .top)
             }
         } else {
             VStack(spacing: 14) {
                 forecastCard
-                periodCard
+                billingCard
             }
         }
     }
@@ -274,114 +273,6 @@ public struct UsageTabView: View {
     }
 }
 
-private struct UsageForecastCard: View {
-    let forecast: UsageForecast
-    let selectedMonth: Date
-    let selectedMonthTotalGB: Double?
-    let onInspect: (Date) -> Void
-    @Environment(\.linkWaveThemePalette) private var palette
-
-    private var isCurrentMonth: Bool {
-        Calendar.current.isDate(selectedMonth, equalTo: Date(), toGranularity: .month)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CardHeader(icon: "chart.line.uptrend.xyaxis", title: isCurrentMonth ? "Usage Forecast" : "Monthly Summary") {
-                Text(selectedMonth.formatted(.dateTime.month(.abbreviated)))
-                    .font(.caption2.monospacedDigit())
-                    .linkWaveText(.secondary)
-            }
-
-            HStack(alignment: .top, spacing: 8) {
-                forecastMetric("Daily Average", value: formatGB(forecast.dailyAverageGb))
-                LinkWaveHairlineDivider()
-                    .frame(width: 0.5, height: 48)
-                forecastMetric(
-                    isCurrentMonth ? "Projected Month" : "Month Total",
-                    value: isCurrentMonth ? formatGB(forecast.projectedMonthGb) : formatGB(selectedMonthTotalGB)
-                )
-                LinkWaveHairlineDivider()
-                    .frame(width: 0.5, height: 48)
-                forecastMetric("Peak Day", value: peakDayValue, subtitle: peakDayDate)
-            }
-
-            if let spike = forecast.spikeDays.first {
-                HStack(alignment: .center, spacing: 9) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                        .accessibilityHidden(true)
-                    Text("Spike (\(String(format: "%.1f×", spike.multiplier))) · \(spike.date.formatted(.dateTime.month(.abbreviated).day())) (\(formatGB(spike.totalGb)))")
-                        .font(.caption.monospacedDigit())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                    Spacer(minLength: 4)
-                    Button {
-                        onInspect(spike.date)
-                    } label: {
-                        Text("Inspect")
-                            .font(.caption.weight(.semibold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    .frame(minHeight: 44)
-                    .liquidGlassSmallButton()
-                }
-                .padding(.top, 2)
-            }
-
-            LinkWaveHairlineDivider()
-            Text(forecast.paceNote)
-                .font(.caption)
-                .linkWaveText(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .linkWaveGlassCard()
-        .accessibilityElement(children: .contain)
-    }
-
-    private var peakDayValue: String {
-        guard let peak = forecast.peakDay else { return "--" }
-        return formatGB(peak.totalGb)
-    }
-
-    private var peakDayDate: String? {
-        forecast.peakDay?.date.formatted(.dateTime.month(.abbreviated).day())
-    }
-
-    private func forecastMetric(_ title: String, value: String, subtitle: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(.caption2)
-                .linkWaveText(.secondary)
-                .lineLimit(1)
-                .frame(height: 15, alignment: .topLeading)
-            Text(value)
-                .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                .monospacedDigit()
-                .tracking(-0.25)
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-            Text(subtitle ?? " ")
-                .font(.caption2)
-                .linkWaveText(.secondary)
-                .lineLimit(1)
-                .frame(height: 13, alignment: .topLeading)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func formatGB(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        return String(format: "%.2f GB", value)
-    }
-
-    private func formatGB(_ value: Double) -> String {
-        String(format: "%.2f GB", value)
-    }
-}
-
 private struct SyncStatusCard: View {
     let summary: DataUsageSummary
     let isChecking: Bool
@@ -408,12 +299,23 @@ private struct SyncStatusCard: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(showsSyncGapDetails ? "Hide sync gap information" : "Show sync gap information")
-                Button(isChecking ? "Checking…" : "Check Now", action: checkNow)
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
+                Button(action: checkNow) {
+                    HStack(spacing: 6) {
+                        if isChecking {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(isChecking ? "Checking" : "Check Now")
+                            .lineLimit(1)
+                    }
+                    .font(.caption.weight(.semibold).monospacedDigit())
                     .foregroundStyle(palette.textAccent)
-                    .buttonStyle(.plain)
-                    .disabled(isChecking)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(palette.textAccent.opacity(0.10), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(isChecking)
             }
 
             Text("\(activeDayCount) active day\(activeDayCount == 1 ? "" : "s") recorded in \(currentMonth.formatted(.dateTime.month(.abbreviated)))")
@@ -451,161 +353,258 @@ private struct SyncStatusCard: View {
     }
 }
 
-private struct PeriodBreakdownCard: View {
-    let summary: DataUsageSummary
+private struct UsageForecastCard: View {
+    let forecast: UsageForecast
     let selectedMonth: Date
-    let selectedMonthSummary: UsageMonthSummary?
-    let previousMonths: [UsageMonthSummary]
-    let onSelectMonth: (Date) -> Void
+    let selectedMonthTotalGB: Double?
+    let onInspect: (Date) -> Void
     @Environment(\.linkWaveThemePalette) private var palette
-    @State private var isPreviousMonthsExpanded = false
 
     private var isCurrentMonth: Bool {
         Calendar.current.isDate(selectedMonth, equalTo: Date(), toGranularity: .month)
     }
 
-    private var selectedMonthDownloadBytes: UInt64 {
-        isCurrentMonth ? summary.monthDownloadBytes : (selectedMonthSummary?.downloadBytes ?? 0)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(palette.textAccent.opacity(0.12))
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.textAccent)
+                }
+                .frame(width: 34, height: 34)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(isCurrentMonth ? "Usage Forecast" : "Monthly Summary")
+                        .font(.subheadline.weight(.bold))
+                    Text("\(forecast.completedDayCount) completed day\(forecast.completedDayCount == 1 ? "" : "s") analyzed")
+                        .font(.caption2.monospacedDigit())
+                        .linkWaveText(.secondary)
+                }
+                Spacer()
+                Text(selectedMonth.formatted(.dateTime.month(.abbreviated)))
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .linkWaveText(.secondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(palette.backgroundTertiary.opacity(0.55), in: Capsule())
+            }
+
+            HStack(spacing: 0) {
+                forecastMetric("Daily Avg", formatGB(forecast.dailyAverageGb))
+                LinkWaveHairlineDivider().frame(width: 0.5, height: 46)
+                forecastMetric(
+                    isCurrentMonth ? "Projected" : "Total",
+                    isCurrentMonth ? formatGB(forecast.projectedMonthGb) : formatGB(selectedMonthTotalGB),
+                    highlighted: true
+                )
+                LinkWaveHairlineDivider().frame(width: 0.5, height: 46)
+                forecastMetric("Peak Day", peakDayValue, subtitle: peakDayDate)
+            }
+
+            if let spike = forecast.spikeDays.first {
+                HStack(alignment: .center, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Spike \(String(format: "%.1fx", spike.multiplier)) · \(spike.date.formatted(.dateTime.month(.abbreviated).day()))")
+                            .font(.caption.weight(.semibold).monospacedDigit())
+                        Text(formatGB(spike.totalGb))
+                            .font(.caption2.monospacedDigit())
+                            .linkWaveText(.secondary)
+                    }
+                    Spacer(minLength: 4)
+                    Button("Inspect →") { onInspect(spike.date) }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.textAccent)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 7)
+                        .background(palette.textAccent.opacity(0.10), in: Capsule())
+                        .buttonStyle(.plain)
+                }
+                .padding(9)
+                .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
+            LinkWaveHairlineDivider()
+            Text(forecast.paceNote)
+                .font(.caption.monospacedDigit())
+                .linkWaveText(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .linkWaveGlassCard()
+        .accessibilityElement(children: .contain)
     }
 
-    private var selectedMonthUploadBytes: UInt64 {
-        isCurrentMonth ? summary.monthUploadBytes : (selectedMonthSummary?.uploadBytes ?? 0)
+    private var peakDayValue: String {
+        guard let peak = forecast.peakDay else { return "--" }
+        return formatGB(peak.totalGb)
     }
 
-    private var selectedMonthTitle: String {
-        selectedMonth.formatted(.dateTime.month(.wide).year())
+    private var peakDayDate: String? {
+        forecast.peakDay?.date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    private func forecastMetric(_ title: String, _ value: String, subtitle: String? = nil, highlighted: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2)
+                .linkWaveText(.secondary)
+            Text(value)
+                .font(.system(.subheadline, design: .rounded).weight(.bold))
+                .foregroundStyle(highlighted ? palette.textAccent : palette.textPrimary.color)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            Text(subtitle ?? " ")
+                .font(.caption2.monospacedDigit())
+                .linkWaveText(.secondary)
+                .frame(height: 13)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+    }
+
+    private func formatGB(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        return String(format: "%.1f GB", value)
+    }
+}
+
+private struct BillingHistoryCard: View {
+    let summary: DataUsageSummary
+    let selectedMonth: Date
+    let previousMonths: [UsageMonthSummary]
+    let onSelectMonth: (Date) -> Void
+    @Environment(\.linkWaveThemePalette) private var palette
+
+    private var isCurrentMonth: Bool {
+        Calendar.current.isDate(selectedMonth, equalTo: Date(), toGranularity: .month)
+    }
+
+    private var sinceTrackingMatchesMonth: Bool {
+        let differenceDown = summary.totalDownloadBytes >= summary.monthDownloadBytes
+            ? summary.totalDownloadBytes - summary.monthDownloadBytes
+            : summary.monthDownloadBytes - summary.totalDownloadBytes
+        let differenceUp = summary.totalUploadBytes >= summary.monthUploadBytes
+            ? summary.totalUploadBytes - summary.monthUploadBytes
+            : summary.monthUploadBytes - summary.totalUploadBytes
+        return Double(differenceDown) <= 50_000_000 && Double(differenceUp) <= 50_000_000
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            CardHeader(icon: "calendar", title: "Period Breakdown") {
-                Text(isCurrentMonth ? "This month" : selectedMonth.formatted(.dateTime.month(.abbreviated)))
-                    .font(.caption2.monospacedDigit())
-                    .linkWaveText(.secondary)
-            }
-
-            HStack {
-                Text("Period")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Download")
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                Text("Upload")
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .font(.caption2.weight(.medium))
-            .linkWaveText(.secondary)
-            LinkWaveHairlineDivider()
-                .padding(.leading, 8)
-
-            if isCurrentMonth {
-                usageRow("Today", download: summary.todayDownloadBytes, upload: summary.todayUploadBytes)
-                LinkWaveHairlineDivider(leading: 8)
-                usageRow("This month", download: summary.monthDownloadBytes, upload: summary.monthUploadBytes)
-            } else {
-                usageRow(selectedMonthTitle, download: selectedMonthDownloadBytes, upload: selectedMonthUploadBytes)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(palette.textAccent.opacity(0.12))
+                    Image(systemName: "arrow.down.arrow.up")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.textAccent)
+                }
+                .frame(width: 34, height: 34)
+                Text("Billing History")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                if isCurrentMonth {
+                    Text("Today \(formatGB(summary.todayDownloadBytes + summary.todayUploadBytes))")
+                        .font(.caption.monospacedDigit())
+                        .linkWaveText(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
             }
 
             if isCurrentMonth && !sinceTrackingMatchesMonth {
+                BillingRow(
+                    title: "Since tracking",
+                    downloadBytes: summary.totalDownloadBytes,
+                    uploadBytes: summary.totalUploadBytes,
+                    activeDays: nil,
+                    totalBytes: summary.totalDownloadBytes + summary.totalUploadBytes,
+                    isViewing: false,
+                    action: nil
+                )
                 LinkWaveHairlineDivider(leading: 8)
-                usageRow("Since tracking", download: summary.totalDownloadBytes, upload: summary.totalUploadBytes)
             }
 
-            if !previousMonths.isEmpty {
-                LinkWaveHairlineDivider()
-                previousMonthsDrawer
+            ForEach(Array(previousMonths.enumerated()), id: \.element.id) { index, month in
+                let isViewing = Calendar.current.isDate(month.monthStart, equalTo: selectedMonth, toGranularity: .month)
+                BillingRow(
+                    title: month.monthStart.formatted(.dateTime.month(.wide).year()),
+                    downloadBytes: month.downloadBytes,
+                    uploadBytes: month.uploadBytes,
+                    activeDays: month.activeDaysCount,
+                    totalBytes: month.totalBytes,
+                    isViewing: isViewing,
+                    action: { onSelectMonth(month.monthStart) }
+                )
+                if index < previousMonths.count - 1 {
+                    LinkWaveHairlineDivider(leading: 8)
+                }
             }
+
+            LinkWaveHairlineDivider()
+            Text("Only months with synced readings are stored. Tap a past cycle to load its chart.")
+                .font(.caption2.monospacedDigit())
+                .linkWaveText(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .linkWaveGlassCard()
         .accessibilityElement(children: .contain)
     }
 
-    private var previousMonthsDrawer: some View {
-        VStack(spacing: 0) {
-            Button {
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-                    isPreviousMonthsExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Text("Previous Months")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(palette.textPrimary.color)
-                    Spacer(minLength: 6)
-                    if let latest = previousMonths.first {
-                        Text("\(latest.monthStart.formatted(.dateTime.month(.abbreviated).year())) · \(formatGB(latest.totalBytes))")
-                            .font(.caption.monospacedDigit())
-                            .linkWaveText(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                    }
-                    Image(systemName: isPreviousMonthsExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(palette.textTertiary.color)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint(isPreviousMonthsExpanded ? "Collapse previous months" : "Show previous months")
-
-            if isPreviousMonthsExpanded {
-                VStack(spacing: 0) {
-                    ForEach(Array(previousMonths.enumerated()), id: \.element.id) { index, month in
-                        previousMonthRow(month)
-                        if index < previousMonths.count - 1 {
-                            LinkWaveHairlineDivider(leading: 8)
-                        }
-                    }
-
-                    Text("Only months with synced readings are stored. Tap any month to inspect its daily breakdown.")
-                        .font(.caption2)
-                        .linkWaveText(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-                        .padding(.top, 9)
-                }
-                .padding(.top, 8)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
+    private func formatGB(_ bytes: UInt64) -> String {
+        String(format: "%.2f GB", Double(bytes) / 1_000_000_000)
     }
+}
 
-    private func previousMonthRow(_ month: UsageMonthSummary) -> some View {
-        let isViewing = Calendar.current.isDate(month.monthStart, equalTo: selectedMonth, toGranularity: .month)
+private struct BillingRow: View {
+    let title: String
+    let downloadBytes: UInt64
+    let uploadBytes: UInt64
+    let activeDays: Int?
+    let totalBytes: UInt64
+    let isViewing: Bool
+    let action: (() -> Void)?
+    @Environment(\.linkWaveThemePalette) private var palette
 
-        return Button {
-            onSelectMonth(month.monthStart)
-        } label: {
+    var body: some View {
+        Button(action: action ?? {}) {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(month.monthStart.formatted(.dateTime.month(.wide).year()))
+                        Text(title)
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(palette.textPrimary.color)
                             .lineLimit(1)
                         if isViewing {
                             Text("Viewing")
-                                .font(.caption2.weight(.medium))
-                                .linkWaveText(.secondary)
+                                .font(.caption2.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(palette.textAccent)
                         }
                     }
-                    Text("↓ \(Self.format(month.downloadBytes)) · ↑ \(Self.format(month.uploadBytes)) · \(month.activeDaysCount) active days")
+                    Text("↓ \(format(downloadBytes)) · ↑ \(format(uploadBytes))\(activeDays.map { " · \($0) days" } ?? "")")
                         .font(.caption2.monospacedDigit())
                         .linkWaveText(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
                 }
                 Spacer(minLength: 4)
-                HStack(spacing: 6) {
-                    Text(formatGB(month.totalBytes))
+                if action != nil {
+                    HStack(spacing: 5) {
+                        Text(formatGB(totalBytes))
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(palette.textPrimary.color)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .linkWaveText(.tertiary)
+                    }
+                } else {
+                    Text(formatGB(totalBytes))
                         .font(.subheadline.weight(.semibold).monospacedDigit())
                         .foregroundStyle(palette.textPrimary.color)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(palette.textTertiary.color)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -613,36 +612,10 @@ private struct PeriodBreakdownCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(action == nil)
     }
 
-    private var sinceTrackingMatchesMonth: Bool {
-        isWithinDisplayTolerance(summary.totalDownloadBytes, summary.monthDownloadBytes)
-            && isWithinDisplayTolerance(summary.totalUploadBytes, summary.monthUploadBytes)
-    }
-
-    private func isWithinDisplayTolerance(_ lhs: UInt64, _ rhs: UInt64) -> Bool {
-        let difference = lhs >= rhs ? lhs - rhs : rhs - lhs
-        return Double(difference) <= 50_000_000
-    }
-
-    private func usageRow(_ title: String, download: UInt64, upload: UInt64) -> some View {
-        HStack {
-            Text(title)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(Self.format(download))
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            Text(Self.format(upload))
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .font(.subheadline.monospacedDigit())
-    }
-
-    private static func total(_ download: UInt64, _ upload: UInt64) -> UInt64 {
-        let (total, overflow) = download.addingReportingOverflow(upload)
-        return overflow ? UInt64.max : total
-    }
-
-    private static func format(_ bytes: UInt64) -> String {
+    private func format(_ bytes: UInt64) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
     }
 
@@ -717,6 +690,7 @@ private struct UsageAnalyticsHeroCard: View {
     @Binding var selectedDate: Date
     @Binding var selectedMonth: Date
     @Environment(\.linkWaveThemePalette) private var palette
+    @Environment(\.colorScheme) private var colorScheme
     @State private var chartData: DailyUsageChartData
     @State private var showsCounterNote = false
 
@@ -806,62 +780,12 @@ private struct UsageAnalyticsHeroCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 7) {
-                Image(systemName: "chart.bar.fill")
-                    .foregroundStyle(palette.textAccent)
-                Text("Data Usage")
-                    .font(.subheadline.weight(.bold))
-                Button {
-                    showsCounterNote.toggle()
-                } label: {
-                    Image(systemName: "info.circle")
-                        .font(.subheadline)
-                        .foregroundStyle(palette.textSecondary.color)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(showsCounterNote ? "Hide counter information" : "Show counter information")
-                Spacer(minLength: 4)
-                monthMenu
-            }
-
-            if showsCounterNote {
-                Text("Usage is allocated from cumulative router counters and stays available across month changes.")
-                    .font(.caption2)
-                    .linkWaveText(.secondary)
-                    .transition(.opacity)
-            }
-
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(Self.format(selectedTotalBytes))
-                    .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                    .monospacedDigit()
-                    .tracking(-0.45)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                Text(isCurrentMonth ? "this month" : "in \(selectedMonthStart.formatted(.dateTime.month(.wide).year()))")
-                    .font(.caption)
-                    .linkWaveText(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-
-            if !isCurrentMonth {
-                Button("Back to this month", action: onBackToCurrentMonth)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(palette.textAccent)
-                    .buttonStyle(.plain)
-            }
-
-            proportionalSplit
-            splitLegend
-            LinkWaveHairlineDivider()
-            monthlyChart
-            LinkWaveHairlineDivider()
-            selectedUsageDetails
+        VStack(alignment: .leading, spacing: 0) {
+            cycleSummaryBand
+            dailyBreakdownBody
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .linkWaveGlassCard()
+        .linkWaveGlassCard(padding: 0)
         .onAppear {
             onLocalDayRollover()
         }
@@ -889,35 +813,143 @@ private struct UsageAnalyticsHeroCard: View {
         }
     }
 
-    private var proportionalSplit: some View {
-        GeometryReader { proxy in
-            HStack(spacing: 0) {
-                Rectangle()
-                    .fill(palette.textAccent)
-                    .frame(width: proxy.size.width * downloadShare)
-                Rectangle()
-                    .fill(.green)
-                    .frame(width: proxy.size.width * (1 - downloadShare))
+    private var cycleSummaryBand: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(palette.textAccent.opacity(0.12))
+                    Image(systemName: "chart.bar.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.textAccent)
+                }
+                .frame(width: 34, height: 34)
+                Text("Data Usage")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(palette.textPrimary.color)
+                Button {
+                    showsCounterNote.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(palette.textSecondary.color)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(showsCounterNote ? "Hide counter information" : "Show counter information")
+                Spacer(minLength: 4)
+                monthMenu
             }
-            .clipShape(Capsule())
+
+            if showsCounterNote {
+                Text("Usage is allocated from cumulative router counters and stays available across month changes.")
+                    .font(.caption2)
+                    .linkWaveText(.secondary)
+                    .padding(.top, 2)
+                    .transition(.opacity)
+            }
+
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(isCurrentMonth ? "This Month" : "\(selectedMonthStart.formatted(.dateTime.month(.wide).year())) Total")
+                        .font(.caption.weight(.medium))
+                        .linkWaveText(.secondary)
+                    Text(Self.format(selectedTotalBytes))
+                        .font(.system(.title2, design: .rounded).weight(.bold))
+                        .foregroundStyle(palette.textPrimary.color)
+                        .monospacedDigit()
+                        .tracking(-0.35)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                    splitLegend
+                    if !isCurrentMonth {
+                        Button("Back to current", action: onBackToCurrentMonth)
+                            .font(.caption.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(palette.textAccent)
+                            .buttonStyle(.plain)
+                            .padding(.top, 2)
+                    }
+                }
+                Spacer(minLength: 4)
+                DualSplitDonut(
+                    downloadShare: downloadShare,
+                    downloadColor: palette.textAccent,
+                    uploadColor: .green
+                )
+                .frame(width: 92, height: 92)
+            }
         }
-        .frame(height: 6)
-        .accessibilityLabel("Download \(Int((downloadShare * 100).rounded())) percent, upload \(Int(((1 - downloadShare) * 100).rounded())) percent")
+        .padding(16)
+        .background(cycleSummaryBackground)
+        .overlay(alignment: .bottom) {
+            LinkWaveHairlineDivider()
+        }
+    }
+
+    @ViewBuilder
+    private var cycleSummaryBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+        if colorScheme == .dark {
+            ZStack {
+                shape.fill(palette.backgroundPrimary)
+                RadialGradient(
+                    colors: [palette.textAccent.opacity(0.16), .clear],
+                    center: .topTrailing,
+                    startRadius: 2,
+                    endRadius: 190
+                )
+                .clipShape(shape)
+            }
+        } else {
+            ZStack {
+                shape.fill(palette.backgroundSecondary.opacity(0.96))
+                shape.fill(palette.textAccent.opacity(0.07))
+                RadialGradient(
+                    colors: [palette.textAccent.opacity(0.10), .clear],
+                    center: .topTrailing,
+                    startRadius: 2,
+                    endRadius: 190
+                )
+                .clipShape(shape)
+            }
+        }
+    }
+
+    private var dailyBreakdownBody: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: "calendar")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(palette.textAccent)
+                Text("Daily Breakdown")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Text("Drag or tap bars to inspect")
+                    .font(.caption2.monospacedDigit())
+                    .linkWaveText(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            monthlyChart
+            selectedUsageDetails
+        }
+        .padding(16)
     }
 
     private var splitLegend: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             legendItem("Download", bytes: selectedDownloadBytes, percentage: downloadShare, tint: palette.textAccent)
-            Spacer(minLength: 4)
             legendItem("Upload", bytes: selectedUploadBytes, percentage: 1 - downloadShare, tint: .green)
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func legendItem(_ title: String, bytes: UInt64, percentage: CGFloat, tint: Color) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 3) {
             Circle().fill(tint).frame(width: 6, height: 6)
-            Text("\(title) \(Self.format(bytes)) (\(Int((percentage * 100).rounded()))%)")
-                .font(.caption2.monospacedDigit())
+            Text(title == "Upload"
+                 ? "Up \(Self.format(bytes)) (\(Int((percentage * 100).rounded()))%)"
+                 : "Down \(Self.format(bytes))")
+                .font(.caption.monospacedDigit())
                 .linkWaveText(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
@@ -1007,24 +1039,36 @@ private struct UsageAnalyticsHeroCard: View {
         VStack(spacing: 2) {
             Chart {
                 ForEach(monthPoints) { point in
-                    let totalGB = Double(point.totalBytes ?? 0) / 1_000_000_000
-                    let baselineCapGB = chartTopGB * 0.009
-                    let isRecorded = point.totalBytes != nil
-                    let plottedValue = isRecorded ? max(totalGB, baselineCapGB) : baselineCapGB
                     let isSelected = calendar.isDate(point.date, inSameDayAs: selectedDate)
                     let dayCenter = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: point.date) ?? point.date
+                    if let download = point.downloadBytes, let upload = point.uploadBytes {
+                        let downloadGB = Double(download) / 1_000_000_000
+                        let uploadGB = Double(upload) / 1_000_000_000
+                        let barOpacity = isSelected ? 1 : 0.40
+                        BarMark(
+                            x: .value("Day", dayCenter, unit: .day),
+                            yStart: .value("Baseline", 0),
+                            yEnd: .value("Download", downloadGB),
+                            width: .fixed(7)
+                        )
+                        .foregroundStyle(palette.textAccent.opacity(barOpacity))
 
-                    BarMark(
-                        x: .value("Day", dayCenter, unit: .day),
-                        yStart: .value("Baseline", 0),
-                        yEnd: .value("Usage", plottedValue),
-                        width: .fixed(7)
-                    )
-                    .foregroundStyle(
-                        isRecorded
-                            ? palette.textAccent.opacity(isSelected ? 1 : 0.36)
-                            : palette.textTertiary.color.opacity(0.24)
-                    )
+                        BarMark(
+                            x: .value("Day", dayCenter, unit: .day),
+                            yStart: .value("Download", downloadGB),
+                            yEnd: .value("Upload", downloadGB + uploadGB),
+                            width: .fixed(7)
+                        )
+                        .foregroundStyle(.green.opacity(barOpacity))
+                    } else {
+                        BarMark(
+                            x: .value("Day", dayCenter, unit: .day),
+                            yStart: .value("Baseline", 0),
+                            yEnd: .value("No reading", chartTopGB * 0.012),
+                            width: .fixed(7)
+                        )
+                        .foregroundStyle(palette.textTertiary.color.opacity(0.30))
+                    }
                 }
 
                 let selectedDayCenter = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: selectedDate) ?? selectedDate
@@ -1118,56 +1162,98 @@ private struct UsageAnalyticsHeroCard: View {
     }
 
     private var selectedUsageDetails: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 7) {
-                Text(selectedDate.formatted(date: .long, time: .omitted))
-                    .font(.subheadline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(selectedDate.formatted(.dateTime.weekday(.abbreviated).month(.wide).day().year()))
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
                 if selectedPoint?.isPartial == true && selectedPoint?.totalBytes != nil {
-                    Text("Partial")
-                        .font(.caption2.weight(.medium))
+                    Text("· Partial day")
+                        .font(.caption2.monospacedDigit())
                         .linkWaveText(.secondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(palette.textTertiary.color.opacity(0.18), in: Capsule())
+                } else if !hasSelectedReading {
+                    Text("· No reading recorded")
+                        .font(.caption2.monospacedDigit())
+                        .linkWaveText(.secondary)
                 }
+                Spacer()
+                Text("Selected day")
+                    .font(.caption2.monospacedDigit())
+                    .linkWaveText(.tertiary)
             }
 
-            Text(hasSelectedReading ? " " : "No reading recorded")
-                .font(.caption)
-                .linkWaveText(.secondary)
-                .frame(height: 14, alignment: .leading)
-
             HStack(spacing: 8) {
-                usageValue("Download", bytes: selectedPoint?.downloadBytes)
+                usageValue("Download", bytes: selectedPoint?.downloadBytes, tint: palette.textAccent)
                 LinkWaveHairlineDivider()
                     .frame(width: 0.5, height: 36)
-                usageValue("Upload", bytes: selectedPoint?.uploadBytes)
+                usageValue("Upload", bytes: selectedPoint?.uploadBytes, tint: .green)
                 LinkWaveHairlineDivider()
                     .frame(width: 0.5, height: 36)
-                usageValue("Total", bytes: selectedPoint?.totalBytes)
+                usageValue("Total", bytes: selectedPoint?.totalBytes, tint: palette.textAccent)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 2)
+        .padding(10)
+        .background(palette.backgroundTertiary.opacity(colorScheme == .dark ? 0.32 : 0.48),
+                    in: RoundedRectangle(cornerRadius: 13, style: .continuous))
     }
 
-    private func usageValue(_ title: String, bytes: UInt64?) -> some View {
+    private func usageValue(_ title: String, bytes: UInt64?, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
                 .font(.caption2)
                 .linkWaveText(.secondary)
-            Text(bytes.map(Self.format) ?? "0.00 GB")
+            Text(formatSelectedValue(title: title, bytes: bytes))
                 .font(.caption.weight(.semibold).monospacedDigit())
+                .foregroundStyle(title == "Total" ? tint : palette.textPrimary.color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func formatSelectedValue(title: String, bytes: UInt64?) -> String {
+        guard let bytes else { return "0.00 GB" }
+        if title == "Upload" && bytes < 1_000_000_000 {
+            return String(format: "%.0f MB", Double(bytes) / 1_000_000)
+        }
+        return String(format: "%.2f GB", Double(bytes) / 1_000_000_000)
+    }
+
     private var hasSelectedReading: Bool { selectedPoint?.totalBytes != nil }
 
     private static func format(_ bytes: UInt64) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
+    }
+}
+
+private struct DualSplitDonut: View {
+    let downloadShare: CGFloat
+    let downloadColor: Color
+    let uploadColor: Color
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.primary.opacity(0.08), lineWidth: 9)
+            Circle()
+                .trim(from: 0, to: downloadShare)
+                .stroke(downloadColor, style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Circle()
+                .trim(from: downloadShare, to: 1)
+                .stroke(uploadColor, style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            VStack(spacing: 1) {
+                Text("\(Int((downloadShare * 100).rounded()))%")
+                    .font(.system(.subheadline, design: .rounded).weight(.bold).monospacedDigit())
+                Text("Down")
+                    .font(.caption2)
+                    .linkWaveText(.secondary)
+            }
+        }
+        .accessibilityLabel("Download \(Int((downloadShare * 100).rounded())) percent")
     }
 }
 
