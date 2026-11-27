@@ -197,11 +197,11 @@ private struct RouterHeaderCard: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
 
-    private var darkPalette: ThemePalette { settings.themePalette(for: .dark) }
-    private var activeAccent: Color { settings.themePalette(for: colorScheme).textAccent }
-    private var darkBase: Color { darkPalette.backgroundPrimary }
-    private var heroPrimary: Color { .white }
-    private var heroSecondary: Color { .white.opacity(0.68) }
+    private var activePalette: ThemePalette { settings.themePalette(for: colorScheme) }
+    private var activeAccent: Color { activePalette.textAccent }
+    private var surfaceBase: Color { activePalette.backgroundPrimary }
+    private var heroPrimary: Color { activePalette.textPrimary.color }
+    private var heroSecondary: Color { activePalette.textSecondary.color }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -215,10 +215,10 @@ private struct RouterHeaderCard: View {
                 accent: activeAccent,
                 primary: heroPrimary,
                 secondary: heroSecondary,
-                isDark: true
+                isDark: colorScheme == .dark
             )
             Rectangle()
-                .fill(heroPrimary.opacity(colorScheme == .dark ? 0.13 : 0.10))
+                .fill(heroPrimary.opacity(0.13))
                 .frame(height: 0.5)
             HStack(spacing: 6) {
                 Image(systemName: "clock")
@@ -287,16 +287,16 @@ private struct RouterHeaderCard: View {
         let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
         switch surfaceStyle {
         case .cleanSolid:
-            shape.fill(darkBase.opacity(0.92))
+            shape.fill(surfaceBase.opacity(0.92))
         case .frosted:
             ZStack {
                 shape.fill(.ultraThinMaterial)
-                shape.fill(darkBase.opacity(colorScheme == .light ? 0.80 : 0.74))
+                shape.fill(surfaceBase.opacity(colorScheme == .light ? 0.80 : 0.74))
             }
         case .liquidGlass:
             ZStack {
                 shape.fill(.regularMaterial)
-                shape.fill(darkBase.opacity(colorScheme == .light ? 0.72 : 0.60))
+                shape.fill(surfaceBase.opacity(colorScheme == .light ? 0.72 : 0.60))
                 shape.fill(LinearGradient(
                     stops: colorScheme == .light
                         ? [
@@ -320,14 +320,21 @@ private struct RouterHeaderCard: View {
         switch surfaceStyle {
         case .cleanSolid:
             AnyShapeStyle(LinearGradient(
-                colors: [activeAccent.opacity(0.18), Color.white.opacity(0.10)],
+                colors: [
+                    activeAccent.opacity(0.18),
+                    (colorScheme == .dark ? Color.white : Color.black).opacity(0.10)
+                ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ))
         case .frosted:
-            AnyShapeStyle(Color.white.opacity(colorScheme == .light ? 0.14 : 0.12))
+            AnyShapeStyle(colorScheme == .dark
+                ? Color.white.opacity(0.12)
+                : activeAccent.opacity(0.20))
         case .liquidGlass:
-            AnyShapeStyle(Color.white.opacity(colorScheme == .light ? 0.22 : 0.18))
+            AnyShapeStyle(colorScheme == .dark
+                ? Color.white.opacity(0.18)
+                : activeAccent.opacity(0.24))
         }
     }
 
@@ -337,10 +344,10 @@ private struct RouterHeaderCard: View {
                 isOnline: viewModel.isConnected,
                 wifiOnline: wifiOnline,
                 accent: activeAccent,
-                chassisTop: darkPalette.backgroundElevated,
-                chassisBottom: darkPalette.backgroundTertiary,
+                chassisTop: activePalette.backgroundElevated,
+                chassisBottom: activePalette.backgroundTertiary,
                 foreground: heroPrimary,
-                isDark: true
+                isDark: colorScheme == .dark
             )
             .frame(width: 70, height: 70)
             .accessibilityHidden(true)
