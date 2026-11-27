@@ -1664,6 +1664,30 @@ private struct HomeSummaryRow: View {
         return overflow ? UInt64.max : total
     }
 
+    private var todayTotalGb: Double {
+        Double(todayTotalBytes) / 1_000_000_000
+    }
+
+    private var avgCompletedDayGb: Double {
+        let calendar = Calendar.current
+        let completedDays = summary.historicalDailyHistory.filter {
+            !calendar.isDateInToday($0.date) && !$0.isPartial && $0.totalBytes != nil
+        }
+        guard !completedDays.isEmpty else { return 50.0 }
+        let totalGb = completedDays.reduce(0.0) { total, point in
+            total + Double(point.totalBytes ?? 0) / 1_000_000_000
+        }
+        return totalGb / Double(completedDays.count)
+    }
+
+    private var dailyPaceCeiling: Double {
+        max(max(30.0, avgCompletedDayGb * 1.6), todayTotalGb * 1.12)
+    }
+
+    private var todayUsageProgress: Double {
+        min(0.95, max(0.08, todayTotalGb / dailyPaceCeiling))
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Button(action: openUsage) {
@@ -1674,7 +1698,7 @@ private struct HomeSummaryRow: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     HStack(spacing: 7) {
                         CircularStatRing(
-                            progress: monthTotalBytes == 0 ? 0 : Double(todayTotalBytes) / Double(monthTotalBytes),
+                            progress: todayUsageProgress,
                             tint: palette.textAccent,
                             showsUsageBars: true,
                             foreground: palette.textPrimary.color
@@ -1819,6 +1843,7 @@ private struct CircularStatRing: View {
                 .trim(from: 0, to: min(max(progress, 0), 1))
                 .stroke(tint, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: 0.3), value: progress)
             if showsUsageBars {
                 HStack(alignment: .bottom, spacing: 2) {
                     ForEach(0..<3, id: \.self) { index in
