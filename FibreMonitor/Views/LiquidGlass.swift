@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 public enum LinkWaveSurfaceStyle: String, CaseIterable, Identifiable {
     case liquidGlass
@@ -516,6 +517,9 @@ private struct LinkWaveTabBarSurfaceModifier: ViewModifier {
         content
             .toolbarBackground(AnyShapeStyle(tabBarBackground), for: .tabBar)
             .toolbarBackground(surfaceStyle == .liquidGlass ? .automatic : .visible, for: .tabBar)
+            .onAppear(perform: applyTabBarAppearance)
+            .onChange(of: palette) { _ in applyTabBarAppearance() }
+            .onChange(of: colorScheme) { _ in applyTabBarAppearance() }
     }
 
     private var tabBarBackground: AnyShapeStyle {
@@ -524,6 +528,34 @@ private struct LinkWaveTabBarSurfaceModifier: ViewModifier {
         case .frosted: AnyShapeStyle(.thinMaterial)
         case .cleanSolid: AnyShapeStyle(linkWaveSolidSurfaceColor(palette, colorScheme: colorScheme))
         }
+    }
+
+    private func applyTabBarAppearance() {
+        let appearance = UITabBar.appearance()
+        appearance.tintColor = UIColor(palette.textAccent)
+        appearance.unselectedItemTintColor = UIColor(
+            red: colorScheme == .dark ? 0.63 : 0.38,
+            green: colorScheme == .dark ? 0.67 : 0.42,
+            blue: colorScheme == .dark ? 0.74 : 0.49,
+            alpha: 1
+        )
+        appearance.selectionIndicatorImage = selectionIndicatorImage()
+    }
+
+    private func selectionIndicatorImage() -> UIImage {
+        let itemWidth = UIScreen.main.bounds.width / 4
+        let size = CGSize(width: itemWidth, height: 38)
+        let rendererFormat = UIGraphicsImageRendererFormat()
+        rendererFormat.scale = UIScreen.main.scale
+        rendererFormat.opaque = false
+        let image = UIGraphicsImageRenderer(size: size, format: rendererFormat).image { _ in
+            UIColor(palette.textAccent.opacity(0.12)).setFill()
+            UIBezierPath(
+                roundedRect: CGRect(x: 12, y: 2, width: max(0, itemWidth - 24), height: 34),
+                cornerRadius: 17
+            ).fill()
+        }
+        return image.withRenderingMode(.alwaysOriginal)
     }
 }
 

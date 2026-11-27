@@ -8,6 +8,7 @@ public struct DashboardView: View {
     @State private var startSpeedTestRequested = false
     @State private var speedTestDownloadMbps: Double?
     @State private var speedTestUploadMbps: Double?
+    @State private var speedTestPhase: SpeedTestProgress.Phase?
     @Environment(\.colorScheme) private var colorScheme
 
     public init(viewModel: MonitorViewModel) {
@@ -28,7 +29,8 @@ public struct DashboardView: View {
                             viewModel: viewModel,
                             settings: settings,
                             testDownloadMbps: speedTestDownloadMbps,
-                            testUploadMbps: speedTestUploadMbps
+                            testUploadMbps: speedTestUploadMbps,
+                            testPhase: speedTestPhase
                         )
 
                         if !viewModel.isConnectedToWiFi {
@@ -63,6 +65,7 @@ public struct DashboardView: View {
                             viewModel: viewModel,
                             testDownloadMbps: $speedTestDownloadMbps,
                             testUploadMbps: $speedTestUploadMbps,
+                            activePhase: $speedTestPhase,
                             startRequested: $startSpeedTestRequested
                         )
                         ConnectionCheckCard(
@@ -193,86 +196,139 @@ private struct RouterHeaderCard: View {
     @ObservedObject var settings: SettingsStore
     let testDownloadMbps: Double?
     let testUploadMbps: Double?
-    @Environment(\.linkWaveThemePalette) private var palette
+    let testPhase: SpeedTestProgress.Phase?
+
+    private var darkPalette: ThemePalette { settings.themePalette(for: .dark) }
+    private var darkAccent: Color { darkPalette.textAccent }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(LinearGradient(
-                            colors: [
-                                palette.backgroundSecondary.opacity(0.94),
-                                palette.backgroundTertiary.opacity(0.78)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ))
-                        .frame(width: 66, height: 54)
-                    HuaweiOptiXstarIllustration(isOnline: viewModel.isConnected, wifiOnline: wifiOnline)
-                }
-                .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(settings.activeProfile?.routerDisplayName ?? "Fibre Router")
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text(viewModel.displayModelName)
-                        .font(.caption)
-                        .linkWaveText(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 8)
-
-                if let rxPower = viewModel.optical.rxPowerDbm {
-                    FibreSignalMeter(rxPowerDbm: rxPower)
-                } else {
-                    RouterConnectivityFallback(
-                        isOnline: viewModel.isConnected,
-                        responseTimeMs: viewModel.routerResponseTimeMs
-                    )
-                }
-            }
-
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 8, height: 8)
-                    .shadow(color: statusColor.opacity(0.7), radius: 3)
-                Text(statusText)
-                    .font(.caption.weight(.bold))
-                    .foregroundColor(statusColor)
-                if let lastUpdate = viewModel.lastUpdate {
-                    Text("• Updated \(lastUpdate, style: .relative)")
-                        .font(.caption2)
-                        .linkWaveText(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-                Spacer()
+            heroHeader
+            CompactSpeedCard(
+                traffic: viewModel.traffic,
+                downloadOverrideMbps: testDownloadMbps,
+                uploadOverrideMbps: testUploadMbps,
+                activePhase: testPhase,
+                isTestRunning: viewModel.isSpeedTestRunning,
+                accent: darkAccent
+            )
+            Rectangle()
+                .fill(Color.white.opacity(0.13))
+                .frame(height: 0.5)
+            HStack(spacing: 6) {
+                Image(systemName: "clock")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(darkAccent)
+                Text("Last updated: \(viewModel.lastUpdate?.formatted(date: .omitted, time: .shortened) ?? "—")")
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(Color.white.opacity(0.66))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 4)
                 if viewModel.isLoggedOut {
                     Button("Reconnect") {
                         viewModel.reconnectSession()
                     }
                     .font(.caption.weight(.semibold))
-                    .liquidGlassSmallButton()
+                    .foregroundStyle(darkAccent)
+                    .buttonStyle(.plain)
                 }
             }
-            CompactSpeedCard(
-                traffic: viewModel.traffic,
-                downloadOverrideMbps: testDownloadMbps,
-                uploadOverrideMbps: testUploadMbps
-            )
         }
-        .linkWaveGlassCard()
+        .padding(16)
+        .background {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        darkPalette.backgroundPrimary,
+                        darkPalette.backgroundSecondary,
+                        darkPalette.backgroundPrimary
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                RadialGradient(
+                    colors: [darkAccent.opacity(0.24), .clear],
+                    center: .center,
+                    startRadius: 0,
+                    endRadius: 170
+                )
+                .frame(width: 260, height: 220)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                RadialGradient(
+                    colors: [darkAccent.opacity(0.17), .clear],
+                    center: .center,
+                    startRadius: 0,
+                    endRadius: 155
+                )
+                .frame(width: 240, height: 200)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                GatewayWave()
+                    .fill(LinearGradient(
+                        colors: [Color.white.opacity(0.035), darkAccent.opacity(0.045)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(darkAccent.opacity(0.35), lineWidth: 0.8)
+        }
+        .shadow(color: darkAccent.opacity(0.11), radius: 18, y: 7)
         .accessibilityElement(children: .combine)
+    }
+
+    private var heroHeader: some View {
+        HStack(spacing: 10) {
+            HuaweiOptiXstarIllustration(
+                isOnline: viewModel.isConnected,
+                wifiOnline: wifiOnline,
+                accent: darkAccent
+            )
+            .frame(width: 70, height: 70)
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+                        .shadow(color: statusColor.opacity(0.8), radius: 3)
+                    Text(statusText)
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(statusColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(statusColor.opacity(0.13), in: Capsule())
+                .overlay(Capsule().stroke(statusColor.opacity(0.28), lineWidth: 0.7))
+
+                Text(settings.activeProfile?.routerDisplayName ?? "Fibre Router")
+                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+                Text(viewModel.displayModelName)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(Color.white.opacity(0.60))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            FibreSignalMeter(rxPowerDbm: viewModel.optical.rxPowerDbm)
+        }
     }
 
     private var statusColor: Color {
         if !viewModel.isConnectedToWiFi { return .red }
         if !viewModel.hasInternetPath { return .orange }
-        if viewModel.isLoggedOut { return .secondary }
+        if viewModel.isLoggedOut { return .white.opacity(0.70) }
         switch viewModel.connectionState {
         case .connected: return .green
         case .connecting, .temporarilyLocked: return .orange
@@ -281,26 +337,42 @@ private struct RouterHeaderCard: View {
     }
 
     private var statusText: String {
-        if !viewModel.isConnectedToWiFi { return "NO WI-FI" }
-        if !viewModel.hasInternetPath { return "NO INTERNET" }
-        if viewModel.isLoggedOut { return "LOGGED OUT" }
+        if !viewModel.isConnectedToWiFi { return "No Wi-Fi" }
+        if !viewModel.hasInternetPath { return "No internet" }
+        if viewModel.isLoggedOut { return "Reconnect" }
         switch viewModel.connectionState {
         case .connected:
-            return viewModel.isLiveTrafficActive && !viewModel.isSpeedTestRunning ? "CONNECTED · Live" : "CONNECTED"
+            return "Connected"
         case .connecting:
-            return "CONNECTING"
+            return "Connecting"
         case .temporarilyLocked:
-            return "LOGIN PAUSED"
+            return "Login paused"
         case .invalidCredentials:
-            return "LOGIN REJECTED"
+            return "Login rejected"
         case .offline:
-            return "OFFLINE"
+            return "Offline"
         }
     }
 
     private var wifiOnline: Bool {
         let reportedStates = viewModel.wifi.radios.map(\.enabled) + viewModel.wifi.networks.map(\.enabled)
         return reportedStates.isEmpty ? viewModel.isConnected : reportedStates.contains(true)
+    }
+}
+
+private struct GatewayWave: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.height * 0.82))
+        path.addCurve(
+            to: CGPoint(x: rect.maxX, y: rect.height * 0.70),
+            control1: CGPoint(x: rect.width * 0.34, y: rect.height * 0.62),
+            control2: CGPoint(x: rect.width * 0.68, y: rect.height * 0.98)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -312,17 +384,19 @@ private struct ConnectionCheckCard: View {
     var body: some View {
         Button(action: openDiagnosis) {
             HStack(spacing: 10) {
-                Image(systemName: "stethoscope")
+                Image(systemName: "dot.radiowaves.left.and.right")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(statusColor)
+                    .frame(width: 36, height: 36)
+                    .background(statusColor.opacity(0.13), in: Circle())
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Connection Check · \(diagnosis.severity.label)")
                         .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
+                        .lineLimit(2)
                     Text(diagnosis.inlineHint)
-                        .font(.caption)
+                        .font(.caption.monospacedDigit())
                         .linkWaveText(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -337,8 +411,13 @@ private struct ConnectionCheckCard: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(palette.textAccent)
                 .fixedSize()
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(palette.backgroundTertiary.opacity(0.72), in: Capsule())
             }
             .contentShape(Rectangle())
+            .padding(2)
+            .background(statusColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
         .linkWaveGlassCard(padding: 14)
@@ -350,7 +429,7 @@ private struct ConnectionCheckCard: View {
         case .optimal: .green
         case .pending: palette.textSecondary.color
         case .warning: .orange
-        case .critical: .red
+        case .critical: .pink
         }
     }
 }
@@ -375,38 +454,45 @@ private struct NetworkStatusBanner: View {
 private struct HuaweiOptiXstarIllustration: View {
     let isOnline: Bool
     let wifiOnline: Bool
-    @Environment(\.linkWaveThemePalette) private var palette
+    let accent: Color
 
     private var ponLight: Color { isOnline ? .green : .red }
-    private var wlanLight: Color { isOnline && wifiOnline ? .green : .orange }
+    private var wlanLight: Color { isOnline && wifiOnline ? accent : .orange }
 
     var body: some View {
         ZStack {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .stroke(Color.white.opacity(0.07 - Double(index) * 0.015), lineWidth: 0.8)
+                    .frame(width: CGFloat(42 + index * 13), height: CGFloat(42 + index * 13))
+                    .offset(y: 3)
+            }
+
             Capsule()
                 .fill(LinearGradient(colors: [Color(red: 0.82, green: 0.86, blue: 0.90), Color(red: 0.43, green: 0.49, blue: 0.57)], startPoint: .leading, endPoint: .trailing))
-                .frame(width: 3, height: 22)
+                .frame(width: 2, height: 22)
                 .rotationEffect(.degrees(-12))
-                .offset(x: -20, y: -14)
+                .offset(x: -20, y: -16)
             Capsule()
                 .fill(LinearGradient(colors: [Color(red: 0.82, green: 0.86, blue: 0.90), Color(red: 0.43, green: 0.49, blue: 0.57)], startPoint: .leading, endPoint: .trailing))
-                .frame(width: 3, height: 22)
+                .frame(width: 2, height: 22)
                 .rotationEffect(.degrees(12))
-                .offset(x: 20, y: -14)
+                .offset(x: 20, y: -16)
 
             Image(systemName: "wifi")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(palette.textAccent)
-                .offset(y: -18)
+                .foregroundStyle(accent.opacity(0.8))
+                .offset(y: -24)
 
             RouterChassis()
                 .fill(LinearGradient(
-                    colors: [Color(red: 0.84, green: 0.87, blue: 0.91), Color(red: 0.60, green: 0.66, blue: 0.73)],
+                    colors: [Color(red: 0.27, green: 0.34, blue: 0.42), Color(red: 0.10, green: 0.15, blue: 0.21)],
                     startPoint: .top,
                     endPoint: .bottom
                 ))
-                .frame(width: 60, height: 23)
+                .frame(width: 58, height: 22)
                 .overlay {
-                    RouterChassis().stroke(Color.white.opacity(0.50), lineWidth: 0.8)
+                    RouterChassis().stroke(Color.white.opacity(0.30), lineWidth: 0.8)
                 }
                 .overlay(alignment: .bottomLeading) {
                     HStack(spacing: 5) {
@@ -434,9 +520,9 @@ private struct HuaweiOptiXstarIllustration: View {
                         .padding(.horizontal, 8)
                         .offset(y: 1)
                 }
-                .shadow(color: .black.opacity(0.16), radius: 3, y: 2)
+                .shadow(color: .black.opacity(0.35), radius: 5, y: 3)
         }
-        .frame(width: 66, height: 50)
+        .frame(width: 70, height: 70)
         .accessibilityLabel("Huawei OptiXstar HG8145X6 router with PON and WLAN status lights")
     }
 }
@@ -456,10 +542,10 @@ private struct RouterChassis: Shape {
 }
 
 private struct FibreSignalMeter: View {
-    let rxPowerDbm: Double
-    @Environment(\.linkWaveThemePalette) private var palette
+    let rxPowerDbm: Double?
 
     private var level: Int {
+        guard let rxPowerDbm else { return 0 }
         if rxPowerDbm >= -24 { return 4 }
         if rxPowerDbm > -27 { return 3 }
         if rxPowerDbm > -29 { return 2 }
@@ -470,7 +556,8 @@ private struct FibreSignalMeter: View {
         switch level {
         case 4, 3: .green
         case 2: .yellow
-        default: .red
+        case 1: .red
+        default: .white.opacity(0.55)
         }
     }
 
@@ -479,43 +566,20 @@ private struct FibreSignalMeter: View {
             HStack(alignment: .bottom, spacing: 2) {
                 ForEach(0..<4, id: \.self) { index in
                     Capsule()
-                        .fill(index < level ? tint : palette.textTertiary.color.opacity(0.55))
+                        .fill(index < level ? tint : Color.white.opacity(0.20))
                         .frame(width: 4, height: CGFloat(7 + index * 4))
                 }
             }
-            Text(String(format: "%.2f dBm", rxPowerDbm))
+            Text(rxPowerDbm.map { String(format: "%.2f dBm", $0) } ?? "— dBm")
                 .font(.caption2.weight(.semibold).monospacedDigit())
                 .foregroundStyle(tint)
             Text("FIBRE RX")
                 .font(.system(size: 8, weight: .bold, design: .rounded))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Color.white.opacity(0.48))
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Fibre signal")
-        .accessibilityValue("\(level) of 4 bars, \(String(format: "%.2f", rxPowerDbm)) dBm")
-    }
-}
-
-private struct RouterConnectivityFallback: View {
-    let isOnline: Bool
-    let responseTimeMs: Int?
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            Label(isOnline ? "ONLINE" : "OFFLINE", systemImage: "circle.fill")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(isOnline ? Color.green : Color.red)
-            Text(isOnline ? responseLabel : "Router unreachable")
-                .font(.caption2)
-                .linkWaveText(.secondary)
-                .lineLimit(1)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private var responseLabel: String {
-        if let responseTimeMs { return "Latency \(responseTimeMs) ms" }
-        return "Latency unavailable"
+        .accessibilityValue(rxPowerDbm.map { "\(level) of 4 bars, \(String(format: "%.2f", $0)) dBm" } ?? "Unavailable")
     }
 }
 
@@ -523,12 +587,20 @@ private struct CompactSpeedCard: View {
     let traffic: TrafficState
     var downloadOverrideMbps: Double? = nil
     var uploadOverrideMbps: Double? = nil
+    let activePhase: SpeedTestProgress.Phase?
+    let isTestRunning: Bool
+    let accent: Color
     @State private var idleDownloadMbps = 0.0
     @State private var idleUploadMbps = 0.0
-    @Environment(\.linkWaveThemePalette) private var palette
 
     private var displayedDownloadMbps: Double { downloadOverrideMbps ?? idleDownloadMbps }
     private var displayedUploadMbps: Double { uploadOverrideMbps ?? idleUploadMbps }
+    private var downloadTint: Color {
+        isTestRunning && activePhase == .download ? accent : accent.opacity(0.68)
+    }
+    private var uploadTint: Color {
+        isTestRunning && activePhase == .upload ? .green : accent.opacity(0.52)
+    }
 
     var body: some View {
         HStack(spacing: 13) {
@@ -536,19 +608,19 @@ private struct CompactSpeedCard: View {
                 title: "Download",
                 value: displayedDownloadMbps,
                 icon: "arrow.down",
-                tint: palette.textAccent,
+                tint: downloadTint,
                 isInterpolated: downloadOverrideMbps != nil
             )
 
             Rectangle()
-                .fill(palette.textTertiary.color.opacity(0.45))
+                .fill(Color.white.opacity(0.16))
                 .frame(width: 1, height: 35)
 
             speedMetric(
                 title: "Upload",
                 value: displayedUploadMbps,
                 icon: "arrow.up",
-                tint: palette.textAccent.opacity(0.72),
+                tint: uploadTint,
                 isInterpolated: uploadOverrideMbps != nil
             )
         }
@@ -591,16 +663,17 @@ private struct CompactSpeedCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.caption)
-                    .linkWaveText(.secondary)
+                    .foregroundStyle(Color.white.opacity(0.62))
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(value >= 1 ? String(format: value >= 100 ? "%.0f" : "%.1f", value) : String(format: "%.0f", value * 1_000))
                         .font(.system(.title3, design: .rounded).weight(.bold))
+                        .foregroundStyle(.white)
                         .monospacedDigit()
                         .tracking(-0.3)
                         .animation(.linear(duration: isInterpolated ? 0.025 : 0.22), value: value)
                     Text(value >= 1 ? "Mbps" : "Kbps")
                         .font(.caption2.weight(.medium))
-                        .linkWaveText(.secondary)
+                        .foregroundStyle(Color.white.opacity(0.62))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -622,6 +695,7 @@ private struct SpeedTestCard: View {
     @ObservedObject var viewModel: MonitorViewModel
     @Binding var testDownloadMbps: Double?
     @Binding var testUploadMbps: Double?
+    @Binding var activePhase: SpeedTestProgress.Phase?
     @Binding var startRequested: Bool
     @State private var pendingResult: SpeedTestResult?
     @State private var progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
@@ -659,104 +733,21 @@ private struct SpeedTestCard: View {
     private var isInspectingSavedRun: Bool { inspectedRecord != nil }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack(spacing: 9) {
-                Image(systemName: "speedometer")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(palette.textAccent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Speed Test")
-                        .font(.headline.weight(.semibold))
-                        .linkWaveText(.primary)
-                    if let inspectedRecord {
-                        Text("Saved · \(Self.formattedTime(inspectedRecord.timestamp))")
-                            .font(.caption2)
-                            .linkWaveText(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
-                if isRunning {
-                    Text(progress.phase.rawValue.uppercased())
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .foregroundStyle(palette.textAccent)
-                        .lineLimit(1)
-                    Button("Stop", action: stopTest)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(palette.textAccent)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .buttonStyle(.plain)
-                        .linkWaveInteractiveGlassCapsule()
-                } else {
-                    Button(action: startTest) {
-                        Label(displayedRecord == nil ? "Start Test" : "Run Again", systemImage: startButtonSymbol)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(viewModel.canRunSpeedTest ? palette.textAccent : palette.textSecondary.color)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.plain)
-                    .linkWaveInteractiveGlassCapsule()
-                    .disabled(!viewModel.settings.isConfigured || !viewModel.canRunSpeedTest)
-                    .accessibilityLabel(startButtonTitle)
-                }
-            }
-
-            HStack(spacing: 0) {
-                resultMetric(
-                    "Ping",
-                    value: displayedRecord.map { String(format: "%.0f ms", $0.pingMs) }
-                        ?? measuredPingMs.map { String(format: "%.0f ms", $0) } ?? "-- ms",
-                    tint: palette.textPrimary.color
-                )
-                resultMetric(
-                    "Jitter",
-                    value: displayedRecord.map { String(format: "%.0f ms", $0.jitterMs) }
-                        ?? measuredJitterMs.map { String(format: "%.0f ms", $0) } ?? "-- ms",
-                    tint: palette.textPrimary.color
-                )
-                resultMetric(
-                    "Downlink",
-                    value: displayedRecord.map { Self.speed($0.downMbps) }
-                        ?? (hasDownloadReading ? Self.speed(displayedDownloadMbps) : "-- Mbps"),
-                    tint: isRunning && progress.phase == .download ? palette.textAccent : palette.textSecondary.color
-                )
-                resultMetric(
-                    "Uplink",
-                    value: displayedRecord.map { Self.speed($0.upMbps) }
-                        ?? (hasUploadReading ? Self.speed(displayedUploadMbps) : "-- Mbps"),
-                    tint: isRunning && progress.phase == .upload ? palette.textAccent : palette.textSecondary.color
-                )
-            }
+        VStack(alignment: .leading, spacing: 13) {
+            instrumentBay
+            LinkWaveHairlineDivider()
+            telemetryProgressBody
 
             if !isRunning, pendingResult == nil, let displayedRecord {
                 LinkWaveHairlineDivider()
                 activityStrengthSection(for: displayedRecord)
             }
 
-            if isRunning {
-                ProgressView(value: progress.fraction)
-                    .tint(palette.textAccent)
-                    .accessibilityLabel("Speed test progress")
-            } else if let errorMessage {
+            if let errorMessage {
                 Text(errorMessage)
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if isRunning {
-                HStack(spacing: 8) {
-                    ProgressView().tint(palette.textAccent)
-                    Text(phaseStatus)
-                        .font(.caption.weight(.medium))
-                        .linkWaveText(.secondary)
-                    Spacer()
-                    Text("\(Int(progress.fraction * 100))%")
-                        .font(.caption.monospacedDigit().weight(.semibold))
-                        .linkWaveText(.secondary)
-                }
             }
 
             if !isRunning, pendingResult == nil, !viewModel.speedHistory.isEmpty {
@@ -800,11 +791,237 @@ private struct SpeedTestCard: View {
         viewModel.canRunSpeedTest ? (displayedRecord == nil ? "play.fill" : "arrow.clockwise") : "wifi.slash"
     }
 
-    private var phaseStatus: String {
+    private var instrumentBay: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            HStack(spacing: 9) {
+                Image(systemName: "speedometer")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(palette.textAccent)
+                    .frame(width: 36, height: 36)
+                    .background(palette.textAccent.opacity(0.11), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Speed Test")
+                        .font(.headline.weight(.semibold))
+                        .linkWaveText(.primary)
+                    Text(consoleStatus)
+                        .font(.caption2.monospacedDigit())
+                        .linkWaveText(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                Spacer(minLength: 4)
+                if isRunning {
+                    Button("Stop", action: stopTest)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.textAccent)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 7)
+                        .buttonStyle(.plain)
+                        .linkWaveInteractiveGlassCapsule()
+                } else {
+                    Button(action: startTest) {
+                        Label(displayedRecord == nil ? "Start Test" : "Run Again", systemImage: startButtonSymbol)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(viewModel.canRunSpeedTest ? palette.textAccent : palette.textSecondary.color)
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 7)
+                    }
+                    .buttonStyle(.plain)
+                    .linkWaveInteractiveGlassCapsule()
+                    .disabled(!viewModel.settings.isConfigured || !viewModel.canRunSpeedTest)
+                    .accessibilityLabel(startButtonTitle)
+                }
+            }
+
+            HStack(spacing: 9) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(primarySpeedTitle)
+                        .font(.caption2.weight(.semibold))
+                        .linkWaveText(.secondary)
+                    Text(primarySpeedValue)
+                        .font(.system(.title2, design: .rounded).weight(.bold))
+                        .monospacedDigit()
+                        .tracking(-0.4)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .contentTransition(.numericText())
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                latencyTile(
+                    title: "Ping",
+                    value: displayedRecord.map { String(format: "%.0f ms", $0.pingMs) }
+                        ?? measuredPingMs.map { String(format: "%.0f ms", $0) } ?? "-- ms"
+                )
+                latencyTile(
+                    title: "Jitter",
+                    value: displayedRecord.map { String(format: "%.0f ms", $0.jitterMs) }
+                        ?? measuredJitterMs.map { String(format: "%.0f ms", $0) } ?? "-- ms"
+                )
+            }
+        }
+        .padding(14)
+        .background {
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(LinearGradient(
+                        colors: [palette.textAccent.opacity(0.10), palette.textAccent.opacity(0.025), .clear],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                SpeedTestMicroGrid(accent: palette.textAccent)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                RadialGradient(
+                    colors: [palette.textAccent.opacity(0.10), .clear],
+                    center: .topTrailing,
+                    startRadius: 0,
+                    endRadius: 150
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(palette.textAccent.opacity(0.11), lineWidth: 0.7)
+        }
+    }
+
+    private var telemetryProgressBody: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            speedProgressRow(
+                title: "Download",
+                phase: .download,
+                tint: palette.textAccent,
+                recordSpeed: displayedRecord?.downMbps
+            )
+            speedProgressRow(
+                title: "Upload",
+                phase: .upload,
+                tint: .green,
+                recordSpeed: displayedRecord?.upMbps
+            )
+        }
+    }
+
+    private var consoleStatus: String {
+        if isRunning {
+            switch progress.phase {
+            case .ping: return "Preparing..."
+            case .download: return "Testing download"
+            case .upload: return "Testing upload"
+            }
+        } else if let inspectedRecord {
+            return "Saved · \(Self.formattedTime(inspectedRecord.timestamp))"
+        } else if displayedRecord != nil {
+            return "Benchmark complete"
+        } else {
+            return "Ready to benchmark"
+        }
+    }
+
+    private var primarySpeedTitle: String {
+        guard isRunning else { return "Peak Download" }
         switch progress.phase {
-        case .ping: "Measuring ping & jitter…"
-        case .download: "Testing download…"
-        case .upload: "Testing upload…"
+        case .ping: return "Live speed"
+        case .download: return "Download"
+        case .upload: return "Upload"
+        }
+    }
+
+    private var primarySpeedValue: String {
+        if isRunning {
+            switch progress.phase {
+            case .ping: return "-- Mbps"
+            case .download: return hasDownloadReading ? Self.speed(displayedDownloadMbps) : "-- Mbps"
+            case .upload: return hasUploadReading ? Self.speed(displayedUploadMbps) : "-- Mbps"
+            }
+        }
+        return displayedRecord.map { Self.speed($0.downMbps) } ?? "-- Mbps"
+    }
+
+    private func latencyTile(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption2.weight(.medium))
+                .linkWaveText(.secondary)
+            Text(value)
+                .font(.system(.caption, design: .rounded).weight(.bold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(width: 68, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background(palette.backgroundTertiary.opacity(0.46), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(palette.textSecondary.color.opacity(0.13), lineWidth: 0.7)
+        }
+    }
+
+    private func speedProgressRow(
+        title: String,
+        phase: SpeedTestProgress.Phase,
+        tint: Color,
+        recordSpeed: Double?
+    ) -> some View {
+        let fraction: Double
+        let status: String
+        if !isRunning {
+            fraction = recordSpeed.map { min(max($0 / 1_000, 0), 1) } ?? 0
+            status = recordSpeed.map { String(format: "%.1f Mbps", $0) } ?? "Ready"
+        } else {
+            switch progress.phase {
+            case .ping:
+                fraction = 0
+                status = phase == .download ? "Preparing..." : "Queued"
+            case .download:
+                fraction = phase == .download ? progress.fraction : 0
+                status = phase == .download ? "Live" : "Queued"
+            case .upload:
+                if phase == .download {
+                    fraction = min(max(displayedDownloadMbps / 1_000, 0), 1)
+                    status = hasDownloadReading ? String(format: "%.1f Mbps", displayedDownloadMbps) : "Preparing..."
+                } else {
+                    fraction = progress.fraction
+                    status = "Live"
+                }
+            }
+        }
+
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+                Spacer(minLength: 4)
+                Text(status)
+                    .font(.caption2.monospacedDigit().weight(.medium))
+                    .linkWaveText(.secondary)
+                    .lineLimit(1)
+            }
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(palette.backgroundTertiary.opacity(0.78))
+                        .frame(height: 10)
+                    Capsule()
+                        .fill(tint.opacity(0.86))
+                        .frame(width: geometry.size.width * CGFloat(min(max(fraction, 0), 1)), height: 10)
+                    ForEach([0.25, 0.5, 0.75], id: \.self) { tick in
+                        Rectangle()
+                            .fill(palette.backgroundPrimary.opacity(0.72))
+                            .frame(width: 1, height: 14)
+                            .position(x: geometry.size.width * CGFloat(tick), y: 7)
+                    }
+                }
+            }
+            .frame(height: 14)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(title) speed test progress")
+            .accessibilityValue(status)
         }
     }
 
@@ -909,7 +1126,7 @@ private struct SpeedTestCard: View {
         return HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(Self.formattedTime(record.timestamp))
-                    .font(.caption.weight(.medium))
+                    .font(.caption.weight(.medium).monospacedDigit())
                     .foregroundStyle(palette.textPrimary.color)
                     .lineLimit(1)
                 Text(summary)
@@ -998,6 +1215,7 @@ private struct SpeedTestCard: View {
 
             Text(activityExplanation(for: selectedActivity, record: record))
                 .font(.caption2)
+                .monospacedDigit()
                 .linkWaveText(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
@@ -1053,27 +1271,10 @@ private struct SpeedTestCard: View {
             .replacingOccurrences(of: "PM", with: "pm")
     }
 
-    private func resultMetric(_ title: String, value: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption2)
-                .linkWaveText(.secondary)
-                .lineLimit(1)
-            Text(value)
-                .font(.system(.subheadline, design: .rounded).weight(.bold))
-                .foregroundStyle(tint)
-                .monospacedDigit()
-                .tracking(-0.2)
-                .animation(.linear(duration: 0.025), value: value)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     private func receiveProgress(_ update: SpeedTestProgress) {
         let previousPhase = progress.phase
         progress = update
+        activePhase = update.phase
 
         if let pingMs = update.pingMs { measuredPingMs = pingMs }
         if let jitterMs = update.jitterMs { measuredJitterMs = jitterMs }
@@ -1214,6 +1415,7 @@ private struct SpeedTestCard: View {
         overrideCleanupTask = nil
         testDownloadMbps = 0
         testUploadMbps = 0
+        activePhase = .ping
         errorMessage = nil
         progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
         viewModel.setSpeedTestRunning(true)
@@ -1222,6 +1424,7 @@ private struct SpeedTestCard: View {
             defer {
                 isRunning = false
                 viewModel.setSpeedTestRunning(false)
+                activePhase = nil
                 testTask = nil
                 if pendingResult == nil {
                     targetDownloadMbps = 0
@@ -1253,6 +1456,26 @@ private struct SpeedTestCard: View {
     private static func speed(_ mbps: Double) -> String {
         if mbps >= 1_000 { return String(format: "%.2f Gbps", mbps / 1_000) }
         return String(format: "%.1f Mbps", mbps)
+    }
+}
+
+private struct SpeedTestMicroGrid: View {
+    let accent: Color
+
+    var body: some View {
+        Canvas { context, size in
+            var path = Path()
+            stride(from: 0.0, through: size.width, by: 14).forEach { x in
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: size.height))
+            }
+            stride(from: 0.0, through: size.height, by: 14).forEach { y in
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: size.width, y: y))
+            }
+            context.stroke(path, with: .color(accent.opacity(0.055)), lineWidth: 0.5)
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -1345,6 +1568,7 @@ private struct HomeSummaryRow: View {
     let openUsage: () -> Void
     let openClients: () -> Void
     @Environment(\.linkWaveThemePalette) private var palette
+    @Environment(\.colorScheme) private var colorScheme
 
     private var todayTotalBytes: UInt64 {
         let (total, overflow) = summary.todayDownloadBytes.addingReportingOverflow(summary.todayUploadBytes)
@@ -1352,96 +1576,109 @@ private struct HomeSummaryRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 10) {
             Button(action: openUsage) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Today’s Usage")
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("Today's Usage")
                         .font(.caption.weight(.semibold))
                         .linkWaveText(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    Text(Self.format(todayTotalBytes))
-                        .font(.system(.title3, design: .rounded).weight(.bold))
-                        .monospacedDigit()
-                        .tracking(-0.3)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                        .contentTransition(.numericText())
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     HStack(spacing: 7) {
-                        usageLine(
-                            value: Self.formatGB(summary.todayDownloadBytes),
-                            icon: "arrow.down",
+                        CircularStatRing(
+                            progress: monthTotalBytes == 0 ? 0 : Double(todayTotalBytes) / Double(monthTotalBytes),
                             tint: palette.textAccent
                         )
-                        usageLine(
-                            value: Self.formatUpload(summary.todayUploadBytes),
-                            icon: "arrow.up",
-                            tint: palette.textSecondary.color
-                        )
+                        Text(Self.formatGB(todayTotalBytes))
+                            .font(.system(.title3, design: .rounded).weight(.bold))
+                            .monospacedDigit()
+                            .tracking(-0.35)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                            .contentTransition(.numericText())
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        usageLine(label: "Down", value: Self.formatGB(summary.todayDownloadBytes), icon: "arrow.down", tint: palette.textAccent)
+                        usageLine(label: "Up", value: Self.formatUpload(summary.todayUploadBytes), icon: "arrow.up", tint: palette.textSecondary.color)
+                    }
+                    Spacer(minLength: 0)
+                    HStack(spacing: 4) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Month")
+                        Spacer(minLength: 2)
+                        Text(Self.formatGB(monthTotalBytes))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.68)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(palette.textAccent)
                     }
                     .font(.system(size: 9, weight: .medium, design: .rounded))
-                    .lineLimit(1)
-                    HStack(spacing: 4) {
-                        Text("Month: \(Self.formatGB(monthTotalBytes))")
-                            .font(.caption2.monospacedDigit())
-                            .linkWaveText(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                        Spacer(minLength: 0)
-                        HStack(spacing: 3) {
-                            Text("View usage")
-                            Image(systemName: "chevron.right")
-                        }
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
-                        .foregroundStyle(palette.textAccent)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                    }
+                    .foregroundStyle(palette.textSecondary.color)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 7)
+                    .background(neutralPillFill, in: Capsule())
                 }
-                .frame(maxWidth: .infinity, minHeight: 108, maxHeight: .infinity, alignment: .topLeading)
-                .linkWaveGlassCard()
+                .frame(maxWidth: .infinity, minHeight: 146, alignment: .topLeading)
+                .linkWaveGlassCard(padding: 12)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Today's usage, \(Self.format(todayTotalBytes)). Open Usage tab.")
+            .accessibilityLabel("Today's usage, \(Self.formatGB(todayTotalBytes)). Open Usage tab.")
 
             Button(action: openClients) {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 9) {
                     Text("Connected Devices")
                         .font(.caption.weight(.semibold))
                         .linkWaveText(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     HStack(spacing: 6) {
-                        Circle()
-                            .fill(.green)
-                            .frame(width: 7, height: 7)
-                            .shadow(color: .green.opacity(0.6), radius: 3)
+                        CircularStatRing(
+                            progress: deviceTotalCount == 0 ? 0 : Double(onlineCount) / Double(deviceTotalCount),
+                            tint: .green,
+                            symbol: "laptopcomputer"
+                        )
                         Text("\(onlineCount) online")
                             .font(.system(.title3, design: .rounded).weight(.bold))
                             .monospacedDigit()
                             .tracking(-0.3)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.75)
+                            .minimumScaleFactor(0.7)
                     }
                     Text("\(offlineCount) offline")
-                        .font(.caption)
+                        .font(.caption2.monospacedDigit())
                         .linkWaveText(.secondary)
                     Spacer(minLength: 0)
-                    Label("View clients", systemImage: "chevron.right")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(palette.textAccent)
+                    HStack(spacing: 4) {
+                        Image(systemName: "person.2")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("View Clients")
+                        Spacer(minLength: 2)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(palette.textAccent)
+                    }
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(palette.textSecondary.color)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 7)
+                    .background(neutralPillFill, in: Capsule())
                 }
-                .frame(maxWidth: .infinity, minHeight: 108, maxHeight: .infinity, alignment: .topLeading)
-                .linkWaveGlassCard()
+                .frame(maxWidth: .infinity, minHeight: 146, alignment: .topLeading)
+                .linkWaveGlassCard(padding: 12)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Connected devices, \(onlineCount) online and \(offlineCount) offline. Open Clients tab.")
         }
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 
-    private static func format(_ bytes: UInt64) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(clamping: bytes), countStyle: .file)
+    private var deviceTotalCount: Int {
+        max(0, onlineCount) + max(0, offlineCount)
+    }
+
+    private var neutralPillFill: Color {
+        palette.backgroundTertiary.opacity(colorScheme == .dark ? 0.62 : 0.68)
     }
 
     private static func formatGB(_ bytes: UInt64) -> String {
@@ -1460,9 +1697,43 @@ private struct HomeSummaryRow: View {
         return overflow ? UInt64.max : total
     }
 
-    private func usageLine(value: String, icon: String, tint: Color) -> some View {
-        Label(value, systemImage: icon)
-            .foregroundStyle(tint)
+    private func usageLine(label: String, value: String, icon: String, tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 8, weight: .bold))
+            Text(label)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+            Text(value)
+                .font(.system(size: 9, weight: .medium, design: .rounded).monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(tint)
+    }
+}
+
+private struct CircularStatRing: View {
+    let progress: Double
+    let tint: Color
+    var symbol: String?
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(tint.opacity(0.18), lineWidth: 3)
+            Circle()
+                .trim(from: 0, to: min(max(progress, 0), 1))
+                .stroke(tint, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
+        }
+        .frame(width: 32, height: 32)
+        .accessibilityHidden(true)
     }
 }
 
