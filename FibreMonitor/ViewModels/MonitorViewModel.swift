@@ -407,6 +407,10 @@ public final class MonitorViewModel: ObservableObject {
         activeSpeedTestRecord = nil
     }
 
+    func restoreActiveSpeedTestRecord(_ record: SpeedTestRecord?) {
+        activeSpeedTestRecord = record
+    }
+
     @discardableResult
     func completeSpeedTest(_ result: SpeedTestResult) -> SpeedTestRecord {
         let record = SpeedTestRecord(

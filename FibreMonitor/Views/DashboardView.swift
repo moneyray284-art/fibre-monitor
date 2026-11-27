@@ -6,14 +6,13 @@ public struct DashboardView: View {
     @State private var showSettings = false
     @State private var showConnectionDiagnosis = false
     @State private var startSpeedTestRequested = false
-    @State private var speedTestDownloadMbps: Double?
-    @State private var speedTestUploadMbps: Double?
-    @State private var speedTestPhase: SpeedTestProgress.Phase?
+    @StateObject private var speedTestCoordinator: SpeedTestCoordinator
     @Environment(\.colorScheme) private var colorScheme
 
     public init(viewModel: MonitorViewModel) {
         self.viewModel = viewModel
         self.settings = viewModel.settings
+        _speedTestCoordinator = StateObject(wrappedValue: SpeedTestCoordinator(viewModel: viewModel))
     }
 
     public var body: some View {
@@ -28,9 +27,9 @@ public struct DashboardView: View {
                         RouterHeaderCard(
                             viewModel: viewModel,
                             settings: settings,
-                            testDownloadMbps: speedTestDownloadMbps,
-                            testUploadMbps: speedTestUploadMbps,
-                            testPhase: speedTestPhase
+                            testDownloadMbps: speedTestCoordinator.liveDownloadMbps,
+                            testUploadMbps: speedTestCoordinator.liveUploadMbps,
+                            testPhase: speedTestCoordinator.phase == .idle ? nil : speedTestCoordinator.phase
                         )
 
                         if !viewModel.isConnectedToWiFi {
@@ -63,9 +62,7 @@ public struct DashboardView: View {
                         )
                         SpeedTestCard(
                             viewModel: viewModel,
-                            testDownloadMbps: $speedTestDownloadMbps,
-                            testUploadMbps: $speedTestUploadMbps,
-                            activePhase: $speedTestPhase,
+                            coordinator: speedTestCoordinator,
                             startRequested: $startSpeedTestRequested
                         )
                         ConnectionCheckCard(
@@ -196,7 +193,7 @@ private struct RouterHeaderCard: View {
     @ObservedObject var settings: SettingsStore
     let testDownloadMbps: Double?
     let testUploadMbps: Double?
-    let testPhase: SpeedTestProgress.Phase?
+    let testPhase: SpeedTestPhase?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.linkWaveThemePalette) private var palette
 
@@ -735,36 +732,10 @@ private struct CompactSpeedCard: View {
 
 private struct SpeedTestCard: View {
     @ObservedObject var viewModel: MonitorViewModel
-    @Binding var testDownloadMbps: Double?
-    @Binding var testUploadMbps: Double?
-    @Binding var activePhase: SpeedTestProgress.Phase?
+    @ObservedObject var coordinator: SpeedTestCoordinator
     @Binding var startRequested: Bool
-    @State private var pendingResult: SpeedTestResult?
-    @State private var completedRecord: SpeedTestRecord?
-    @State private var hasCompletedRun = false
-    @State private var progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
-    @State private var errorMessage: String?
-    @State private var isRunning = false
-    @State private var testTask: Task<Void, Never>?
-    @State private var interpolationTask: Task<Void, Never>?
-    @State private var overrideCleanupTask: Task<Void, Never>?
-    @State private var measuredPingMs: Double?
-    @State private var measuredJitterMs: Double?
-    @State private var emaDownloadMbps = 0.0
-    @State private var emaUploadMbps = 0.0
-    @State private var targetDownloadMbps = 0.0
-    @State private var targetUploadMbps = 0.0
-    @State private var displayedDownloadMbps = 0.0
-    @State private var displayedUploadMbps = 0.0
-    @State private var speedScaleMax = 120.0
-    @State private var gatewayDownloadReturnMbps = 0.0
-    @State private var gatewayDownloadReturnTargetMbps = 0.0
-    @State private var isReturningGatewayDownloadToLive = false
-    @State private var hasDownloadReading = false
-    @State private var hasUploadReading = false
     @State private var isHistoryExpanded = false
     @State private var isResultsDrawerExpanded = false
-    @State private var inspectedHistoryID: UUID?
     @State private var selectedActivity: SpeedTestActivity?
     @Environment(\.linkWaveThemePalette) private var palette
     @Environment(\.colorScheme) private var colorScheme
@@ -774,18 +745,18 @@ private struct SpeedTestCard: View {
     }
 
     private var inspectedRecord: SpeedTestRecord? {
-        viewModel.speedHistory.first { $0.id == inspectedHistoryID }
+        viewModel.speedHistory.first { $0.id == coordinator.inspectedHistoryID }
     }
 
     private var displayedRecord: SpeedTestRecord? {
-        inspectedRecord ?? completedRecord ?? (pendingResult == nil ? viewModel.activeSpeedTestRecord : nil)
+        inspectedRecord ?? coordinator.completedRecord ?? viewModel.activeSpeedTestRecord
     }
 
     private var isInspectingSavedRun: Bool { inspectedRecord != nil }
 
     private var shouldShowResultsDrawer: Bool {
-        isRunning || activePhase != nil
-            || (isResultsDrawerExpanded && (hasCompletedRun || inspectedRecord != nil))
+        coordinator.isRunning || coordinator.phase != .idle
+            || (isResultsDrawerExpanded && (coordinator.hasCompletedRun || inspectedRecord != nil))
     }
 
     var body: some View {
@@ -795,22 +766,22 @@ private struct SpeedTestCard: View {
                 LinkWaveHairlineDivider()
                 VStack(alignment: .leading, spacing: 13) {
                     telemetryProgressBody
-                    if !isRunning, pendingResult == nil,
-                       let record = inspectedRecord ?? completedRecord {
+                    if !coordinator.isRunning,
+                       let record = inspectedRecord ?? coordinator.completedRecord {
                         activityStrengthSection(for: record)
                     }
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            if let errorMessage {
+            if let errorMessage = coordinator.errorMessage {
                 Text(errorMessage)
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if !isRunning, pendingResult == nil, !viewModel.speedHistory.isEmpty {
+            if !coordinator.isRunning, !viewModel.speedHistory.isEmpty {
                 LinkWaveHairlineDivider()
                 previousTestsSection
             }
@@ -819,16 +790,10 @@ private struct SpeedTestCard: View {
         .linkWaveGlassCard()
         .accessibilityElement(children: .contain)
         .onChange(of: viewModel.canRunSpeedTest) { isAvailable in
-            guard !isAvailable, isRunning else { return }
-            testTask?.cancel()
-            errorMessage = viewModel.isConnectedToWiFi
+            guard !isAvailable, coordinator.isRunning else { return }
+            coordinator.cancelSpeedTest(message: viewModel.isConnectedToWiFi
                 ? "Speed test stopped because the internet path was lost."
-                : "Speed test stopped because Wi-Fi disconnected."
-        }
-        .onChange(of: viewModel.traffic.downloadMbps) { sample in
-            guard isReturningGatewayDownloadToLive else { return }
-            gatewayDownloadReturnTargetMbps = max(0, sample)
-            scheduleInterpolation()
+                : "Speed test stopped because Wi-Fi disconnected.")
         }
         .onChange(of: startRequested) { requested in
             guard requested else { return }
@@ -836,9 +801,7 @@ private struct SpeedTestCard: View {
             startTest()
         }
         .onDisappear {
-            testTask?.cancel()
-            if pendingResult == nil { interpolationTask?.cancel() }
-            overrideCleanupTask?.cancel()
+            coordinator.cancelSpeedTest()
         }
     }
 
@@ -872,7 +835,7 @@ private struct SpeedTestCard: View {
                         .minimumScaleFactor(0.8)
                 }
                 Spacer(minLength: 4)
-                if isRunning {
+                if coordinator.isRunning {
                     Button("Stop", action: stopTest)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(palette.textAccent)
@@ -899,14 +862,14 @@ private struct SpeedTestCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(primarySpeedTitle)
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(isRunning && progress.phase == .upload ? Color.green : palette.textSecondary.color)
+                        .foregroundStyle(coordinator.isRunning && coordinator.phase == .upload ? Color.green : palette.textSecondary.color)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         .frame(height: 14, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(primarySpeedValue)
                         .font(.system(.title2, design: .rounded).weight(.bold))
-                        .foregroundStyle(isRunning && progress.phase == .upload ? Color.green : palette.textPrimary.color)
+                        .foregroundStyle(coordinator.isRunning && coordinator.phase == .upload ? Color.green : palette.textPrimary.color)
                         .monospacedDigit()
                         .tracking(-0.4)
                         .lineLimit(1)
@@ -918,12 +881,12 @@ private struct SpeedTestCard: View {
                 latencyTile(
                     title: "Ping",
                     value: displayedRecord.map { String(format: "%.0f ms", $0.pingMs) }
-                        ?? measuredPingMs.map { String(format: "%.0f ms", $0) } ?? "-- ms"
+                        ?? coordinator.measuredPingMs.map { String(format: "%.0f ms", $0) } ?? "-- ms"
                 )
                 latencyTile(
                     title: "Jitter",
                     value: displayedRecord.map { String(format: "%.0f ms", $0.jitterMs) }
-                        ?? measuredJitterMs.map { String(format: "%.0f ms", $0) } ?? "-- ms"
+                        ?? coordinator.measuredJitterMs.map { String(format: "%.0f ms", $0) } ?? "-- ms"
                 )
             }
         }
@@ -975,15 +938,16 @@ private struct SpeedTestCard: View {
     }
 
     private var consoleStatus: String {
-        if isRunning {
-            switch progress.phase {
+        if coordinator.isRunning {
+            switch coordinator.phase {
             case .ping: return "Preparing..."
             case .download: return "Testing download"
             case .upload: return "Testing upload link..."
+            case .idle: return "Ready to benchmark"
             }
         } else if let inspectedRecord {
             return "Saved · \(Self.formattedTime(inspectedRecord.timestamp))"
-        } else if hasCompletedRun || displayedRecord != nil {
+        } else if coordinator.hasCompletedRun || displayedRecord != nil {
             return "Benchmark complete"
         } else {
             return "Ready to benchmark"
@@ -991,20 +955,24 @@ private struct SpeedTestCard: View {
     }
 
     private var primarySpeedTitle: String {
-        guard isRunning else { return "Peak Download" }
-        switch progress.phase {
+        guard coordinator.isRunning else { return "Peak Download" }
+        switch coordinator.phase {
         case .ping: return "Throughput"
         case .download: return "Live Download"
         case .upload: return "Live Upload"
+        case .idle: return "Peak Download"
         }
     }
 
     private var primarySpeedValue: String {
-        if isRunning {
-            switch progress.phase {
+        if coordinator.isRunning {
+            switch coordinator.phase {
             case .ping: return "-- Mbps"
-            case .download: return hasDownloadReading ? Self.speed(displayedDownloadMbps) : "-- Mbps"
-            case .upload: return hasUploadReading ? Self.speed(displayedUploadMbps) : "-- Mbps"
+            case .download:
+                return coordinator.hasDownloadReading ? Self.speed(coordinator.progress.liveDownKbps / 1_000) : "-- Mbps"
+            case .upload:
+                return coordinator.hasUploadReading ? Self.speed(coordinator.progress.liveUpKbps / 1_000) : "-- Mbps"
+            case .idle: return "-- Mbps"
             }
         }
         return displayedRecord.map { Self.speed($0.downMbps) } ?? "-- Mbps"
@@ -1039,35 +1007,38 @@ private struct SpeedTestCard: View {
     ) -> some View {
         let currentMbps: Double
         let status: String
-        if !isRunning {
+        if !coordinator.isRunning {
             currentMbps = recordSpeed ?? 0
             status = recordSpeed.map { String(format: "%.1f Mbps", $0) } ?? "Ready"
         } else {
-            switch progress.phase {
+            switch coordinator.phase {
             case .ping:
                 currentMbps = 0
                 status = phase == .download ? "Preparing..." : "Queued"
             case .download:
                 if phase == .download {
-                    currentMbps = displayedDownloadMbps
-                    status = hasDownloadReading ? String(format: "%.1f Mbps", displayedDownloadMbps) : "Measuring..."
+                    currentMbps = coordinator.progress.liveDownKbps / 1_000
+                    status = coordinator.hasDownloadReading ? String(format: "%.1f Mbps", currentMbps) : "Measuring..."
                 } else {
                     currentMbps = 0
                     status = "Queued"
                 }
             case .upload:
                 if phase == .download {
-                    currentMbps = displayedDownloadMbps
-                    status = hasDownloadReading ? String(format: "%.1f Mbps", displayedDownloadMbps) : "Preparing..."
+                    currentMbps = coordinator.progress.testDownMbps ?? 0
+                    status = coordinator.hasDownloadReading ? String(format: "%.1f Mbps", currentMbps) : "Preparing..."
                 } else {
-                    currentMbps = displayedUploadMbps
-                    status = hasUploadReading
-                        ? String(format: "%.1f Mbps", displayedUploadMbps)
+                    currentMbps = coordinator.progress.liveUpKbps / 1_000
+                    status = coordinator.hasUploadReading
+                        ? String(format: "%.1f Mbps", currentMbps)
                         : "Measuring..."
                 }
+            case .idle:
+                currentMbps = recordSpeed ?? 0
+                status = recordSpeed.map { String(format: "%.1f Mbps", $0) } ?? "Ready"
             }
         }
-        let fraction = min(1, max(0, currentMbps / speedScaleMax))
+        let fraction = min(1, max(0, currentMbps / coordinator.speedScale))
 
         return VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
@@ -1105,8 +1076,7 @@ private struct SpeedTestCard: View {
     }
 
     private func stopTest() {
-        errorMessage = "Speed test stopped."
-        testTask?.cancel()
+        coordinator.cancelSpeedTest(message: "Speed test stopped.")
     }
 
     private var previousTestsSection: some View {
@@ -1148,7 +1118,7 @@ private struct SpeedTestCard: View {
                     ForEach(Array(viewModel.speedHistory.enumerated()), id: \.element.id) { index, entry in
                         Button {
                             withAnimation(.easeOut(duration: 0.28)) {
-                                inspectedHistoryID = entry.id
+                                coordinator.inspectedHistoryID = entry.id
                                 selectedActivity = nil
                                 isResultsDrawerExpanded = true
                             }
@@ -1157,7 +1127,7 @@ private struct SpeedTestCard: View {
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 9)
                                 .background(
-                                    inspectedHistoryID == entry.id
+                                    coordinator.inspectedHistoryID == entry.id
                                         ? Color.primary.opacity(0.06)
                                         : Color.clear,
                                     in: RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -1177,7 +1147,7 @@ private struct SpeedTestCard: View {
                     Spacer()
                     Button("Clear") {
                         viewModel.clearSpeedTestHistory()
-                        inspectedHistoryID = nil
+                        coordinator.inspectedHistoryID = nil
                         isHistoryExpanded = false
                         selectedActivity = nil
                         isResultsDrawerExpanded = false
@@ -1240,7 +1210,7 @@ private struct SpeedTestCard: View {
                 Spacer()
                 if isInspectingSavedRun {
                     Button("Close") {
-                        inspectedHistoryID = nil
+                        coordinator.inspectedHistoryID = nil
                         selectedActivity = nil
                         isResultsDrawerExpanded = false
                     }
@@ -1358,208 +1328,15 @@ private struct SpeedTestCard: View {
             .replacingOccurrences(of: "PM", with: "pm")
     }
 
-    private func receiveProgress(_ update: SpeedTestProgress) {
-        let previousPhase = progress.phase
-        progress = update
-        activePhase = update.phase
-
-        if let pingMs = update.pingMs { measuredPingMs = pingMs }
-        if let jitterMs = update.jitterMs { measuredJitterMs = jitterMs }
-
-        if update.phase != previousPhase {
-            switch update.phase {
-            case .ping:
-                break
-            case .download:
-                emaDownloadMbps = 0
-                targetDownloadMbps = 0
-                displayedDownloadMbps = 0
-                hasDownloadReading = false
-                testDownloadMbps = 0
-            case .upload:
-                isReturningGatewayDownloadToLive = true
-                gatewayDownloadReturnMbps = displayedDownloadMbps
-                gatewayDownloadReturnTargetMbps = max(0, viewModel.traffic.downloadMbps)
-                emaUploadMbps = 0
-                targetUploadMbps = 0
-                displayedUploadMbps = 0
-                hasUploadReading = false
-                testUploadMbps = 0
-                scheduleInterpolation()
-            }
-        }
-
-        guard let sampleMbps = update.currentMbps else { return }
-        let elapsed = update.elapsed ?? 0
-        guard elapsed >= 0.4 || update.fraction >= 1 else { return }
-
-        let boundedSample = max(0, sampleMbps)
-        speedScaleMax = max(speedScaleMax, boundedSample)
-        switch update.phase {
-        case .ping:
-            return
-        case .download:
-            emaDownloadMbps = update.fraction >= 1
-                ? boundedSample
-                : (emaDownloadMbps == 0 ? boundedSample : emaDownloadMbps * 0.72 + boundedSample * 0.28)
-            targetDownloadMbps = emaDownloadMbps
-            hasDownloadReading = true
-        case .upload:
-            emaUploadMbps = update.fraction >= 1
-                ? boundedSample
-                : (emaUploadMbps == 0 ? boundedSample : emaUploadMbps * 0.72 + boundedSample * 0.28)
-            targetUploadMbps = emaUploadMbps
-            hasUploadReading = true
-        }
-        scheduleInterpolation()
-    }
-
-    private func scheduleInterpolation() {
-        guard interpolationTask == nil else { return }
-        interpolationTask = Task { @MainActor in
-            while !Task.isCancelled {
-                let downloadDelta = targetDownloadMbps - displayedDownloadMbps
-                let uploadDelta = targetUploadMbps - displayedUploadMbps
-                let gatewayDownloadDelta = gatewayDownloadReturnTargetMbps - gatewayDownloadReturnMbps
-                let gatewayDownloadIsSettled = !isReturningGatewayDownloadToLive || abs(gatewayDownloadDelta) < 0.04
-
-                if abs(downloadDelta) < 0.04 && abs(uploadDelta) < 0.04 && gatewayDownloadIsSettled {
-                    withAnimation(.linear(duration: 0.04)) {
-                        displayedDownloadMbps = targetDownloadMbps
-                        displayedUploadMbps = targetUploadMbps
-                        if isReturningGatewayDownloadToLive {
-                            gatewayDownloadReturnMbps = gatewayDownloadReturnTargetMbps
-                            testDownloadMbps = nil
-                            isReturningGatewayDownloadToLive = false
-                        } else if progress.phase == .download {
-                            testDownloadMbps = displayedDownloadMbps
-                        }
-                        testUploadMbps = displayedUploadMbps
-                    }
-                    break
-                }
-
-                withAnimation(.linear(duration: 1.0 / 30.0)) {
-                    displayedDownloadMbps += downloadDelta * 0.22
-                    displayedUploadMbps += uploadDelta * 0.22
-                    if isReturningGatewayDownloadToLive {
-                        gatewayDownloadReturnMbps += gatewayDownloadDelta * 0.22
-                        testDownloadMbps = gatewayDownloadReturnMbps
-                    } else if progress.phase == .download {
-                        testDownloadMbps = displayedDownloadMbps
-                    }
-                    testUploadMbps = displayedUploadMbps
-                }
-                try? await Task.sleep(nanoseconds: 33_333_333)
-            }
-
-            interpolationTask = nil
-            guard !Task.isCancelled else { return }
-            if let pendingResult {
-                selectedActivity = nil
-                self.pendingResult = nil
-                scheduleOverrideCleanup()
-            } else if !isRunning {
-                scheduleOverrideCleanup()
-            }
-        }
-    }
-
-    private func scheduleOverrideCleanup() {
-        overrideCleanupTask?.cancel()
-        overrideCleanupTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_100_000_000)
-            guard !isRunning else { return }
-            withAnimation(.easeOut(duration: 0.2)) {
-                testDownloadMbps = nil
-                testUploadMbps = nil
-            }
-            overrideCleanupTask = nil
-        }
-    }
-
     private func startTest() {
-        guard !isRunning, viewModel.canRunSpeedTest else { return }
-        isRunning = true
+        guard !coordinator.isRunning, viewModel.canRunSpeedTest else { return }
         isResultsDrawerExpanded = true
-        viewModel.clearActiveSpeedTestRecord()
-        pendingResult = nil
-        completedRecord = nil
-        hasCompletedRun = false
-        inspectedHistoryID = nil
+        coordinator.inspectedHistoryID = nil
         isHistoryExpanded = false
         selectedActivity = nil
-        measuredPingMs = nil
-        measuredJitterMs = nil
-        emaDownloadMbps = 0
-        emaUploadMbps = 0
-        targetDownloadMbps = 0
-        targetUploadMbps = 0
-        displayedDownloadMbps = 0
-        displayedUploadMbps = 0
-        gatewayDownloadReturnMbps = 0
-        gatewayDownloadReturnTargetMbps = 0
-        isReturningGatewayDownloadToLive = false
-        hasDownloadReading = false
-        hasUploadReading = false
-        speedScaleMax = 120
-        overrideCleanupTask?.cancel()
-        overrideCleanupTask = nil
-        testDownloadMbps = 0
-        testUploadMbps = 0
-        activePhase = .ping
-        errorMessage = nil
-        progress = SpeedTestProgress(phase: .ping, fraction: 0, detail: "Preparing test")
-        viewModel.setSpeedTestRunning(true)
-
-        testTask = Task { @MainActor in
-            var didComplete = false
-            defer {
-                testTask = nil
-                if !didComplete {
-                    isRunning = false
-                    viewModel.setSpeedTestRunning(false)
-                    activePhase = nil
-                    targetDownloadMbps = 0
-                    targetUploadMbps = 0
-                    scheduleInterpolation()
-                }
-            }
-            do {
-                let completedResult = try await SpeedTestService.run { update in
-                    receiveProgress(update)
-                }
-                withAnimation(.easeOut(duration: 0.18)) {
-                    let record = viewModel.completeSpeedTest(completedResult)
-                    completedRecord = record
-                    hasCompletedRun = true
-                    pendingResult = completedResult
-                    testDownloadMbps = completedResult.downloadMbps
-                    testUploadMbps = completedResult.uploadMbps
-                    measuredPingMs = completedResult.pingMs
-                    measuredJitterMs = completedResult.jitterMs
-                    speedScaleMax = max(
-                        speedScaleMax,
-                        max(completedResult.downloadMbps, completedResult.uploadMbps)
-                    )
-                    targetDownloadMbps = completedResult.downloadMbps
-                    targetUploadMbps = completedResult.uploadMbps
-                    hasDownloadReading = true
-                    hasUploadReading = true
-                    isRunning = false
-                    viewModel.setSpeedTestRunning(false)
-                    activePhase = nil
-                }
-                didComplete = true
-                scheduleInterpolation()
-            } catch is CancellationError {
-                if errorMessage == nil { errorMessage = "Speed test stopped." }
-            } catch let error as URLError where error.code == .cancelled {
-                if errorMessage == nil { errorMessage = "Speed test stopped." }
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-        }
+        let host = viewModel.settings.host
+        let gatewayURL = URL(string: host.contains("://") ? host : "http://\(host)")
+        coordinator.startSpeedTest(gatewayURL: gatewayURL)
     }
 
     private static func speed(_ mbps: Double) -> String {
