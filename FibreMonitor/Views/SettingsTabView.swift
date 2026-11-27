@@ -5,6 +5,7 @@ public struct SettingsTabView: View {
     @ObservedObject var settings: SettingsStore
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("linkwave.surfaceStyle") private var surfaceStyleRawValue = LinkWaveSurfaceStyle.liquidGlass.rawValue
+    @AppStorage("linkwave_bg_pattern") private var backgroundPatternRawValue = BackgroundPatternID.waves.rawValue
     @State private var editorMode: RouterProfileEditorView.Mode?
     @State private var pendingDelete: RouterProfile?
     @State private var showRebootAlert = false
@@ -172,6 +173,20 @@ public struct SettingsTabView: View {
                 Picker("Surface", selection: $surfaceStyleRawValue) {
                     ForEach(LinkWaveSurfaceStyle.allCases) { style in
                         Text(style.title).tag(style.rawValue)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                Label("Background Art", systemImage: "water.waves")
+                    .font(.caption)
+                    .foregroundStyle(palette.textSecondary.color)
+
+                Picker("Background Art", selection: $backgroundPatternRawValue) {
+                    ForEach(BackgroundPatternID.allCases) { pattern in
+                        Text(pattern.short).tag(pattern.rawValue)
                     }
                 }
                 .labelsHidden()

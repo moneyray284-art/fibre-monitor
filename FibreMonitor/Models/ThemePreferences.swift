@@ -1,6 +1,33 @@
 import SwiftUI
 import UIKit
 
+public enum BackgroundPatternID: String, CaseIterable, Identifiable, Codable {
+    case waves
+    case mesh
+    case rings
+    case none
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .waves: "Harmonic Waves"
+        case .mesh: "Optical Mesh"
+        case .rings: "Topographic Rings"
+        case .none: "Clean Canvas"
+        }
+    }
+
+    public var short: String {
+        switch self {
+        case .waves: "Waves"
+        case .mesh: "Mesh"
+        case .rings: "Rings"
+        case .none: "Off"
+        }
+    }
+}
+
 public struct CodableColor: Codable, Equatable {
     public var red: Double
     public var green: Double

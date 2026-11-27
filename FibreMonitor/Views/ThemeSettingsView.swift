@@ -3,6 +3,7 @@ import SwiftUI
 struct ThemeSettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var settings: SettingsStore
+    @AppStorage("linkwave_bg_pattern") private var backgroundPatternRawValue = BackgroundPatternID.waves.rawValue
     @State private var activeResetAlert: ResetAlertType?
 
     private enum ResetAlertType {
@@ -34,6 +35,7 @@ struct ThemeSettingsView: View {
             VStack(alignment: .leading, spacing: 22) {
                 themesSection
                 accentColorSection
+                backgroundPatternSection
                 backgroundsSection
                 textColorsSection
                 resetSection
@@ -94,6 +96,61 @@ struct ThemeSettingsView: View {
                 colorPickerRow("Secondary", keyPath: \.textSecondary)
                 divider
                 colorPickerRow("Tertiary", keyPath: \.textTertiary)
+            }
+        }
+    }
+
+    private var backgroundPatternSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("BACKGROUND PATTERN")
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                ForEach(BackgroundPatternID.allCases) { pattern in
+                    let isSelected = backgroundPatternRawValue == pattern.rawValue
+                    Button {
+                        Haptics.impact(.light)
+                        backgroundPatternRawValue = pattern.rawValue
+                    } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ZStack(alignment: .topTrailing) {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(palette.backgroundTertiary.opacity(colorScheme == .dark ? 0.48 : 0.52))
+                                BackgroundPatternPreview(pattern: pattern, accentColor: palette.textAccent)
+                                    .padding(3)
+                                if isSelected {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(palette.textAccent)
+                                        .padding(5)
+                                        .background(palette.backgroundSecondary.opacity(0.9), in: Circle())
+                                        .padding(6)
+                                }
+                            }
+                            .frame(height: 68)
+
+                            Text(pattern.title)
+                                .font(.caption.weight(isSelected ? .semibold : .medium))
+                                .foregroundStyle(palette.textPrimary.color)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        }
+                        .padding(9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            isSelected ? palette.textAccent.opacity(0.09) : palette.backgroundSecondary.opacity(0.38),
+                            in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                                .stroke(
+                                    isSelected ? palette.textAccent.opacity(0.42) : palette.textTertiary.color.opacity(0.18),
+                                    lineWidth: isSelected ? 1 : 0.7
+                                )
+                        }
+                        .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
             }
         }
     }

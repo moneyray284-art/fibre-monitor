@@ -1,25 +1,47 @@
 import SwiftUI
 
 struct AmbientWaveArtView: View {
-    enum Variant {
+    enum Variant: Equatable {
         case canvas
         case sheet
     }
 
+    private struct PatternStroke {
+        var path: Path
+        var isPrimary: Bool = false
+        var lineWidth: CGFloat = 0.9
+        var dash: [CGFloat] = []
+    }
+
+    private struct PatternNode {
+        var point: CGPoint
+        var radius: CGFloat
+        var isPrimary: Bool
+        var isFocal: Bool = false
+    }
+
     let variant: Variant
+    let pattern: BackgroundPatternID
+    let accentColor: Color
+    let isPulsing: Bool
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.linkWaveThemePalette) private var palette
     @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var lineColor: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.055)
-            : Color(red: 15.0 / 255.0, green: 23.0 / 255.0, blue: 42.0 / 255.0).opacity(0.055)
-    }
+    private var isSheet: Bool { variant == .sheet }
+    private var effectivePulse: Bool { isPulsing && !reduceMotion }
 
-    private var accentColor: Color {
-        palette.textAccent.opacity(colorScheme == .dark ? 0.12 : 0.095)
+    private var baseStrokeColor: Color {
+        if isSheet {
+            return colorScheme == .dark
+                ? Color.white.opacity(0.065)
+                : Color(red: 15.0 / 255.0, green: 23.0 / 255.0, blue: 42.0 / 255.0).opacity(0.065)
+        }
+        return colorScheme == .dark
+            ? Color.white.opacity(0.075)
+            : Color(red: 15.0 / 255.0, green: 23.0 / 255.0, blue: 42.0 / 255.0).opacity(0.08)
     }
 
     private var darkBaseTintOpacity: Double {
@@ -31,7 +53,20 @@ struct AmbientWaveArtView: View {
         }
     }
 
+    @ViewBuilder
     var body: some View {
+        if pattern == .none {
+            EmptyView()
+        } else if effectivePulse {
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { timeline in
+                artwork(at: timeline.date)
+            }
+        } else {
+            artwork(at: nil)
+        }
+    }
+
+    private func artwork(at date: Date?) -> some View {
         Canvas { context, size in
             if colorScheme == .dark {
                 context.fill(
@@ -40,79 +75,268 @@ struct AmbientWaveArtView: View {
                 )
             }
 
-            switch variant {
-            case .canvas:
-                drawCanvasArt(in: &context, size: size)
-            case .sheet:
-                drawSheetArt(in: &context, size: size)
-            }
+            let strokes = patternStrokes(in: size)
+            let nodes = patternNodes(in: size)
+            draw(strokes: strokes, nodes: nodes, in: &context, at: date)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 
-    private func drawCanvasArt(in context: inout GraphicsContext, size: CGSize) {
-        let w = size.width
-        let h = size.height
-        drawRings(context: &context, center: CGPoint(x: w * 0.91, y: h * 0.12), count: 5, radius: min(w, h) * 0.22, color: lineColor)
-        drawRings(context: &context, center: CGPoint(x: w * 0.08, y: h * 0.83), count: 3, radius: min(w, h) * 0.13, color: lineColor, dashed: true)
-
-        drawWave(context: &context, size: size, y: h * 0.43, amplitude: h * 0.10, color: accentColor, width: 1.15)
-        drawWave(context: &context, size: size, y: h * 0.46, amplitude: h * 0.10, color: lineColor, width: 0.9, dashed: true)
-        drawWave(context: &context, size: size, y: h * 0.49, amplitude: h * 0.10, color: lineColor, width: 0.8)
-        drawWave(context: &context, size: size, y: h * 0.70, amplitude: h * 0.045, color: lineColor.opacity(0.8), width: 0.8)
-        drawWave(context: &context, size: size, y: h * 0.73, amplitude: h * 0.04, color: lineColor.opacity(0.72), width: 0.8, dashed: true)
-
-        drawNode(context: &context, at: CGPoint(x: w * 0.28, y: h * 0.40), radius: 2.2, color: accentColor)
-        drawNode(context: &context, at: CGPoint(x: w * 0.66, y: h * 0.46), radius: 1.7, color: lineColor)
-        drawNode(context: &context, at: CGPoint(x: w * 0.77, y: h * 0.49), radius: 1.6, color: lineColor)
-        drawNode(context: &context, at: CGPoint(x: w * 0.28, y: h * 0.40), radius: 6, color: accentColor, strokeOnly: true)
-    }
-
-    private func drawSheetArt(in context: inout GraphicsContext, size: CGSize) {
-        let w = size.width
-        let h = size.height
-        drawRings(context: &context, center: CGPoint(x: w * 0.90, y: h * 0.10), count: 4, radius: min(w, h) * 0.15, color: lineColor)
-        drawWave(context: &context, size: size, y: h * 0.25, amplitude: h * 0.06, color: accentColor, width: 1)
-        drawWave(context: &context, size: size, y: h * 0.28, amplitude: h * 0.06, color: lineColor, width: 0.85, dashed: true)
-        drawWave(context: &context, size: size, y: h * 0.70, amplitude: h * 0.035, color: lineColor, width: 0.75)
-        drawWave(context: &context, size: size, y: h * 0.73, amplitude: h * 0.032, color: lineColor, width: 0.75, dashed: true)
-        drawNode(context: &context, at: CGPoint(x: w * 0.22, y: h * 0.25), radius: 1.8, color: accentColor)
-        drawNode(context: &context, at: CGPoint(x: w * 0.72, y: h * 0.28), radius: 1.6, color: lineColor)
-        drawNode(context: &context, at: CGPoint(x: w * 0.36, y: h * 0.70), radius: 1.5, color: lineColor)
-    }
-
-    private func drawRings(
-        context: inout GraphicsContext,
-        center: CGPoint,
-        count: Int,
-        radius: CGFloat,
-        color: Color,
-        dashed: Bool = false
+    private func draw(
+        strokes: [PatternStroke],
+        nodes: [PatternNode],
+        in context: inout GraphicsContext,
+        at date: Date?
     ) {
-        for index in 0..<count {
-            let ringRadius = radius * CGFloat(index + 1) / CGFloat(count)
-            let rect = CGRect(x: center.x - ringRadius, y: center.y - ringRadius, width: ringRadius * 2, height: ringRadius * 2)
-            let ring = Path(ellipseIn: rect)
-            let useDash = dashed || index.isMultiple(of: 2)
+        let elapsed = date?.timeIntervalSinceReferenceDate ?? 0
+        let basePulseOpacity = isSheet ? 0.18 : 0.24
+        let primaryPulseOpacity = isSheet ? 0.26 : 0.34
+
+        for (index, stroke) in strokes.enumerated() {
+            let restingColor = stroke.isPrimary ? accentColor.opacity(0.125) : baseStrokeColor
             context.stroke(
-                ring,
-                with: .color(color.opacity(index.isMultiple(of: 2) ? 1 : 0.76)),
-                style: StrokeStyle(lineWidth: 0.8, dash: useDash ? [2, 4] : [])
+                stroke.path,
+                with: .color(restingColor),
+                style: StrokeStyle(lineWidth: stroke.lineWidth, lineCap: .round, dash: stroke.dash)
+            )
+
+            guard effectivePulse, date != nil else { continue }
+            let phase = (elapsed / 2.8 + Double(index) * 0.173).truncatingRemainder(dividingBy: 1)
+            let start = CGFloat(phase)
+            let pulseColor = accentColor.opacity(stroke.isPrimary ? primaryPulseOpacity : basePulseOpacity)
+            let pulseStyle = StrokeStyle(lineWidth: stroke.isPrimary ? 2.2 : 1.5, lineCap: .round)
+            if start + 0.24 <= 1 {
+                context.stroke(
+                    stroke.path.trimmedPath(from: start, to: start + 0.24),
+                    with: .color(pulseColor),
+                    style: pulseStyle
+                )
+            } else {
+                context.stroke(
+                    stroke.path.trimmedPath(from: start, to: 1),
+                    with: .color(pulseColor),
+                    style: pulseStyle
+                )
+                context.stroke(
+                    stroke.path.trimmedPath(from: 0, to: start + 0.24 - 1),
+                    with: .color(pulseColor),
+                    style: pulseStyle
+                )
+            }
+        }
+
+        let nodePulse = 1.10 + 0.14 * sin(elapsed * 2.4)
+        for node in nodes {
+            drawNode(
+                node,
+                radius: node.radius,
+                opacity: node.isPrimary ? 0.18 : 1,
+                in: &context
+            )
+            if effectivePulse && node.isFocal {
+                drawNode(node, radius: node.radius * nodePulse, opacity: 0.36, in: &context)
+            }
+            if node.isFocal {
+                let ringRadius = node.radius * 2.4
+                let ringRect = CGRect(
+                    x: node.point.x - ringRadius,
+                    y: node.point.y - ringRadius,
+                    width: ringRadius * 2,
+                    height: ringRadius * 2
+                )
+                context.stroke(
+                    Path(ellipseIn: ringRect),
+                    with: .color(accentColor.opacity(0.125)),
+                    lineWidth: 0.9
+                )
+            }
+        }
+    }
+
+    private func drawNode(
+        _ node: PatternNode,
+        radius: CGFloat,
+        opacity: Double,
+        in context: inout GraphicsContext
+    ) {
+        let rect = CGRect(
+            x: node.point.x - radius,
+            y: node.point.y - radius,
+            width: radius * 2,
+            height: radius * 2
+        )
+        let color = node.isPrimary
+            ? accentColor.opacity(opacity)
+            : baseStrokeColor
+        context.fill(Path(ellipseIn: rect), with: .color(color))
+    }
+
+    private func patternStrokes(in size: CGSize) -> [PatternStroke] {
+        return switch pattern {
+        case .waves: waveStrokes(in: size)
+        case .mesh: meshStrokes(in: size)
+        case .rings: ringStrokes(in: size)
+        case .none: []
+        }
+    }
+
+    private func patternNodes(in size: CGSize) -> [PatternNode] {
+        return switch pattern {
+        case .waves: waveNodes(in: size)
+        case .mesh: meshNodes(in: size)
+        case .rings: ringNodes(in: size)
+        case .none: []
+        }
+    }
+
+    private func waveStrokes(in size: CGSize) -> [PatternStroke] {
+        let w = size.width
+        let h = size.height
+        let primaryCenter = CGPoint(x: w * 0.91, y: h * 0.12)
+        let echoCenter = CGPoint(x: w * 0.08, y: h * 0.83)
+        var result = ringPaths(center: primaryCenter, count: isSheet ? 4 : 5, radius: min(w, h) * (isSheet ? 0.15 : 0.22))
+        if !isSheet {
+            result += ringPaths(center: echoCenter, count: 3, radius: min(w, h) * 0.13, forceDashed: true)
+        }
+
+        let topY = h * (isSheet ? 0.25 : 0.43)
+        let amplitude = h * (isSheet ? 0.06 : 0.10)
+        result.append(wavePath(size: size, y: topY, amplitude: amplitude, primary: true, width: 1.15))
+        result.append(wavePath(size: size, y: topY + h * 0.035, amplitude: amplitude, dash: [3, 5], width: 0.9))
+        if !isSheet {
+            result.append(wavePath(size: size, y: topY + h * 0.065, amplitude: amplitude, width: 0.8))
+        }
+        result.append(wavePath(size: size, y: h * 0.70, amplitude: h * 0.04, width: 0.8))
+        result.append(wavePath(size: size, y: h * 0.73, amplitude: h * 0.035, dash: [3, 5], width: 0.75))
+        return result
+    }
+
+    private func waveNodes(in size: CGSize) -> [PatternNode] {
+        let w = size.width
+        let h = size.height
+        let focal = CGPoint(x: w * 0.28, y: h * (isSheet ? 0.25 : 0.40))
+        let mainNodes = [
+            PatternNode(point: focal, radius: 2.2, isPrimary: true, isFocal: true),
+            PatternNode(point: CGPoint(x: w * 0.66, y: h * 0.46), radius: 1.7, isPrimary: false),
+            PatternNode(point: CGPoint(x: w * 0.77, y: h * 0.49), radius: 1.6, isPrimary: false),
+            PatternNode(point: CGPoint(x: w * 0.36, y: h * 0.70), radius: 1.5, isPrimary: false)
+        ]
+        return isSheet ? Array(mainNodes.prefix(3)) : mainNodes
+    }
+
+    private func meshStrokes(in size: CGSize) -> [PatternStroke] {
+        let w = size.width
+        let h = size.height
+        let points = meshPoints(in: size)
+        var result: [PatternStroke] = []
+        let canvasEdges: [(Int, Int, Bool)] = [
+            (0, 1, false), (1, 2, true), (2, 3, false), (3, 4, true),
+            (5, 6, true), (6, 7, false), (7, 8, true), (8, 9, false),
+            (0, 5, false), (1, 6, true), (2, 7, false), (3, 8, true), (4, 9, false),
+            (0, 6, true), (2, 6, false), (2, 8, true), (4, 8, false)
+        ]
+        let sheetEdges: [(Int, Int, Bool)] = [
+            (0, 1, false), (1, 2, true), (2, 3, false), (3, 4, true),
+            (5, 6, true), (6, 7, false), (7, 8, true), (8, 9, false),
+            (1, 6, true), (2, 7, false), (3, 8, true), (0, 6, true), (2, 8, true)
+        ]
+        let edges = isSheet ? sheetEdges : canvasEdges
+        for (from, to, dashed) in edges {
+            result.append(linePath(
+                from: points[from],
+                to: points[to],
+                dash: dashed ? [2, 4] : [],
+                width: 0.85
+            ))
+        }
+
+        var backbone = Path()
+        backbone.move(to: CGPoint(x: w * 0.08, y: h * 0.64))
+        backbone.addCurve(
+            to: CGPoint(x: w * 0.91, y: h * 0.28),
+            control1: CGPoint(x: w * 0.34, y: h * 0.14),
+            control2: CGPoint(x: w * 0.60, y: h * 0.88)
+        )
+        result.append(PatternStroke(path: backbone, isPrimary: true, lineWidth: 1.2))
+        return result
+    }
+
+    private func meshNodes(in size: CGSize) -> [PatternNode] {
+        let points = meshPoints(in: size)
+        let visibleIndices = isSheet ? [1, 6, 8] : Array(points.indices)
+        return visibleIndices.map { index in
+            let point = points[index]
+            return PatternNode(
+                point: point,
+                radius: index == 6 ? 2.1 : 1.4,
+                isPrimary: index == 6,
+                isFocal: index == 6
             )
         }
     }
 
-    private func drawWave(
-        context: inout GraphicsContext,
+    private func ringStrokes(in size: CGSize) -> [PatternStroke] {
+        let w = size.width
+        let h = size.height
+        let primary = CGPoint(x: w * 0.80, y: h * (isSheet ? 0.18 : 0.22))
+        let secondary = CGPoint(x: w * 0.19, y: h * (isSheet ? 0.72 : 0.76))
+        var result = ringPaths(center: primary, count: isSheet ? 4 : 6, radius: min(w, h) * (isSheet ? 0.18 : 0.24))
+        result += ringPaths(center: secondary, count: isSheet ? 3 : 4, radius: min(w, h) * (isSheet ? 0.13 : 0.17), forceDashed: true)
+        var axis = Path()
+        axis.move(to: CGPoint(x: w * 0.12, y: h * 0.18))
+        axis.addLine(to: CGPoint(x: w * 0.88, y: h * 0.82))
+        result.append(PatternStroke(path: axis, lineWidth: 0.8, dash: [3, 6]))
+        return result
+    }
+
+    private func ringNodes(in size: CGSize) -> [PatternNode] {
+        [
+            PatternNode(
+                point: CGPoint(x: size.width * 0.80, y: size.height * (isSheet ? 0.18 : 0.22)),
+                radius: 2.2,
+                isPrimary: true,
+                isFocal: true
+            ),
+            PatternNode(
+                point: CGPoint(x: size.width * 0.19, y: size.height * (isSheet ? 0.72 : 0.76)),
+                radius: 1.8,
+                isPrimary: false
+            )
+        ]
+    }
+
+    private func ringPaths(
+        center: CGPoint,
+        count: Int,
+        radius: CGFloat,
+        forceDashed: Bool = false
+    ) -> [PatternStroke] {
+        (0..<count).map { index in
+            let ringRadius = radius * CGFloat(index + 1) / CGFloat(count)
+            let rect = CGRect(
+                x: center.x - ringRadius,
+                y: center.y - ringRadius,
+                width: ringRadius * 2,
+                height: ringRadius * 2
+            )
+            return PatternStroke(
+                path: Path(ellipseIn: rect),
+                lineWidth: 0.8,
+                dash: (forceDashed ? !index.isMultiple(of: 2) : index.isMultiple(of: 2)) ? [2, 4] : []
+            )
+        }
+    }
+
+    private func wavePath(
         size: CGSize,
         y: CGFloat,
         amplitude: CGFloat,
-        color: Color,
-        width: CGFloat,
-        dashed: Bool = false
-    ) {
+        primary: Bool = false,
+        dash: [CGFloat] = [],
+        width: CGFloat
+    ) -> PatternStroke {
         var path = Path()
         path.move(to: CGPoint(x: 0, y: y))
         path.addCurve(
@@ -120,22 +344,42 @@ struct AmbientWaveArtView: View {
             control1: CGPoint(x: size.width * 0.28, y: y - amplitude),
             control2: CGPoint(x: size.width * 0.64, y: y + amplitude * 1.1)
         )
-        context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: width, dash: dashed ? [3, 5] : []))
+        return PatternStroke(path: path, isPrimary: primary, lineWidth: width, dash: dash)
     }
 
-    private func drawNode(
-        context: inout GraphicsContext,
-        at point: CGPoint,
-        radius: CGFloat,
-        color: Color,
-        strokeOnly: Bool = false
-    ) {
-        let rect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
-        let node = Path(ellipseIn: rect)
-        if strokeOnly {
-            context.stroke(node, with: .color(color), lineWidth: 0.9)
-        } else {
-            context.fill(node, with: .color(color))
-        }
+    private func linePath(from start: CGPoint, to end: CGPoint, dash: [CGFloat] = [], width: CGFloat) -> PatternStroke {
+        var path = Path()
+        path.move(to: start)
+        path.addLine(to: end)
+        return PatternStroke(path: path, lineWidth: width, dash: dash)
+    }
+
+    private func meshPoints(in size: CGSize) -> [CGPoint] {
+        let w = size.width
+        let h = size.height
+        return [
+            CGPoint(x: w * 0.06, y: h * 0.30), CGPoint(x: w * 0.27, y: h * 0.16),
+            CGPoint(x: w * 0.49, y: h * 0.30), CGPoint(x: w * 0.73, y: h * 0.14),
+            CGPoint(x: w * 0.95, y: h * 0.31), CGPoint(x: w * 0.08, y: h * 0.70),
+            CGPoint(x: w * 0.30, y: h * 0.55), CGPoint(x: w * 0.53, y: h * 0.75),
+            CGPoint(x: w * 0.76, y: h * 0.57), CGPoint(x: w * 0.93, y: h * 0.76)
+        ]
+    }
+}
+
+struct BackgroundPatternPreview: View {
+    let pattern: BackgroundPatternID
+    let accentColor: Color
+
+    var body: some View {
+        AmbientWaveArtView(
+            variant: .sheet,
+            pattern: pattern,
+            accentColor: accentColor,
+            isPulsing: false
+        )
+        .frame(height: 62)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .accessibilityHidden(true)
     }
 }

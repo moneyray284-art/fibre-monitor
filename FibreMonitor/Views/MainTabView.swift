@@ -22,8 +22,6 @@ public struct MainTabView: View {
 
     public var body: some View {
         ZStack {
-            AmbientWaveArtView(variant: .canvas)
-
             TabView(selection: $viewModel.selectedTab) {
                 DashboardView(viewModel: viewModel)
                     .tabItem {
@@ -63,6 +61,7 @@ public struct MainTabView: View {
         .environment(\.linkWaveThemePalette, activeThemePalette)
         .environment(\.linkWaveLogoColor, settings.logoColor.color(for: effectiveColorScheme))
         .environment(\.linkWaveSurfaceStyle, surfaceStyle)
+        .environment(\.linkWaveBackgroundIsPulsing, isBackgroundPulsing)
         .foregroundStyle(activeThemePalette.textPrimary.color)
         .statusBarHidden(isLaunchAnimationVisible)
         .sheet(isPresented: routerPickerBinding) {
@@ -149,6 +148,10 @@ public struct MainTabView: View {
 
     private var surfaceStyle: LinkWaveSurfaceStyle {
         LinkWaveSurfaceStyle(rawValue: surfaceStyleRawValue) ?? .liquidGlass
+    }
+
+    private var isBackgroundPulsing: Bool {
+        viewModel.isRefreshing || viewModel.isSpeedTestRunning || viewModel.isDiagnosing
     }
 
     private var routerPickerBinding: Binding<Bool> {

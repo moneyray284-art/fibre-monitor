@@ -21,10 +21,19 @@ private struct LinkWaveSurfaceStyleKey: EnvironmentKey {
     static let defaultValue: LinkWaveSurfaceStyle = .liquidGlass
 }
 
+private struct LinkWaveBackgroundPulseKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     var linkWaveSurfaceStyle: LinkWaveSurfaceStyle {
         get { self[LinkWaveSurfaceStyleKey.self] }
         set { self[LinkWaveSurfaceStyleKey.self] = newValue }
+    }
+
+    var linkWaveBackgroundIsPulsing: Bool {
+        get { self[LinkWaveBackgroundPulseKey.self] }
+        set { self[LinkWaveBackgroundPulseKey.self] = newValue }
     }
 }
 
@@ -171,6 +180,8 @@ public struct LiquidGlassBackground: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.linkWaveThemePalette) private var palette
     @Environment(\.linkWaveSurfaceStyle) private var surfaceStyle
+    @Environment(\.linkWaveBackgroundIsPulsing) private var isPulsing
+    @AppStorage("linkwave_bg_pattern") private var patternRawValue = BackgroundPatternID.waves.rawValue
     private let artVariant: AmbientWaveArtView.Variant
 
     public init(isSheet: Bool = false) {
@@ -187,7 +198,12 @@ public struct LiquidGlassBackground: View {
                     palette.backgroundPrimary
                 }
 
-                AmbientWaveArtView(variant: artVariant)
+                AmbientWaveArtView(
+                    variant: artVariant,
+                    pattern: BackgroundPatternID(rawValue: patternRawValue) ?? .waves,
+                    accentColor: palette.textAccent,
+                    isPulsing: isPulsing
+                )
 
                 if surfaceStyle != .cleanSolid {
                     ZStack(alignment: .top) {
