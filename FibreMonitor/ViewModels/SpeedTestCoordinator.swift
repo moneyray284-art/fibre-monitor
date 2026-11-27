@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 @MainActor
-final class SpeedTestCoordinator: ObservableObject {
+public final class SpeedTestCoordinator: ObservableObject {
     private struct MetricsSnapshot {
         var pingMs: Double?
         var jitterMs: Double?
@@ -32,7 +32,7 @@ final class SpeedTestCoordinator: ObservableObject {
     private var smoothedUploadMbps = 0.0
     private var speedScaleMax = 120.0
 
-    init(viewModel: MonitorViewModel) {
+    public init(viewModel: MonitorViewModel) {
         self.viewModel = viewModel
     }
 
