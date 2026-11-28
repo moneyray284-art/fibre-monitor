@@ -146,11 +146,22 @@ jobs:
           ls -lh "$LINKWAVE_IPA_NAME"
 
       - name: Upload IPA Artifact
+        id: upload_ipa
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: LinkWave-${{ env.LINKWAVE_VERSION }}-IPA
+          path: ${{ env.LINKWAVE_IPA_PATH }}
+          retention-days: 30
+
+      - name: Retry IPA Artifact Upload
+        if: steps.upload_ipa.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: LinkWave-${{ env.LINKWAVE_VERSION }}-IPA
           path: ${{ env.LINKWAVE_IPA_PATH }}
           retention-days: 30
+          overwrite: true
 
       - name: Create GitHub Release
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' }}
