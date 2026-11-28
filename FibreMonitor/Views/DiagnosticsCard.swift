@@ -3,6 +3,7 @@ import SwiftUI
 /// Ping and traceroute run by the router itself, like its Diagnostics page.
 struct DiagnosticsCard: View {
     @ObservedObject var viewModel: MonitorViewModel
+    @Environment(\.linkWaveThemePalette) private var palette
 
     private let quickTargets = ["8.8.8.8", "1.1.1.1", "google.com"]
 
@@ -52,7 +53,7 @@ struct DiagnosticsCard: View {
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
-            .liquidGlassActionButton(tint: viewModel.isDiagnosing ? .red : .accentColor)
+            .liquidGlassActionButton(tint: viewModel.isDiagnosing ? .red : palette.textAccent)
             .disabled(!viewModel.isConnected || viewModel.diagnosticHost.trimmingCharacters(in: .whitespaces).isEmpty)
 
             if !viewModel.diagnosticOutput.text.isEmpty {
@@ -61,13 +62,13 @@ struct DiagnosticsCard: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(viewModel.diagnosticOutput.text)
                                 .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.green)
+                                .foregroundColor(palette.textAccent)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .textSelection(.enabled)
                             if let status = viewModel.diagnosticOutput.status {
                                 Text(status == "Complete" ? "Done" : status.replacingOccurrences(of: "_", with: " "))
                                     .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                    .foregroundColor(status == "Complete" ? .green : .orange)
+                                    .foregroundColor(status == "Complete" ? palette.textAccent : .orange)
                             }
                             Color.clear.frame(height: 1).id("end")
                         }
@@ -83,6 +84,6 @@ struct DiagnosticsCard: View {
                 }
             }
         }
-        .liquidGlassCard()
+        .linkWaveGlassCard()
     }
 }

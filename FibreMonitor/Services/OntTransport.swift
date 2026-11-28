@@ -10,16 +10,25 @@ public struct OntRequest: Equatable, Sendable {
     public var form: [(String, String)]
     /// Adds `X-Requested-With: XMLHttpRequest` like the web UI's AJAX calls.
     public var ajax: Bool
+    /// Optional per-request override, used for router writes that restart the WLAN radio.
+    public var timeoutInterval: TimeInterval?
 
-    public init(_ method: Method, _ path: String, form: [(String, String)] = [], ajax: Bool = true) {
+    public init(
+        _ method: Method,
+        _ path: String,
+        form: [(String, String)] = [],
+        ajax: Bool = true,
+        timeoutInterval: TimeInterval? = nil
+    ) {
         self.method = method
         self.path = path
         self.form = form
         self.ajax = ajax
+        self.timeoutInterval = timeoutInterval
     }
 
     public static func == (a: OntRequest, b: OntRequest) -> Bool {
-        a.method == b.method && a.path == b.path && a.ajax == b.ajax
+        a.method == b.method && a.path == b.path && a.ajax == b.ajax && a.timeoutInterval == b.timeoutInterval
             && a.form.map { $0.0 } == b.form.map { $0.0 } && a.form.map { $0.1 } == b.form.map { $0.1 }
     }
 
@@ -37,20 +46,34 @@ public struct OntRequest: Equatable, Sendable {
 
 /// Seam between the client and the network so tests can script router replies.
 public protocol OntTransport: Sendable {
+    var requiresWiFiForRouterRequests: Bool { get }
     func send(_ request: OntRequest, host: String) async throws -> String
     /// Drops cookies and sets the pre-login cookie the web UI's login page sets.
     func resetSession(host: String) async
+    /// Rejects router requests when the device is not connected through Wi-Fi.
+    func validateRouterNetwork() async throws
+    /// Cancels pending requests when Wi-Fi is lost.
+    func cancelPendingRequests() async
+}
+
+public extension OntTransport {
+    var requiresWiFiForRouterRequests: Bool { false }
+    func validateRouterNetwork() async throws {}
+    func cancelPendingRequests() async {}
 }
 
 public final class URLSessionOntTransport: OntTransport, @unchecked Sendable {
+    public var requiresWiFiForRouterRequests: Bool { true }
+
     private let session: URLSession
     private let cookies: HTTPCookieStorage
 
     public init() {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
-        config.timeoutIntervalForResource = 20
-        config.waitsForConnectivity = false
+        config.timeoutIntervalForResource = 12
+        config.waitsForConnectivity = true
+        config.allowsCellularAccess = false
         config.httpCookieAcceptPolicy = .always
         config.httpShouldSetCookies = true
         self.cookies = config.httpCookieStorage ?? HTTPCookieStorage.shared
@@ -72,9 +95,11 @@ public final class URLSessionOntTransport: OntTransport, @unchecked Sendable {
     }
 
     public func send(_ request: OntRequest, host: String) async throws -> String {
+        try await validateRouterNetwork()
         guard let url = URL(string: "http://\(host)\(request.path)") else { throw URLError(.badURL) }
         var r = URLRequest(url: url)
         r.httpMethod = request.method.rawValue
+        if let timeoutInterval = request.timeoutInterval { r.timeoutInterval = timeoutInterval }
         r.cachePolicy = .reloadIgnoringLocalCacheData
         r.setValue("http://\(host)", forHTTPHeaderField: "Origin")
         r.setValue("http://\(host)/", forHTTPHeaderField: "Referer")
@@ -88,5 +113,20 @@ public final class URLSessionOntTransport: OntTransport, @unchecked Sendable {
             throw URLError(.badServerResponse)
         }
         return String(decoding: data, as: UTF8.self)
+    }
+
+    public func validateRouterNetwork() async throws {
+        guard NetworkMonitor.shared.routerRequestsAllowed else {
+            throw URLError(.notConnectedToInternet)
+        }
+    }
+
+    public func cancelPendingRequests() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            session.getAllTasks { tasks in
+                tasks.forEach { $0.cancel() }
+                continuation.resume()
+            }
+        }
     }
 }

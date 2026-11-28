@@ -1,5 +1,184 @@
 import Foundation
 import Security
+import SwiftUI
+
+public enum AppTheme: String, CaseIterable, Identifiable, Hashable {
+    case system
+    case light
+    case dark
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    public var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
+public enum AppAccentColor: String, CaseIterable, Identifiable, Hashable {
+    case blue
+    case cyan
+    case green
+    case purple
+    case orange
+
+    public var id: String { rawValue }
+    public var title: String { rawValue.capitalized }
+
+    public var color: Color {
+        switch self {
+        case .blue: .blue
+        case .cyan: Color(red: 0.055, green: 0.647, blue: 0.780)
+        case .green: .green
+        case .purple: .purple
+        case .orange: .orange
+        }
+    }
+}
+
+public enum AppLogoColorChoice: String, CaseIterable, Identifiable, Hashable {
+    case cyan
+    case sky
+    case mint
+    case emerald
+    case indigo
+    case violet
+    case rose
+    case amber
+
+    public var id: String { rawValue }
+    public var title: String { rawValue.capitalized }
+
+    public func color(for scheme: ColorScheme) -> Color {
+        switch (self, scheme) {
+        case (.cyan, .dark): Color(red: 34.0 / 255.0, green: 211.0 / 255.0, blue: 238.0 / 255.0)
+        case (.cyan, _): Color(red: 14.0 / 255.0, green: 116.0 / 255.0, blue: 144.0 / 255.0)
+        case (.sky, .dark): Color(red: 56.0 / 255.0, green: 189.0 / 255.0, blue: 248.0 / 255.0)
+        case (.sky, _): Color(red: 2.0 / 255.0, green: 132.0 / 255.0, blue: 199.0 / 255.0)
+        case (.mint, .dark): Color(red: 45.0 / 255.0, green: 212.0 / 255.0, blue: 191.0 / 255.0)
+        case (.mint, _): Color(red: 15.0 / 255.0, green: 118.0 / 255.0, blue: 110.0 / 255.0)
+        case (.emerald, .dark): Color(red: 52.0 / 255.0, green: 211.0 / 255.0, blue: 153.0 / 255.0)
+        case (.emerald, _): Color(red: 5.0 / 255.0, green: 150.0 / 255.0, blue: 105.0 / 255.0)
+        case (.indigo, .dark): Color(red: 129.0 / 255.0, green: 140.0 / 255.0, blue: 248.0 / 255.0)
+        case (.indigo, _): Color(red: 67.0 / 255.0, green: 56.0 / 255.0, blue: 202.0 / 255.0)
+        case (.violet, .dark): Color(red: 167.0 / 255.0, green: 139.0 / 255.0, blue: 250.0 / 255.0)
+        case (.violet, _): Color(red: 109.0 / 255.0, green: 40.0 / 255.0, blue: 217.0 / 255.0)
+        case (.rose, .dark): Color(red: 251.0 / 255.0, green: 113.0 / 255.0, blue: 133.0 / 255.0)
+        case (.rose, _): Color(red: 190.0 / 255.0, green: 18.0 / 255.0, blue: 60.0 / 255.0)
+        case (.amber, .dark): Color(red: 251.0 / 255.0, green: 191.0 / 255.0, blue: 36.0 / 255.0)
+        case (.amber, _): Color(red: 180.0 / 255.0, green: 83.0 / 255.0, blue: 9.0 / 255.0)
+        }
+    }
+
+    public var accentColor: AppAccentColor {
+        switch self {
+        case .cyan: .cyan
+        case .sky: .blue
+        case .mint: .green
+        case .emerald: .green
+        case .indigo: .blue
+        case .violet: .purple
+        case .rose: .orange
+        case .amber: .orange
+        }
+    }
+}
+
+public enum AppIconChoice: String, CaseIterable, Identifiable, Hashable {
+    case launchArcs
+    case monogramI
+    case arcsI
+    case linkRing
+    case wavefrontW
+    case classic
+
+    // Keep old stored values available for migration and automatic theme matching.
+    case orange
+    case blue
+    case purple
+    case green
+
+    public static var allCases: [AppIconChoice] {
+        [.launchArcs, .monogramI, .arcsI, .linkRing, .wavefrontW, .classic]
+    }
+
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .launchArcs: "Arcs"
+        case .monogramI: "Link i"
+        case .arcsI: "Arcs + i"
+        case .linkRing: "Link Ring"
+        case .wavefrontW: "Wave W"
+        case .classic: "Classic"
+        case .orange: "Orange"
+        case .blue: "Blue"
+        case .purple: "Purple"
+        case .green: "Green"
+        }
+    }
+
+    public var alternateIconName: String? {
+        switch self {
+        case .launchArcs: "AppIconLaunchArcs"
+        case .monogramI: "AppIconMonogramI"
+        case .arcsI: "AppIconArcsI"
+        case .linkRing: "AppIconLinkRing"
+        case .wavefrontW: "AppIconWavefrontW"
+        case .classic: nil
+        case .orange: "AppIconOrange"
+        case .blue: "AppIconBlue"
+        case .purple: "AppIconPurple"
+        case .green: "AppIconGreen"
+        }
+    }
+
+    public func alternateIconName(logoColor: AppLogoColorChoice) -> String? {
+        let design = pickerEquivalent
+        let prefix: String
+        switch design {
+        case .launchArcs: prefix = "AppIconLaunchArcs"
+        case .monogramI: prefix = "AppIconMonogramI"
+        case .arcsI: prefix = "AppIconArcsI"
+        case .linkRing: prefix = "AppIconLinkRing"
+        case .wavefrontW: prefix = "AppIconWavefrontW"
+        case .classic: return nil
+        case .orange, .blue, .purple, .green: return nil
+        }
+        return "\(prefix)\(logoColor.title)"
+    }
+
+    public var pickerEquivalent: AppIconChoice {
+        switch self {
+        case .orange: .monogramI
+        case .blue: .arcsI
+        case .purple: .linkRing
+        case .green: .wavefrontW
+        default: self
+        }
+    }
+
+    public static func matching(_ accent: AppAccentColor) -> AppIconChoice {
+        switch accent {
+        case .blue: .arcsI
+        case .cyan: .launchArcs
+        case .green: .wavefrontW
+        case .purple: .linkRing
+        case .orange: .monogramI
+        }
+    }
+}
 
 /// Seam around Keychain password storage so unit tests can inspect per-profile accounts.
 public protocol PasswordStore {
@@ -58,7 +237,20 @@ public final class SettingsStore: ObservableObject {
         static let profiles = "router_profiles"
         static let activeProfileId = "active_router_profile_id"
         static let profileAliases = "profile_device_aliases"
-        static let pollInterval = "poll_interval_seconds"
+        static let theme = "app_theme"
+        static let accentColor = "app_accent_color"
+        static let logoColor = "app_logo_color_v1"
+        // Legacy shared key; retained for migration to per-appearance preset keys.
+        static let themePreset = "app_theme_palette_preset_v1"
+        static let lightPreset = "app_theme_palette_light_preset_v1"
+        static let darkPreset = "app_theme_palette_dark_preset_v1"
+        static let lightThemePalette = "app_theme_palette_light_v1"
+        static let darkThemePalette = "app_theme_palette_dark_v1"
+        static let hapticLevel = "app_haptic_level_v1"
+        static let appIconChoice = "app_icon_choice"
+        static let autoMatchAppIcon = "auto_match_app_icon"
+        static let dataUsage = "data_usage_v1"
+        static let sharedDailyUsage = "linkwave.daily_usage.history.v1"
         static let migrated = "v2_profiles_migrated"
 
         // Legacy 1.x keys
@@ -69,23 +261,226 @@ public final class SettingsStore: ObservableObject {
     }
 
     private let defaults: UserDefaults
+    private let sharedDefaults: UserDefaults
     private let passwordStore: PasswordStore
+    private var usageByProfile: [String: ProfileUsage] = [:]
+    private var isApplyingBatchUpdate = false
 
     @Published public private(set) var profiles: [RouterProfile] = []
+    /// Publishes in-app credential writes, including Keychain updates, to the shared router model.
+    @Published public private(set) var routerCredentialsRevision: UInt64 = 0
     @Published public var activeProfileId: UUID? {
-        didSet { saveActiveProfileId() }
+        didSet {
+            saveActiveProfileId()
+            refreshDataUsageSummary()
+        }
     }
-    @Published public var pollIntervalSeconds: Int {
-        didSet { defaults.set(pollIntervalSeconds, forKey: Keys.pollInterval) }
+    @Published public var theme: AppTheme {
+        didSet { defaults.set(theme.rawValue, forKey: Keys.theme) }
     }
+    @Published public var logoColor: AppLogoColorChoice {
+        didSet { defaults.set(logoColor.rawValue, forKey: Keys.logoColor) }
+    }
+    @Published public var accentColor: AppAccentColor {
+        didSet { defaults.set(accentColor.rawValue, forKey: Keys.accentColor) }
+    }
+    @Published public var lightPreset: AppThemePreset? {
+        didSet { defaults.set(lightPreset?.rawValue ?? "custom", forKey: Keys.lightPreset) }
+    }
+    @Published public var darkPreset: AppThemePreset? {
+        didSet { defaults.set(darkPreset?.rawValue ?? "custom", forKey: Keys.darkPreset) }
+    }
+    @Published public var lightThemePalette: ThemePalette {
+        didSet { saveThemePalette(lightThemePalette, forKey: Keys.lightThemePalette) }
+    }
+    @Published public var darkThemePalette: ThemePalette {
+        didSet { saveThemePalette(darkThemePalette, forKey: Keys.darkThemePalette) }
+    }
+    @Published public var hapticLevel: HapticLevel {
+        didSet { defaults.set(hapticLevel.rawValue, forKey: Keys.hapticLevel) }
+    }
+    @Published public var appIconChoice: AppIconChoice {
+        didSet { defaults.set(appIconChoice.rawValue, forKey: Keys.appIconChoice) }
+    }
+    @Published public var autoMatchAppIconToAccentColor: Bool {
+        didSet { defaults.set(autoMatchAppIconToAccentColor, forKey: Keys.autoMatchAppIcon) }
+    }
+    @Published public private(set) var dataUsageSummary = DataUsageSummary()
+    /// Changes only when daily history changes; chart views can observe this small token
+    /// without comparing the full history array during each scrub update.
+    public private(set) var usageHistoryRevision = 0
     @Published public private(set) var profileAliases: [String: [String: String]] = [:]
 
-    public init(defaults: UserDefaults = .standard, passwordStore: PasswordStore = SystemKeychainStore()) {
+    private struct ProfileUsage: Codable {
+        struct Day: Codable {
+            var downloadBytes: UInt64 = 0
+            var uploadBytes: UInt64 = 0
+
+            init(downloadBytes: UInt64 = 0, uploadBytes: UInt64 = 0) {
+                self.downloadBytes = downloadBytes
+                self.uploadBytes = uploadBytes
+            }
+
+            private enum CodingKeys: String, CodingKey { case downloadBytes, uploadBytes }
+
+            init(from decoder: Decoder) throws {
+                let values = try decoder.container(keyedBy: CodingKeys.self)
+                downloadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .downloadBytes)) ?? 0
+                uploadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .uploadBytes)) ?? 0
+            }
+        }
+
+        var lastDownloadCounter: UInt64?
+        var lastUploadCounter: UInt64?
+        var totalDownloadBytes: UInt64 = 0
+        var totalUploadBytes: UInt64 = 0
+        var days: [String: Day] = [:]
+        var chartStartDayKey: String?
+        // Optional so data saved by earlier versions still decodes.
+        var lastCounterSampleAt: Date?
+        var lastSuccessfulSyncAt: Date?
+        var observedDayKeys: [String]?
+        var incompleteDayKeys: [String]?
+        var partialTrackingVersion: Int?
+        var lastConnectionObservationAt: Date?
+        var connectionInterruptions: [ConnectionInterruption]?
+
+        init() { }
+
+        private enum CodingKeys: String, CodingKey {
+            case lastDownloadCounter, lastUploadCounter, totalDownloadBytes, totalUploadBytes, days
+            case chartStartDayKey, lastCounterSampleAt, lastSuccessfulSyncAt, observedDayKeys
+            case incompleteDayKeys, partialTrackingVersion, lastConnectionObservationAt, connectionInterruptions
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            lastDownloadCounter = try? values.decodeIfPresent(UInt64.self, forKey: .lastDownloadCounter)
+            lastUploadCounter = try? values.decodeIfPresent(UInt64.self, forKey: .lastUploadCounter)
+            totalDownloadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .totalDownloadBytes)) ?? 0
+            totalUploadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .totalUploadBytes)) ?? 0
+            days = (try? values.decodeIfPresent([String: Day].self, forKey: .days)) ?? [:]
+            chartStartDayKey = try? values.decodeIfPresent(String.self, forKey: .chartStartDayKey)
+            lastCounterSampleAt = try? values.decodeIfPresent(Date.self, forKey: .lastCounterSampleAt)
+            lastSuccessfulSyncAt = try? values.decodeIfPresent(Date.self, forKey: .lastSuccessfulSyncAt)
+            observedDayKeys = try? values.decodeIfPresent([String].self, forKey: .observedDayKeys)
+            incompleteDayKeys = try? values.decodeIfPresent([String].self, forKey: .incompleteDayKeys)
+            partialTrackingVersion = try? values.decodeIfPresent(Int.self, forKey: .partialTrackingVersion)
+            lastConnectionObservationAt = try? values.decodeIfPresent(Date.self, forKey: .lastConnectionObservationAt)
+            connectionInterruptions = try? values.decodeIfPresent([ConnectionInterruption].self, forKey: .connectionInterruptions)
+        }
+    }
+
+    private struct SharedDailyUsageHistory: Codable {
+        struct Day: Codable {
+            var downloadBytes: UInt64
+            var uploadBytes: UInt64
+
+            init(downloadBytes: UInt64, uploadBytes: UInt64) {
+                self.downloadBytes = downloadBytes
+                self.uploadBytes = uploadBytes
+            }
+
+            private enum CodingKeys: String, CodingKey { case downloadBytes, uploadBytes }
+
+            init(from decoder: Decoder) throws {
+                let values = try decoder.container(keyedBy: CodingKeys.self)
+                downloadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .downloadBytes)) ?? 0
+                uploadBytes = (try? values.decodeIfPresent(UInt64.self, forKey: .uploadBytes)) ?? 0
+            }
+        }
+
+        struct Profile: Codable {
+            var chartStartDayKey: String?
+            var days: [String: Day]
+
+            init(chartStartDayKey: String?, days: [String: Day]) {
+                self.chartStartDayKey = chartStartDayKey
+                self.days = days
+            }
+
+            private enum CodingKeys: String, CodingKey { case chartStartDayKey, days }
+
+            init(from decoder: Decoder) throws {
+                let values = try decoder.container(keyedBy: CodingKeys.self)
+                chartStartDayKey = try? values.decodeIfPresent(String.self, forKey: .chartStartDayKey)
+                days = (try? values.decodeIfPresent([String: Day].self, forKey: .days)) ?? [:]
+            }
+        }
+
+        var profiles: [String: Profile]
+
+        init(profiles: [String: Profile]) {
+            self.profiles = profiles
+        }
+
+        private enum CodingKeys: String, CodingKey { case profiles }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            profiles = (try? values.decodeIfPresent([String: Profile].self, forKey: .profiles)) ?? [:]
+        }
+    }
+
+    public init(
+        defaults: UserDefaults = .standard,
+        passwordStore: PasswordStore = SystemKeychainStore(),
+        sharedDefaults: UserDefaults? = nil
+    ) {
         self.defaults = defaults
+        if let sharedDefaults {
+            self.sharedDefaults = sharedDefaults
+        } else if defaults === UserDefaults.standard {
+            self.sharedDefaults = UserDefaults(suiteName: RouterSnapshotCache.appGroupID) ?? defaults
+        } else {
+            self.sharedDefaults = defaults
+        }
         self.passwordStore = passwordStore
 
-        let interval = defaults.integer(forKey: Keys.pollInterval)
-        self.pollIntervalSeconds = interval > 0 ? interval : 2
+        self.theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .system
+        let accentColor = AppAccentColor(rawValue: defaults.string(forKey: Keys.accentColor) ?? "") ?? .cyan
+        self.accentColor = accentColor
+        let logoColor = AppLogoColorChoice(rawValue: defaults.string(forKey: Keys.logoColor) ?? "") ?? .cyan
+        self.logoColor = logoColor
+        let autoMatchAppIcon = defaults.object(forKey: Keys.autoMatchAppIcon) as? Bool ?? true
+        self.autoMatchAppIconToAccentColor = autoMatchAppIcon
+        let savedIcon = AppIconChoice(rawValue: defaults.string(forKey: Keys.appIconChoice) ?? "") ?? .classic
+        self.appIconChoice = savedIcon.pickerEquivalent
+        let savedPresetKey = defaults.string(forKey: Keys.themePreset)
+        let preset = savedPresetKey.flatMap(AppThemePreset.init(rawValue:)) ?? .linkWaveDefault
+        let savedLightPalette = Self.loadThemePalette(forKey: Keys.lightThemePalette, from: defaults)
+        let savedDarkPalette = Self.loadThemePalette(forKey: Keys.darkThemePalette, from: defaults)
+        let oldAccentWasSaved = defaults.string(forKey: Keys.accentColor) != nil
+        let isLegacyCustomPalette = savedPresetKey == "custom"
+            || (savedPresetKey == nil && (savedLightPalette != nil || savedDarkPalette != nil || oldAccentWasSaved))
+        let legacyFallbackPreset = isLegacyCustomPalette ? nil : preset
+        self.lightPreset = Self.loadThemePreset(
+            forKey: Keys.lightPreset,
+            from: defaults,
+            legacyFallback: legacyFallbackPreset
+        )
+        self.darkPreset = Self.loadThemePreset(
+            forKey: Keys.darkPreset,
+            from: defaults,
+            legacyFallback: legacyFallbackPreset
+        )
+        var lightPalette = savedLightPalette ?? preset.lightPalette
+        var darkPalette = savedDarkPalette ?? preset.darkPalette
+        if oldAccentWasSaved && savedPresetKey == nil && savedLightPalette == nil {
+            lightPalette.accent = CodableColor(color: accentColor.color)
+        }
+        if oldAccentWasSaved && savedPresetKey == nil && savedDarkPalette == nil {
+            darkPalette.accent = CodableColor(color: accentColor.color)
+        }
+        self.lightThemePalette = lightPalette
+        self.darkThemePalette = darkPalette
+        defaults.set(logoColor.rawValue, forKey: Keys.logoColor)
+        self.hapticLevel = HapticLevel(rawValue: defaults.string(forKey: Keys.hapticLevel) ?? "") ?? .light
+        if let data = defaults.data(forKey: Keys.dataUsage),
+           let decoded = try? JSONDecoder().decode([String: ProfileUsage].self, from: data) {
+            self.usageByProfile = decoded
+        }
+        mergeSharedDailyUsageHistory()
 
         if defaults.bool(forKey: Keys.migrated) || defaults.data(forKey: Keys.profiles) != nil {
             if let data = defaults.data(forKey: Keys.profiles),
@@ -103,6 +498,7 @@ public final class SettingsStore: ObservableObject {
         } else {
             migrateFromV1()
         }
+        refreshDataUsageSummary()
     }
 
     public var activeProfile: RouterProfile? {
@@ -124,6 +520,12 @@ public final class SettingsStore: ObservableObject {
         activeProfile != nil && !host.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
     }
 
+    public var connectionHistory: [ConnectionInterruption] {
+        guard let profileId = activeProfile?.id,
+              let events = usageByProfile[profileId.uuidString]?.connectionInterruptions else { return [] }
+        return events.sorted { $0.startedAt > $1.startedAt }
+    }
+
     public var credentials: HuaweiOntClient.Credentials {
         .init(
             host: host.trimmingCharacters(in: .whitespaces),
@@ -132,12 +534,176 @@ public final class SettingsStore: ObservableObject {
         )
     }
 
+    public func themePalette(for scheme: ColorScheme) -> ThemePalette {
+        var palette = scheme == .dark ? darkThemePalette : lightThemePalette
+        guard scheme == .light, activePreset(for: scheme) != nil else { return palette }
+
+        // Built-in Light presets use a shared high-contrast ink scale; custom palettes keep
+        // the exact text colors selected by the user.
+        palette.textPrimary = CodableColor(red: 0.0431, green: 0.0706, blue: 0.1255)
+        palette.textSecondary = CodableColor(red: 0.2784, green: 0.3333, blue: 0.4118)
+        palette.textTertiary = CodableColor(red: 0.3922, green: 0.4549, blue: 0.5451)
+        return palette
+    }
+
+    public func setLogoColor(_ choice: AppLogoColorChoice) {
+        guard logoColor != choice else { return }
+        withAnimation(.easeInOut(duration: 0.25)) {
+            logoColor = choice
+        }
+    }
+
+    public func activePreset(for scheme: ColorScheme) -> AppThemePreset? {
+        scheme == .dark ? darkPreset : lightPreset
+    }
+
+    public func setThemeColor(
+        _ color: Color,
+        for keyPath: WritableKeyPath<ThemePalette, CodableColor>,
+        scheme: ColorScheme
+    ) {
+        guard !isApplyingBatchUpdate else { return }
+        var palette = themePalette(for: scheme)
+        palette[keyPath: keyPath] = CodableColor(color: color)
+        if scheme == .dark {
+            darkThemePalette = palette
+        } else {
+            lightThemePalette = palette
+        }
+
+        if scheme == .dark {
+            darkPreset = nil
+        } else {
+            lightPreset = nil
+        }
+        if keyPath == \ThemePalette.accent {
+            accentColor = AppAccentColor.closest(to: color)
+            if autoMatchAppIconToAccentColor {
+                if scheme == .dark {
+                    var light = lightThemePalette
+                    light.accent = CodableColor(color: color)
+                    lightThemePalette = light
+                    lightPreset = nil
+                } else {
+                    var dark = darkThemePalette
+                    dark.accent = CodableColor(color: color)
+                    darkThemePalette = dark
+                    darkPreset = nil
+                }
+            }
+        }
+    }
+
+    public func setAutoMatchAccentTheme(_ enabled: Bool, sourceScheme: ColorScheme) {
+        guard autoMatchAppIconToAccentColor != enabled else { return }
+        autoMatchAppIconToAccentColor = enabled
+        guard enabled else { return }
+
+        let sourceAccent = themePalette(for: sourceScheme).accent
+        if sourceScheme == .dark {
+            var light = lightThemePalette
+            light.accent = sourceAccent
+            lightThemePalette = light
+            lightPreset = nil
+        } else {
+            var dark = darkThemePalette
+            dark.accent = sourceAccent
+            darkThemePalette = dark
+            darkPreset = nil
+        }
+        accentColor = AppAccentColor.closest(to: sourceAccent.color)
+    }
+
+    public func applyThemePreset(_ preset: AppThemePreset, for scheme: ColorScheme) {
+        isApplyingBatchUpdate = true
+        withAnimation(.easeInOut(duration: 0.25)) {
+            let activePalette = scheme == .dark ? preset.darkPalette : preset.lightPalette
+            if scheme == .dark {
+                darkThemePalette = activePalette
+                darkPreset = preset
+            } else {
+                lightThemePalette = activePalette
+                lightPreset = preset
+            }
+            accentColor = AppAccentColor.closest(to: activePalette.accent.color)
+            if autoMatchAppIconToAccentColor {
+                if scheme == .dark {
+                    var light = lightThemePalette
+                    light.accent = activePalette.accent
+                    lightThemePalette = light
+                    lightPreset = nil
+                } else {
+                    var dark = darkThemePalette
+                    dark.accent = activePalette.accent
+                    darkThemePalette = dark
+                    darkPreset = nil
+                }
+            }
+        }
+        isApplyingBatchUpdate = false
+    }
+
+    public func resetLightTheme() {
+        isApplyingBatchUpdate = true
+        withAnimation(.easeInOut(duration: 0.25)) {
+            lightThemePalette = AppThemePreset.linkWaveDefault.lightPalette
+            lightPreset = .linkWaveDefault
+            accentColor = AppAccentColor.closest(to: lightThemePalette.accent.color)
+        }
+        isApplyingBatchUpdate = false
+    }
+
+    public func resetDarkTheme() {
+        isApplyingBatchUpdate = true
+        withAnimation(.easeInOut(duration: 0.25)) {
+            darkThemePalette = AppThemePreset.linkWaveDefault.darkPalette
+            darkPreset = .linkWaveDefault
+            accentColor = AppAccentColor.closest(to: darkThemePalette.accent.color)
+        }
+        isApplyingBatchUpdate = false
+    }
+
+    public func resetEverything() {
+        isApplyingBatchUpdate = true
+        withAnimation(.easeInOut(duration: 0.25)) {
+            logoColor = .cyan
+            lightThemePalette = AppThemePreset.linkWaveDefault.lightPalette
+            darkThemePalette = AppThemePreset.linkWaveDefault.darkPalette
+            lightPreset = .linkWaveDefault
+            darkPreset = .linkWaveDefault
+            accentColor = AppAccentColor.closest(to: AppThemePreset.linkWaveDefault.lightPalette.accent.color)
+            hapticLevel = .light
+        }
+        isApplyingBatchUpdate = false
+    }
+
+    private func saveThemePalette(_ palette: ThemePalette, forKey key: String) {
+        guard let data = try? JSONEncoder().encode(palette) else { return }
+        defaults.set(data, forKey: key)
+    }
+
+    private static func loadThemePalette(forKey key: String, from defaults: UserDefaults) -> ThemePalette? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(ThemePalette.self, from: data)
+    }
+
+    private static func loadThemePreset(
+        forKey key: String,
+        from defaults: UserDefaults,
+        legacyFallback: AppThemePreset?
+    ) -> AppThemePreset? {
+        guard let savedValue = defaults.string(forKey: key) else { return legacyFallback }
+        guard savedValue != "custom" else { return nil }
+        return AppThemePreset(rawValue: savedValue)
+    }
+
     public func password(for profileId: UUID) -> String {
         passwordStore.password(forAccount: profileId.uuidString) ?? ""
     }
 
     public func setPassword(_ password: String, for profileId: UUID) {
         passwordStore.setPassword(password, forAccount: profileId.uuidString)
+        if activeProfileId == profileId { routerCredentialsRevision &+= 1 }
         objectWillChange.send()
     }
 
@@ -152,7 +718,7 @@ public final class SettingsStore: ObservableObject {
         if select { item.lastUsed = Date() }
 
         profiles.append(item)
-        passwordStore.setPassword(password, forAccount: item.id.uuidString)
+        setPassword(password, for: item.id)
         if select || activeProfileId == nil {
             activeProfileId = item.id
         }
@@ -164,18 +730,32 @@ public final class SettingsStore: ObservableObject {
         guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
         var updated = profile
         updated.name = Self.cleanName(updated.name, fallbackHost: updated.host)
+        let routerName = updated.routerName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        updated.routerName = routerName.isEmpty ? nil : routerName
         updated.host = updated.host.trimmingCharacters(in: .whitespaces)
         updated.username = Self.cleanUsername(updated.username)
         profiles[index] = updated
         if let password {
-            passwordStore.setPassword(password, forAccount: updated.id.uuidString)
+            setPassword(password, for: updated.id)
+        } else if activeProfileId == updated.id {
+            routerCredentialsRevision &+= 1
         }
+        saveProfiles()
+    }
+
+    public func updateProfileNames(id: UUID, profileName: String, routerName: String) {
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else { return }
+        profiles[index].name = Self.cleanName(profileName, fallbackHost: profiles[index].host)
+        let trimmedRouterName = routerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        profiles[index].routerName = trimmedRouterName.isEmpty ? nil : trimmedRouterName
         saveProfiles()
     }
 
     public func deleteProfile(_ id: UUID) {
         profiles.removeAll { $0.id == id }
         passwordStore.deletePassword(forAccount: id.uuidString)
+        usageByProfile.removeValue(forKey: id.uuidString)
+        saveUsage()
         profileAliases.removeValue(forKey: id.uuidString)
         saveAliases()
         if activeProfileId == id {
@@ -194,6 +774,326 @@ public final class SettingsStore: ObservableObject {
         profiles[index].lastUsed = Date()
         activeProfileId = id
         saveProfiles()
+        refreshDataUsageSummary()
+    }
+
+    /// Records cumulative WAN counters. Counter deltas can catch up after a pause, but a gap of
+    /// at least 36 hours cannot be split accurately across the affected days.
+    public func recordTrafficCounters(download: UInt64, upload: UInt64, for profileId: UUID, at date: Date = Date()) {
+        let key = profileId.uuidString
+        var usage = usageByProfile[key] ?? ProfileUsage()
+        var observedDays = Set(usage.observedDayKeys ?? Array(usage.days.keys))
+        var incompleteDays = Set(usage.incompleteDayKeys ?? [])
+
+        if let previousSample = usage.lastCounterSampleAt {
+            let calendar = Calendar.current
+            var cursor = calendar.startOfDay(for: previousSample)
+            let finalDay = calendar.startOfDay(for: date)
+            var daysMarked = 0
+            let sampleGap = date.timeIntervalSince(previousSample)
+            if cursor < finalDay && sampleGap >= 36 * 60 * 60 {
+                while cursor <= finalDay && daysMarked < 367 {
+                    incompleteDays.insert(Self.dayKey(for: cursor))
+                    daysMarked += 1
+                    guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+                    cursor = next
+                }
+            }
+        }
+
+        let dayKey = Self.dayKey(for: date)
+        if usage.chartStartDayKey == nil {
+            usage.chartStartDayKey = usage.days.keys.min() ?? observedDays.min() ?? dayKey
+        }
+        observedDays.insert(dayKey)
+        usage.lastCounterSampleAt = date
+
+        guard let previousDownload = usage.lastDownloadCounter,
+              let previousUpload = usage.lastUploadCounter else {
+            usage.lastDownloadCounter = download
+            usage.lastUploadCounter = upload
+            // The initial counter read is only a baseline; it does not reveal earlier traffic today.
+            incompleteDays.insert(dayKey)
+            usage.observedDayKeys = observedDays.sorted()
+            usage.incompleteDayKeys = incompleteDays.sorted()
+            usageByProfile[key] = usage
+            saveUsage()
+            refreshDataUsageSummary()
+            return
+        }
+
+        let downloadDelta = Self.usageCounterDelta(previous: previousDownload, current: download)
+        let uploadDelta = Self.usageCounterDelta(previous: previousUpload, current: upload)
+        if Self.counterDidReset(previous: previousDownload, current: download)
+            || Self.counterDidReset(previous: previousUpload, current: upload) {
+            incompleteDays.insert(dayKey)
+        }
+        usage.lastDownloadCounter = download
+        usage.lastUploadCounter = upload
+        usage.totalDownloadBytes += downloadDelta
+        usage.totalUploadBytes += uploadDelta
+
+        var day = usage.days[dayKey] ?? ProfileUsage.Day()
+        day.downloadBytes += downloadDelta
+        day.uploadBytes += uploadDelta
+        usage.days[dayKey] = day
+
+        usage.observedDayKeys = observedDays.sorted()
+        usage.incompleteDayKeys = incompleteDays.sorted()
+        usage.partialTrackingVersion = 1
+
+        usageByProfile[key] = usage
+        saveUsage()
+        refreshDataUsageSummary()
+    }
+
+    public func recordSuccessfulSync(for profileId: UUID, at date: Date = Date()) {
+        var usage = usageByProfile[profileId.uuidString] ?? ProfileUsage()
+        if let lastSync = usage.lastSuccessfulSyncAt, date.timeIntervalSince(lastSync) < 60 {
+            return
+        }
+        usage.lastSuccessfulSyncAt = date
+        usageByProfile[profileId.uuidString] = usage
+        saveUsage()
+        refreshDataUsageSummary()
+    }
+
+    /// Saves observed router reachability transitions. Call only while the app is actively syncing.
+    public func recordConnectionObservation(
+        isReachable: Bool,
+        for profileId: UUID,
+        at date: Date = Date(),
+        interruptionStartedAt: Date? = nil
+    ) {
+        var usage = usageByProfile[profileId.uuidString] ?? ProfileUsage()
+        var events = usage.connectionInterruptions ?? []
+
+        if isReachable {
+            guard let index = events.lastIndex(where: { $0.restoredAt == nil }) else { return }
+            let observationGap = usage.lastConnectionObservationAt.map { date.timeIntervalSince($0) } ?? .infinity
+            events[index].restoredAt = date
+            if observationGap <= 60 {
+                events[index].observedDurationSeconds = max(0, date.timeIntervalSince(events[index].startedAt))
+            }
+        } else if events.contains(where: { $0.restoredAt == nil }) {
+            if let lastObservation = usage.lastConnectionObservationAt,
+               date.timeIntervalSince(lastObservation) < 30 {
+                return
+            }
+        } else {
+            events.append(ConnectionInterruption(startedAt: interruptionStartedAt ?? date))
+        }
+
+        usage.lastConnectionObservationAt = date
+        usage.connectionInterruptions = Array(events.suffix(100))
+        usageByProfile[profileId.uuidString] = usage
+        saveUsage()
+        refreshDataUsageSummary()
+    }
+
+    private func refreshDataUsageSummary() {
+        guard let profileId = activeProfile?.id else {
+            if !dataUsageSummary.historicalDailyHistory.isEmpty {
+                usageHistoryRevision &+= 1
+            }
+            dataUsageSummary = DataUsageSummary()
+            return
+        }
+
+        let profileKey = profileId.uuidString
+        var usage = usageByProfile[profileKey] ?? ProfileUsage()
+        let todayKey = Self.dayKey(for: Date())
+        let monthPrefix = String(todayKey.prefix(7))
+        let monthDays = usage.days.filter { $0.key.hasPrefix(monthPrefix) }.values
+        var incompleteDays = Set(usage.incompleteDayKeys ?? [])
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        var anchorChanged = false
+        // Older builds marked every midnight-crossing sync gap as partial. The old data did not
+        // retain gap durations, so keep only the known first tracking day and today, then record
+        // precise >=36-hour gaps and counter resets going forward.
+        if usage.partialTrackingVersion == nil {
+            let firstTrackingDay = usage.observedDayKeys?.min() ?? usage.days.keys.min()
+            incompleteDays = Set(incompleteDays.filter { $0 == firstTrackingDay || $0 == todayKey })
+            usage.incompleteDayKeys = incompleteDays.sorted()
+            usage.partialTrackingVersion = 1
+            anchorChanged = true
+        }
+        if usage.chartStartDayKey == nil {
+            usage.chartStartDayKey = usage.days.keys.min()
+                ?? usage.observedDayKeys?.min()
+                ?? todayKey
+            anchorChanged = true
+        }
+
+        var chartStart: Date
+        if let storedChartStart = usage.chartStartDayKey.flatMap(Self.date(fromDayKey:)) {
+            chartStart = storedChartStart
+        } else {
+            chartStart = today
+            if usage.chartStartDayKey != todayKey {
+                usage.chartStartDayKey = todayKey
+                anchorChanged = true
+            }
+        }
+        let elapsedDays = calendar.dateComponents([.day], from: chartStart, to: today).day ?? 0
+        if elapsedDays >= 7 {
+            let elapsedWindows = elapsedDays / 7
+            chartStart = calendar.date(byAdding: .day, value: elapsedWindows * 7, to: chartStart) ?? today
+            usage.chartStartDayKey = Self.dayKey(for: chartStart)
+            anchorChanged = true
+        }
+
+        if anchorChanged {
+            usageByProfile[profileKey] = usage
+            saveUsage()
+        }
+
+        let history = (0..<7).compactMap { offset -> DailyUsagePoint? in
+            guard let date = calendar.date(byAdding: .day, value: offset, to: chartStart) else { return nil }
+            let key = Self.dayKey(for: date)
+            let day = usage.days[key] ?? ProfileUsage.Day()
+            let hasRecordedBytes = day.downloadBytes > 0 || day.uploadBytes > 0
+            let hasUsableReading = date <= today && hasRecordedBytes
+            return DailyUsagePoint(
+                date: date,
+                label: date.formatted(.dateTime.month(.abbreviated).day()),
+                downloadBytes: hasUsableReading ? day.downloadBytes : nil,
+                uploadBytes: hasUsableReading ? day.uploadBytes : nil,
+                isPartial: hasUsableReading && (incompleteDays.contains(key) || calendar.isDateInToday(date))
+            )
+        }
+        let historicalDayKeys = Set(usage.days.keys).union(usage.observedDayKeys ?? [])
+        let historicalHistory = historicalDayKeys.sorted().compactMap { key -> DailyUsagePoint? in
+            guard let date = Self.date(fromDayKey: key), date <= today else { return nil }
+            let hasSavedCounters = usage.days[key] != nil
+            let day = usage.days[key] ?? ProfileUsage.Day()
+            return DailyUsagePoint(
+                date: date,
+                label: date.formatted(.dateTime.day()),
+                downloadBytes: hasSavedCounters ? day.downloadBytes : nil,
+                uploadBytes: hasSavedCounters ? day.uploadBytes : nil,
+                isPartial: hasSavedCounters && (incompleteDays.contains(key) || calendar.isDateInToday(date))
+            )
+        }
+        let nextSummary = DataUsageSummary(
+            todayDownloadBytes: usage.days[todayKey]?.downloadBytes ?? 0,
+            todayUploadBytes: usage.days[todayKey]?.uploadBytes ?? 0,
+            monthDownloadBytes: monthDays.reduce(0) { $0 + $1.downloadBytes },
+            monthUploadBytes: monthDays.reduce(0) { $0 + $1.uploadBytes },
+            totalDownloadBytes: usage.totalDownloadBytes,
+            totalUploadBytes: usage.totalUploadBytes,
+            lastSuccessfulSyncAt: usage.lastSuccessfulSyncAt,
+            missingHistoryDayCount: history.filter { $0.date <= today && $0.totalBytes == nil }.count,
+            dailyHistory: history,
+            historicalDailyHistory: historicalHistory
+        )
+        if historicalHistory != dataUsageSummary.historicalDailyHistory {
+            usageHistoryRevision &+= 1
+        }
+        dataUsageSummary = nextSummary
+    }
+
+    public func refreshUsageSummaryForCurrentLocalDay() {
+        refreshDataUsageSummary()
+    }
+
+    /// Restores the latest cached router counters when the profile's local usage store
+    /// has not yet been hydrated, without lowering any more recent locally stored totals.
+    public func restoreTodayUsageFromRouterSnapshot(
+        downloadBytes: UInt64,
+        uploadBytes: UInt64,
+        for profileId: UUID
+    ) {
+        guard activeProfile?.id == profileId else { return }
+        let profileKey = profileId.uuidString
+        var usage = usageByProfile[profileKey] ?? ProfileUsage()
+        let key = Self.dayKey(for: Date())
+        var day = usage.days[key] ?? ProfileUsage.Day()
+        let restoredDownload = max(day.downloadBytes, downloadBytes)
+        let restoredUpload = max(day.uploadBytes, uploadBytes)
+        guard restoredDownload != day.downloadBytes || restoredUpload != day.uploadBytes else { return }
+        day.downloadBytes = restoredDownload
+        day.uploadBytes = restoredUpload
+        usage.days[key] = day
+        usageByProfile[profileKey] = usage
+        saveUsage()
+        refreshDataUsageSummary()
+    }
+
+    private func saveUsage() {
+        if let data = try? JSONEncoder().encode(usageByProfile) {
+            defaults.set(data, forKey: Keys.dataUsage)
+        }
+
+        let sharedProfiles = usageByProfile.mapValues { usage in
+            SharedDailyUsageHistory.Profile(
+                chartStartDayKey: usage.chartStartDayKey,
+                days: usage.days.mapValues {
+                    SharedDailyUsageHistory.Day(
+                        downloadBytes: $0.downloadBytes,
+                        uploadBytes: $0.uploadBytes
+                    )
+                }
+            )
+        }
+        if let data = try? JSONEncoder().encode(SharedDailyUsageHistory(profiles: sharedProfiles)) {
+            sharedDefaults.set(data, forKey: Keys.sharedDailyUsage)
+        }
+    }
+
+    private func mergeSharedDailyUsageHistory() {
+        guard let data = sharedDefaults.data(forKey: Keys.sharedDailyUsage),
+              let sharedHistory = try? JSONDecoder().decode(SharedDailyUsageHistory.self, from: data) else {
+            return
+        }
+
+        for (profileKey, sharedProfile) in sharedHistory.profiles {
+            var usage = usageByProfile[profileKey] ?? ProfileUsage()
+            for (dayKey, sharedDay) in sharedProfile.days {
+                var day = usage.days[dayKey] ?? ProfileUsage.Day()
+                day.downloadBytes = max(day.downloadBytes, sharedDay.downloadBytes)
+                day.uploadBytes = max(day.uploadBytes, sharedDay.uploadBytes)
+                usage.days[dayKey] = day
+            }
+            if usage.chartStartDayKey == nil {
+                usage.chartStartDayKey = sharedProfile.chartStartDayKey
+            }
+            usageByProfile[profileKey] = usage
+        }
+    }
+
+    private static func usageCounterDelta(previous: UInt64, current: UInt64) -> UInt64 {
+        if current >= previous { return current - previous }
+        if previous <= UInt64(UInt32.max), previous > UInt64(UInt32.max) / 2 {
+            return (UInt64(UInt32.max) + 1 - previous) + current
+        }
+        // The WAN session likely reset. Count bytes since the reset and resume from this value.
+        return current
+    }
+
+    private static func counterDidReset(previous: UInt64, current: UInt64) -> Bool {
+        guard current < previous else { return false }
+        // Preserve the existing 32-bit wrap handling; only other backwards moves are resets.
+        if previous <= UInt64(UInt32.max), previous > UInt64(UInt32.max) / 2 {
+            return false
+        }
+        return true
+    }
+
+    private static func dayKey(for date: Date) -> String {
+        let parts = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    private static func date(fromDayKey key: String) -> Date? {
+        let parts = key.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        var components = DateComponents()
+        components.year = parts[0]
+        components.month = parts[1]
+        components.day = parts[2]
+        return Calendar.current.date(from: components)
     }
 
     public func recordDetection(for profileId: UUID, model: String?, cfgMode: String?) {

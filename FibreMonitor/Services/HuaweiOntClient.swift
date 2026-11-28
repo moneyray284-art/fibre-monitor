@@ -2,11 +2,8 @@ import Foundation
 
 /// Talks to a Huawei OptiXstar ONT (tested against the HG8145X6-10 web UI).
 ///
-/// Login mirrors the web page: fetch a token from `/asp/GetRandCount.asp`, then post
-/// the base64 password to `/login.cgi`. The session lives in a cookie. When it
-/// expires the router serves its login page instead of data; the client then logs in
-/// again once. A rejected login is never retried automatically, because the router
-/// locks logins after a few wrong passwords.
+/// Huawei ONT adapter. Authentication and its cookie-backed session are coordinated by
+/// `RouterAuthCoordinator` so overlapping router requests share one login attempt.
 public actor HuaweiOntClient {
     public struct Credentials: Equatable, Sendable {
         public var host: String
@@ -28,27 +25,30 @@ public actor HuaweiOntClient {
     }
 
     private let transport: OntTransport
+    private let authCoordinator: RouterAuthCoordinator
     private var credentials: Credentials
     private var loggedIn = false
-    /// Set after a rejected login; cleared only when the credentials change.
-    private var loginBlocked = false
     public private(set) var detectedIdentity: RouterIdentity?
 
     private var lastCounters: (rx: UInt64, tx: UInt64, time: Date)?
+    private var consecutiveZeroDownloadSamples = 0
+    private var consecutiveZeroUploadSamples = 0
     private var traffic = TrafficState()
     private let maxHistory = 60
 
     public init(credentials: Credentials, transport: OntTransport = URLSessionOntTransport()) {
         self.credentials = credentials
         self.transport = transport
+        self.authCoordinator = RouterAuthCoordinator(credentials: credentials, transport: transport)
     }
 
-    public func update(credentials new: Credentials) {
+    public func update(credentials new: Credentials) async {
         guard new != credentials else { return }
         credentials = new
         loggedIn = false
-        loginBlocked = false
-        lastCounters = nil
+        await authCoordinator.updateCredentials(new)
+        await transport.resetSession(host: new.host)
+        resetTrafficCounterBaseline()
         traffic = TrafficState()
         wanDomain = nil
         ssidBands = [:]
@@ -60,8 +60,8 @@ public actor HuaweiOntClient {
         await logout()
         credentials = new
         loggedIn = false
-        loginBlocked = false
-        lastCounters = nil
+        await authCoordinator.updateCredentials(new)
+        resetTrafficCounterBaseline()
         traffic = TrafficState()
         wanDomain = nil
         ssidBands = [:]
@@ -69,7 +69,9 @@ public actor HuaweiOntClient {
         await transport.resetSession(host: new.host)
     }
 
-    public var isLoginBlocked: Bool { loginBlocked }
+    public func loginFailure() async -> RouterAuthFailure? {
+        await authCoordinator.currentFailure()
+    }
 
     // MARK: Session
 
@@ -78,43 +80,21 @@ public actor HuaweiOntClient {
             throw OntError.notConfigured
         }
         guard Self.isValidHost(credentials.host) else { throw OntError.invalidHost }
-        guard !loginBlocked else { throw OntError.loginRejected }
-        await transport.resetSession(host: credentials.host)
-        let token = HuaweiJs.clean(try await transport.send(.init(.post, "/asp/GetRandCount.asp"), host: credentials.host))
-        guard !token.isEmpty, !token.contains("<") else { throw OntError.badResponse("login token") }
-
-        let reply = try await transport.send(.init(.post, "/login.cgi", form: [
-            ("UserName", credentials.username),
-            ("PassWord", Data(credentials.password.utf8).base64EncodedString()),
-            ("Language", "english"),
-            ("x.X_HW_Token", token),
-        ], ajax: false), host: credentials.host)
-
-        // Success is a tiny page that redirects to index.asp; failure re-serves the login page.
-        guard reply.contains("index.asp") else {
+        do {
+            detectedIdentity = try await authCoordinator.authenticate()
+            loggedIn = true
+        } catch {
             loggedIn = false
-            loginBlocked = true
-            throw OntError.loginRejected
-        }
-        loggedIn = true
-        // Load the main page once like a browser would, so the session is fully set up and identity can be read.
-        if let indexText = try? await transport.send(.init(.get, "/index.asp", ajax: false), host: credentials.host) {
-            let model = HuaweiJs.stringVar("ProductName", in: indexText)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let cfg = HuaweiJs.stringVar("CfgMode", in: indexText)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if (model?.isEmpty == false) || (cfg?.isEmpty == false) {
-                detectedIdentity = RouterIdentity(
-                    model: model?.isEmpty == false ? model : nil,
-                    cfgMode: cfg?.isEmpty == false ? cfg : nil
-                )
-            }
+            throw error
         }
     }
 
     public func logout() async {
         let wasLoggedIn = loggedIn
         let currentHost = credentials.host
+        await authCoordinator.beginSessionClose()
         loggedIn = false
-        lastCounters = nil
+        resetTrafficCounterBaseline()
         wanDomain = nil
         ssidBands = [:]
         detectedIdentity = nil
@@ -124,24 +104,90 @@ public actor HuaweiOntClient {
                                           host: currentHost)
         }
         await transport.resetSession(host: currentHost)
+        await authCoordinator.finishSessionClose()
+    }
+
+    /// Stops login work and cancels transport requests without sending a logout over cellular.
+    public func suspendForNetworkLoss() async {
+        loggedIn = false
+        resetTrafficCounterBaseline()
+        traffic.downloadMbps = 0
+        traffic.uploadMbps = 0
+        await authCoordinator.suspendForNetworkLoss()
+        await transport.cancelPendingRequests()
     }
 
     /// Sends a data request, logging in first if needed and once more if the session expired.
     /// Full HTML pages are checked for `expect` (text the real page always contains), because
     /// an expired session answers with the login page instead.
     private func fetch(_ request: OntRequest, expect: String? = nil) async throws -> String {
+        var request = request
+        if request.timeoutInterval == nil { request.timeoutInterval = 5 }
         func valid(_ text: String) -> Bool {
             if let expect { return text.contains(expect) }
             return HuaweiJs.looksLikeData(text)
         }
-        if !loggedIn { try await login() }
-        let first = try await transport.send(request, host: credentials.host)
-        if valid(first) { return first }
-        loggedIn = false
+        let response = try await sendAuthenticated(request)
+        if valid(response) { return response }
+        let generation = await authCoordinator.currentGeneration()
+        await invalidateSession(ifGeneration: generation)
+        let retry = try await sendAuthenticated(request)
+        guard valid(retry) else { throw OntError.sessionExpired }
+        return retry
+    }
+
+    /// Retries one request after Huawei drops its sid cookie or returns a login redirect.
+    /// URLSession reports HTTP 401/403/500 as `badServerResponse` (-1011) here.
+    private func sendAuthenticated(_ request: OntRequest) async throws -> String {
         try await login()
-        let second = try await transport.send(request, host: credentials.host)
-        guard valid(second) else { throw OntError.sessionExpired }
-        return second
+        let generation = await authCoordinator.currentGeneration()
+        var firstResponse: String?
+        do {
+            firstResponse = try await transport.send(request, host: credentials.host)
+        } catch {
+            guard Self.isExpiredSessionError(error) else { throw error }
+        }
+
+        if let firstResponse, !Self.looksLikeLoginPage(firstResponse) {
+            return firstResponse
+        }
+
+        await invalidateSession(ifGeneration: generation)
+        try await login()
+        let retryGeneration = await authCoordinator.currentGeneration()
+        do {
+            let retryRequest = try await refreshedWlanTokenIfNeeded(in: request)
+            let response = try await transport.send(retryRequest, host: credentials.host)
+            guard !Self.looksLikeLoginPage(response) else {
+                await invalidateSession(ifGeneration: retryGeneration)
+                throw OntError.sessionExpired
+            }
+            return response
+        } catch {
+            if Self.isExpiredSessionError(error) {
+                await invalidateSession(ifGeneration: retryGeneration)
+            }
+            throw error
+        }
+    }
+
+    private func refreshedWlanTokenIfNeeded(in request: OntRequest) async throws -> OntRequest {
+        guard request.path.contains("/html/amp/wlanbasic/set.cgi"),
+              request.path.contains("RequestFile=html/amp/wlanbasic/WlanBasic.asp"),
+              request.form.contains(where: { $0.0 == "x.X_HW_Token" }) else { return request }
+        let page = try await fetchWlanBasicPage()
+        let token = try Self.wlanPageToken(in: page)
+        var refreshed = request
+        refreshed.form = refreshed.form.map { key, value in
+            key == "x.X_HW_Token" ? (key, token) : (key, value)
+        }
+        return refreshed
+    }
+
+    private static func isExpiredSessionError(_ error: Error) -> Bool {
+        if let ontError = error as? OntError, case .sessionExpired = ontError { return true }
+        guard let urlError = error as? URLError else { return false }
+        return urlError.code == .badServerResponse || urlError.code == .userAuthenticationRequired
     }
 
     private func freshToken() async throws -> String {
@@ -197,22 +243,66 @@ public actor HuaweiOntClient {
     }
 
     private func apply(counters: (rx: UInt64, tx: UInt64), at now: Date) {
-        defer { lastCounters = (counters.rx, counters.tx, now) }
-        guard let last = lastCounters else { return }
+        traffic.cumulativeDownloadBytes = counters.rx
+        traffic.cumulativeUploadBytes = counters.tx
+        guard let last = lastCounters else {
+            lastCounters = (counters.rx, counters.tx, now)
+            return
+        }
         let seconds = now.timeIntervalSince(last.time)
-        guard seconds >= 0.3,
-              let dRx = Self.delta(previous: last.rx, current: counters.rx),
-              let dTx = Self.delta(previous: last.tx, current: counters.tx) else { return }
+        // Keep the original baseline through short or out-of-order polls. This lets
+        // the next valid sample include the full elapsed byte delta instead of making
+        // refresh timing create a false 0 Kbps reading.
+        guard seconds >= 0.8 else { return }
+        guard let dRx = Self.delta(previous: last.rx, current: counters.rx),
+              let dTx = Self.delta(previous: last.tx, current: counters.tx) else {
+            lastCounters = (counters.rx, counters.tx, now)
+            consecutiveZeroDownloadSamples = 0
+            consecutiveZeroUploadSamples = 0
+            return
+        }
+        lastCounters = (counters.rx, counters.tx, now)
         let down = Double(dRx) * 8 / seconds / 1_000_000
         let up = Double(dTx) * 8 / seconds / 1_000_000
         // Anything above 10 Gbps is a counter glitch, not traffic.
-        guard down < 10_000, up < 10_000 else { return }
-        traffic.downloadMbps = down
-        traffic.uploadMbps = up
+        guard down < 10_000, up < 10_000 else {
+            consecutiveZeroDownloadSamples = 0
+            consecutiveZeroUploadSamples = 0
+            return
+        }
+
+        if dRx == 0 {
+            if seconds >= 1.0 {
+                consecutiveZeroDownloadSamples += 1
+                if consecutiveZeroDownloadSamples >= 2 { traffic.downloadMbps = 0 }
+            }
+        } else {
+            consecutiveZeroDownloadSamples = 0
+            traffic.downloadMbps = down
+        }
+        if dTx == 0 {
+            if seconds >= 1.0 {
+                consecutiveZeroUploadSamples += 1
+                if consecutiveZeroUploadSamples >= 2 { traffic.uploadMbps = 0 }
+            }
+        } else {
+            consecutiveZeroUploadSamples = 0
+            traffic.uploadMbps = up
+        }
         traffic.peakDownloadMbps = max(traffic.peakDownloadMbps, down)
         traffic.peakUploadMbps = max(traffic.peakUploadMbps, up)
-        traffic.history.append(ThroughputSample(downloadMbps: down, uploadMbps: up, time: now))
+        traffic.history.append(ThroughputSample(
+            downloadMbps: traffic.downloadMbps,
+            uploadMbps: traffic.uploadMbps,
+            time: now
+        ))
         if traffic.history.count > maxHistory { traffic.history.removeFirst(traffic.history.count - maxHistory) }
+    }
+
+    private func resetTrafficCounterBaseline() {
+        lastCounters = nil
+        consecutiveZeroDownloadSamples = 0
+        consecutiveZeroUploadSamples = 0
     }
 
     // MARK: WAN
@@ -253,12 +343,12 @@ public actor HuaweiOntClient {
         guard Self.isValidHost(h) else { throw OntError.invalidHost }
         let interface = try await diagnosticInterface()
         let token = try await freshTokenLoggingIn()
-        _ = try await transport.send(.init(.post,
+        _ = try await sendAuthenticated(.init(.post,
             "/html/bbsp/maintenance/complex.cgi?x=InternetGatewayDevice.IPPingDiagnostics&RUNSTATE_FLAG=Ping&\(Self.diagnosePage)",
             form: [("x.Host", h), ("x.DiagnosticsState", "Requested"), ("x.NumberOfRepetitions", String(min(max(count, 1), 50))),
                    ("x.DSCP", "0"), ("x.DataBlockSize", "56"), ("x.Timeout", "10000"), ("x.Interface", interface),
                    ("RUNSTATE_FLAG.value", "START"), ("x.X_HW_Token", token)],
-            ajax: false), host: credentials.host)
+            ajax: false))
     }
 
     public func pingOutput() async throws -> DiagnosticOutput {
@@ -271,11 +361,11 @@ public actor HuaweiOntClient {
         guard Self.isValidHost(h) else { throw OntError.invalidHost }
         let interface = try await diagnosticInterface()
         let token = try await freshTokenLoggingIn()
-        _ = try await transport.send(.init(.post,
+        _ = try await sendAuthenticated(.init(.post,
             "/html/bbsp/maintenance/complex.cgi?x=InternetGatewayDevice.TraceRouteDiagnostics&RUNSTATE_FLAG=Traceroute&\(Self.diagnosePage)",
             form: [("x.Interface", interface), ("x.X_HW_ProtocolType", "0"), ("x.DiagnosticsState", "Requested"),
                    ("x.Host", h), ("x.DataBlockSize", "38"), ("RUNSTATE_FLAG.value", "START"), ("x.X_HW_Token", token)],
-            ajax: false), host: credentials.host)
+            ajax: false))
     }
 
     public func traceOutput() async throws -> DiagnosticOutput {
@@ -340,10 +430,16 @@ public actor HuaweiOntClient {
 
     public func fetchOptical() async throws -> OpticalInfo {
         let token = try await freshTokenLoggingIn()
-        let text = try await fetch(.init(.post, "/html/amp/common/getSmartDiagnoseResult.asp", form: [("x.X_HW_Token", token)]))
+        async let diagnoseRead = fetch(.init(.post, "/html/amp/common/getSmartDiagnoseResult.asp", form: [("x.X_HW_Token", token)]))
+        async let transceiverRead: String? = try? await sendAuthenticated(.init(
+            .post,
+            "/html/ssmp/common/getOpticTxRx.asp",
+            timeoutInterval: 5
+        ))
+        let text = try await diagnoseRead
         var info = Self.parseSmartDiagnose(text)
         // TX power and temperature, when the firmware exposes them. Optional.
-        if let optic = try? await transport.send(.init(.post, "/html/ssmp/common/getOpticTxRx.asp"), host: credentials.host),
+        if let optic = await transceiverRead,
            HuaweiJs.looksLikeData(optic) {
             Self.mergeOpticTxRx(optic, into: &info)
         }
@@ -381,10 +477,23 @@ public actor HuaweiOntClient {
     // MARK: Devices
 
     public func fetchDevices() async throws -> [OntDevice] {
-        let text = try await fetch(.init(.post, "/html/bbsp/common/GetLanUserDevInfo.asp"))
-        var devices = Self.parseDevices(text, ssidBands: ssidBands)
+        try await fetchDevices(bandBySSID: ssidBands)
+    }
+
+    public func fetchDevices(bandBySSID: [Int: String]) async throws -> [OntDevice] {
+        // Device data and DHCP enrichment are independent reads. Fetch them together,
+        // using the caller's last known SSID map to avoid a concurrent Wi-Fi update
+        // changing client band labels while this response is being parsed.
+        async let deviceRead = fetch(.init(.post, "/html/bbsp/common/GetLanUserDevInfo.asp"))
+        async let dhcpRead: String? = try? await sendAuthenticated(.init(
+            .post,
+            "/html/bbsp/common/GetLanUserDhcpInfo.asp",
+            timeoutInterval: 5
+        ))
+        let text = try await deviceRead
+        var devices = Self.parseDevices(text, ssidBands: bandBySSID)
         // Optional DHCP lease enrichment; older firmwares or sessions without it still succeed.
-        if let dhcp = try? await transport.send(.init(.post, "/html/bbsp/common/GetLanUserDhcpInfo.asp"), host: credentials.host),
+        if let dhcp = await dhcpRead,
            HuaweiJs.looksLikeData(dhcp) {
             devices = Self.enrichDevices(devices, withDhcpInfo: dhcp)
         }
@@ -402,10 +511,10 @@ public actor HuaweiOntClient {
             throw OntError.badResponse("device record")
         }
         let token = try await freshTokenLoggingIn()
-        _ = try await transport.send(.init(.post,
+        _ = try await sendAuthenticated(.init(.post,
             "/html/bbsp/userdevinfo/del.cgi?x=InternetGatewayDevice.LANDevice.1.X_HW_UserDev"
                 + "&RequestFile=html/bbsp/userdevinfo/userdevinfosmart.asp",
-            form: [(device.domain, ""), ("x.X_HW_Token", token)]), host: credentials.host)
+            form: [(device.domain, ""), ("x.X_HW_Token", token)]))
         let after = try await fetchDevices()
         guard !after.contains(where: { $0.mac == device.mac }) else { throw OntError.notConfirmed }
         return after
@@ -429,38 +538,197 @@ public actor HuaweiOntClient {
         let cleanAlias = try Self.validateDeviceAlias(alias)
         let token = try await freshTokenLoggingIn()
         let deviceType = device.userSpecifiedDeviceType.isEmpty ? "0" : device.userSpecifiedDeviceType
-        _ = try await transport.send(.init(.post,
+        _ = try await sendAuthenticated(.init(.post,
             "/html/bbsp/userdevinfo/set.cgi?x=\(device.domain)&RequestFile=html/bbsp/userdevinfo/userdetdevinfo.asp",
             form: [
                 ("x.UserDevAlias", cleanAlias),
                 ("x.UserSpecifiedDeviceType", deviceType),
                 ("x.X_HW_Token", token)
             ],
-            ajax: false), host: credentials.host)
+            ajax: false))
         return try await fetchDevices()
+    }
+
+    // MARK: WLAN access control
+
+    private static let wlanMacFilterPage = "/html/bbsp/wlanmacfilter/wlanmacfilter.asp"
+    private static let wlanMacFilterObject = "InternetGatewayDevice.X_HW_Security.WLANMacFilter"
+    private static let lanMacFilterPage = "/html/bbsp/macfilter/macfilter.asp"
+    private static let lanMacFilterObject = "InternetGatewayDevice.X_HW_Security.MacFilter"
+
+    public func fetchWlanMacBlacklist() async throws -> WlanMacBlacklistState {
+        let page = try await fetch(.init(.get, Self.wlanMacFilterPage, ajax: false), expect: "MacFilterSrc")
+        return Self.parseWlanMacBlacklist(page)
+    }
+
+    static func parseWlanMacBlacklist(_ page: String) -> WlanMacBlacklistState {
+        let rows = HuaweiJs.instances(of: "stMacFilter", in: page)
+        let devices = rows.compactMap { row -> BlockedRouterDevice? in
+            guard let domain = row.first else { return nil }
+            let values = Array(row.dropFirst())
+            let mac = values.map(normalizedFilterMac).first(where: { !$0.isEmpty }) ?? ""
+            let ssidName = values.first(where: { $0.localizedCaseInsensitiveContains("ssid") }) ?? ""
+            let name = values.first(where: {
+                !$0.localizedCaseInsensitiveContains("ssid") && normalizedFilterMac($0).isEmpty
+            }) ?? ""
+            guard domain.hasPrefix(Self.wlanMacFilterObject + "."),
+                  let index = Int(domain.dropFirst(Self.wlanMacFilterObject.count + 1)), index > 0,
+                  !mac.isEmpty else { return nil }
+            return BlockedRouterDevice(
+                domain: domain,
+                mac: mac,
+                ssidName: ssidName,
+                name: name
+            )
+        }
+        return WlanMacBlacklistState(
+            isEnabled: HuaweiJs.stringVar("enableFilter", in: page) == "1",
+            policy: HuaweiJs.stringVar("Mode", in: page) ?? "",
+            devices: devices
+        )
+    }
+
+    private static func normalizedFilterMac(_ value: String) -> String {
+        let mac = HuaweiJs.clean(value).replacingOccurrences(of: "-", with: ":").lowercased()
+        let octets = mac.split(separator: ":")
+        guard octets.count == 6,
+              octets.allSatisfy({ $0.count == 2 && $0.allSatisfy(\.isHexDigit) }),
+              let first = UInt8(octets[0], radix: 16), first & 1 == 0,
+              mac != "00:00:00:00:00:00" else { return "" }
+        return mac
+    }
+
+    public func blockWifiDevice(
+        _ device: OntDevice,
+        name: String,
+        ssidName: String,
+        clearConflictingEntries: Bool = false
+    ) async throws -> WlanMacBlacklistState {
+        let isWifi: Bool
+        switch device.port {
+        case .wifi24, .wifi5: isWifi = true
+        case .lan, .other: isWifi = false
+        }
+        guard isWifi, ssidName.hasPrefix("SSID-"),
+              let index = Int(ssidName.dropFirst("SSID-".count)), (1...8).contains(index) else {
+            throw OntError.badResponse("Wi-Fi association")
+        }
+        let mac = Self.normalizedFilterMac(device.mac)
+        guard !mac.isEmpty else { throw OntError.badResponse("device MAC address") }
+
+        var state = try await fetchWlanMacBlacklist()
+        if state.policy != "0" || !state.isEnabled {
+            // Changing an existing whitelist would invert the meaning of every current entry.
+            // The UI must confirm before this explicit replacement path clears both lists.
+            let wlanPage = try await fetch(.init(.get, Self.wlanMacFilterPage, ajax: false), expect: "MacFilterSrc")
+            let wiredPage = try await fetch(.init(.get, Self.lanMacFilterPage, ajax: false), expect: "MacFilter")
+            let wlanRows = HuaweiJs.instances(of: "stMacFilter", in: wlanPage)
+            let wiredRows = HuaweiJs.instances(of: "stMacFilter", in: wiredPage)
+            let hasEntries = !wlanRows.isEmpty || !wiredRows.isEmpty
+            if hasEntries && !clearConflictingEntries { throw OntError.macFilterPolicyConflict }
+            if clearConflictingEntries {
+                try await clearMacFilterEntries(wlanRows: wlanRows, wiredRows: wiredRows)
+                state = try await fetchWlanMacBlacklist()
+                let verifiedWired = try await fetch(.init(.get, Self.lanMacFilterPage, ajax: false), expect: "MacFilter")
+                guard state.devices.isEmpty,
+                      HuaweiJs.instances(of: "stMacFilter", in: verifiedWired).isEmpty else {
+                    throw OntError.notConfirmed
+                }
+            } else if !state.devices.isEmpty {
+                throw OntError.macFilterPolicyConflict
+            }
+
+            let token = try await freshTokenLoggingIn()
+            _ = try await sendAuthenticated(.init(.post,
+                "/html/bbsp/wlanmacfilter/set.cgi?x=InternetGatewayDevice.X_HW_Security&RequestFile=html/bbsp/wlanmacfilter/wlanmacfilter.asp",
+                form: [
+                    ("x.MacFilterPolicy", "0"),
+                    ("x.MacFilterRight", "1"),
+                    ("x.X_HW_Token", token)
+                ], ajax: false))
+            state = try await fetchWlanMacBlacklist()
+            guard state.policy == "0", state.isEnabled, state.devices.isEmpty else {
+                throw OntError.notConfirmed
+            }
+        }
+
+        if state.activeBlockedDevices.contains(where: { $0.mac == mac }) { return state }
+        let token = try await freshTokenLoggingIn()
+        let path = "/html/bbsp/wlanmacfilter/add.cgi?x=\(Self.wlanMacFilterObject)&RequestFile=html/bbsp/wlanmacfilter/wlanmacfilter.asp"
+        _ = try await sendAuthenticated(.init(.post, path, form: [
+            ("x.SourceMACAddress", mac),
+            ("x.SSIDName", ssidName),
+            ("x.DeviceName", name),
+            ("x.Enable", "1"),
+            ("x.X_HW_Token", token)
+        ], ajax: false))
+
+        state = try await fetchWlanMacBlacklist()
+        guard state.activeBlockedDevices.contains(where: { $0.mac == mac }) else {
+            throw OntError.notConfirmed
+        }
+        return state
+    }
+
+    private func clearMacFilterEntries(wlanRows: [[String]], wiredRows: [[String]]) async throws {
+        let wlanDomains = wlanRows.compactMap(\.first).filter { Self.isMacFilterRecord($0, in: Self.wlanMacFilterObject) }
+        let wiredDomains = wiredRows.compactMap(\.first).filter { Self.isMacFilterRecord($0, in: Self.lanMacFilterObject) }
+
+        for domain in wlanDomains {
+            let token = try await freshTokenLoggingIn()
+            let path = "/html/bbsp/wlanmacfilter/del.cgi?x=\(Self.wlanMacFilterObject)&RequestFile=html/bbsp/wlanmacfilter/wlanmacfilter.asp"
+            _ = try await sendAuthenticated(.init(.post, path, form: [
+                (domain, ""), ("x.X_HW_Token", token)
+            ], ajax: false))
+        }
+        for domain in wiredDomains {
+            let token = try await freshTokenLoggingIn()
+            let path = "/html/bbsp/macfilter/del.cgi?x=\(Self.lanMacFilterObject)&RequestFile=html/bbsp/macfilter/macfilter.asp"
+            _ = try await sendAuthenticated(.init(.post, path, form: [
+                (domain, ""), ("x.X_HW_Token", token)
+            ], ajax: false))
+        }
+    }
+
+    private static func isMacFilterRecord(_ domain: String, in object: String) -> Bool {
+        let prefix = object + "."
+        guard domain.hasPrefix(prefix) else { return false }
+        return Int(domain.dropFirst(prefix.count)) != nil
+    }
+
+    public func unblockWifiDevice(_ device: BlockedRouterDevice) async throws -> WlanMacBlacklistState {
+        let prefix = Self.wlanMacFilterObject + "."
+        guard device.domain.hasPrefix(prefix),
+              let index = Int(device.domain.dropFirst(prefix.count)), index > 0 else {
+            throw OntError.badResponse("blacklist record")
+        }
+        let token = try await freshTokenLoggingIn()
+        let path = "/html/bbsp/wlanmacfilter/del.cgi?x=\(Self.wlanMacFilterObject)&RequestFile=html/bbsp/wlanmacfilter/wlanmacfilter.asp"
+        _ = try await sendAuthenticated(.init(.post, path, form: [
+            (device.domain, ""),
+            ("x.X_HW_Token", token)
+        ], ajax: false))
+        let state = try await fetchWlanMacBlacklist()
+        guard !state.devices.contains(where: { $0.mac == device.mac }) else { throw OntError.notConfirmed }
+        return state
     }
 
     // MARK: Router health
 
     private static func looksLikeLoginPage(_ text: String) -> Bool {
-        text.contains("login.cgi") || text.contains("txt_Username")
+        let lower = text.lowercased()
+        return lower.contains("login.cgi") || lower.contains("login.html")
+            || lower.contains("txt_username") || lower.contains("txt_password")
+            || lower.contains("loginform")
     }
 
     public func fetchHealth() async throws -> RouterHealth {
-        if !loggedIn { try await login() }
-        let req = OntRequest(.get, "/html/ssmp/deviceinfo/deviceinfo.asp", ajax: false)
-        let first = try await transport.send(req, host: credentials.host)
-        if first.contains("cpuUsed") || first.contains("stDeviceInfo") {
-            return Self.parseHealth(first)
+        let req = OntRequest(.get, "/html/ssmp/deviceinfo/deviceinfo.asp", ajax: false, timeoutInterval: 5)
+        let response = try await sendAuthenticated(req)
+        guard response.contains("cpuUsed") || response.contains("stDeviceInfo") else {
+            throw OntError.badResponse("deviceinfo")
         }
-        guard Self.looksLikeLoginPage(first) else { throw OntError.badResponse("deviceinfo") }
-        loggedIn = false
-        try await login()
-        let second = try await transport.send(req, host: credentials.host)
-        guard second.contains("cpuUsed") || second.contains("stDeviceInfo") else {
-            throw OntError.sessionExpired
-        }
-        return Self.parseHealth(second)
+        return Self.parseHealth(response)
     }
 
     static func parseHealth(_ text: String) -> RouterHealth {
@@ -485,6 +753,37 @@ public actor HuaweiOntClient {
         return state
     }
 
+    /// Combines the router's Wi-Fi list with configured WLAN slots, including disabled SSIDs.
+    /// Passphrases from WlanBasic.asp are discarded before returning to the UI.
+    public func fetchManagedWifiState() async throws -> WifiState {
+        var state = try await fetchWifi()
+        let configs = try await fetchWlanBasic()
+        for config in configs where (1...8).contains(config.ssidIndex) && !config.ssid.isEmpty {
+            let listReportedBand = state.networks.first(where: { $0.ssidIndex == config.ssidIndex })?.band ?? ""
+            let reportedBand = [config.lowerLayers, listReportedBand]
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .joined(separator: " ")
+            let band = WifiFrequencyBand.label(
+                for: config.ssidIndex,
+                fallback: reportedBand
+            )
+            let network = WifiNetwork(
+                ssidIndex: config.ssidIndex,
+                name: config.ssid,
+                band: band,
+                enabled: config.isEnabled
+            )
+            if let index = state.networks.firstIndex(where: { $0.ssidIndex == config.ssidIndex }) {
+                state.networks[index] = network
+            } else {
+                state.networks.append(network)
+            }
+        }
+        state.networks.sort { $0.ssidIndex < $1.ssidIndex }
+        ssidBands = Dictionary(state.networks.map { ($0.ssidIndex, $0.band) }, uniquingKeysWith: { a, _ in a })
+        return state
+    }
+
     static func parseWifi(_ text: String) -> WifiState {
         var state = WifiState()
         var seen = Set<Int>()
@@ -492,14 +791,37 @@ public actor HuaweiOntClient {
             guard let index = Int((r["domain"] ?? "").split(separator: ".").last ?? ""), seen.insert(index).inserted else { continue }
             state.radios.append(WifiRadio(index: index, band: r["OperatingFrequencyBand"] ?? "", enabled: r["Enable"] == "1"))
         }
-        let params = ["domain", "name", "ssid", "X_HW_ServiceEnable", "enable", "X_HW_RFBand", "bindenable"]
+        let params = ["domain", "name", "ssid", "X_HW_ServiceEnable", "enable", "RFBand", "X_HW_RFBand", "bindenable"]
+        var networksByIndex: [Int: WifiNetwork] = [:]
         for r in HuaweiJs.records(of: "stWlanInfo", in: text, fallbackParams: params) {
             // Skip the page's own template record ('domain', 'SSID'+tid, ...).
-            guard let index = Int((r["domain"] ?? "").split(separator: ".").last ?? "") else { continue }
+            guard let index = Int((r["domain"] ?? "").split(separator: ".").last ?? ""), index > 0 else { continue }
             let enabled = r["enable"] == "1" && r["X_HW_ServiceEnable"] != "0"
-            state.networks.append(WifiNetwork(ssidIndex: index, name: r["ssid"] ?? "", band: r["X_HW_RFBand"] ?? "",
-                                              enabled: enabled))
+            let fallbackBand = [r["X_HW_RFBand"], r["RFBand"]]
+                .compactMap { $0 }
+                .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) ?? ""
+            let candidate = WifiNetwork(
+                ssidIndex: index,
+                name: r["ssid"] ?? "",
+                band: WifiFrequencyBand.label(for: index, fallback: fallbackBand),
+                enabled: enabled
+            )
+            if let existing = networksByIndex[index] {
+                if existing.name.isEmpty && !candidate.name.isEmpty {
+                    networksByIndex[index] = candidate
+                } else if !existing.enabled && candidate.enabled {
+                    networksByIndex[index] = WifiNetwork(
+                        ssidIndex: index,
+                        name: existing.name,
+                        band: WifiFrequencyBand.label(for: index, fallback: fallbackBand),
+                        enabled: true
+                    )
+                }
+            } else {
+                networksByIndex[index] = candidate
+            }
         }
+        state.networks = networksByIndex.values.sorted { $0.ssidIndex < $1.ssidIndex }
         state.radios.sort { $0.index < $1.index }
         state.networks.sort { $0.ssidIndex < $1.ssidIndex }
         return state
@@ -508,14 +830,138 @@ public actor HuaweiOntClient {
     /// Fetches ephemeral SSID security & Wi-Fi configuration from `WlanBasic.asp`.
     /// Callers must discard returned passphrases when dismissed or backgrounded.
     public func fetchWlanBasic(bandHint: String? = nil, ssidIndex: Int? = nil) async throws -> [WifiSsidConfig] {
-        let text = try await fetch(.init(.get, "/html/amp/wlanbasic/WlanBasic.asp", ajax: false), expect: "stWlan")
-        var configs = Self.parseWlanBasic(text)
-        if let ssidIndex, !configs.contains(where: { $0.ssidIndex == ssidIndex }) {
-            let suffix = (bandHint?.hasPrefix("5") == true) ? "?5G" : "?2G"
-            let alt = try await fetch(.init(.get, "/html/amp/wlanbasic/WlanBasic.asp\(suffix)", ajax: false), expect: "stWlan")
-            configs = Self.parseWlanBasic(alt)
+        let text = try await fetchWlanBasicPage()
+        var pages = [text]
+        if let ssidIndex {
+            let configs = Self.parseWlanBasic(text)
+            if !configs.contains(where: { $0.ssidIndex == ssidIndex }) {
+                let suffix = (bandHint?.hasPrefix("5") == true) ? "?5G" : "?2G"
+                let alt = try await fetch(.init(.get, "/html/amp/wlanbasic/WlanBasic.asp\(suffix)", ajax: false), expect: "stWlan")
+                pages.append(alt)
+            }
+        } else {
+            for suffix in ["?2G", "?5G"] {
+                if let page = try? await fetch(.init(.get, "/html/amp/wlanbasic/WlanBasic.asp\(suffix)", ajax: false), expect: "stWlan") {
+                    pages.append(page)
+                }
+            }
         }
-        return configs
+        return Self.mergeWlanBasicConfigs(pages.map(Self.parseWlanBasic))
+    }
+
+    private static func mergeWlanBasicConfigs(_ pages: [[WifiSsidConfig]]) -> [WifiSsidConfig] {
+        var byIndex: [Int: WifiSsidConfig] = [:]
+        for page in pages {
+            for incoming in page {
+                guard let existing = byIndex[incoming.ssidIndex] else {
+                    byIndex[incoming.ssidIndex] = incoming
+                    continue
+                }
+                if existing.ssid.isEmpty && !incoming.ssid.isEmpty {
+                    byIndex[incoming.ssidIndex] = incoming
+                }
+            }
+        }
+        return byIndex.values.sorted { $0.ssidIndex < $1.ssidIndex }
+    }
+
+    private func fetchWlanBasicPage(suffix: String = "") async throws -> String {
+        try await fetch(.init(.get, "/html/amp/wlanbasic/WlanBasic.asp\(suffix)", ajax: false), expect: "stWlan")
+    }
+
+    /// Huawei's WLAN form carries the page-scoped token in its hidden `hwonttoken` input.
+    private static func wlanPageToken(in page: String) throws -> String {
+        let inputRegex = try NSRegularExpression(pattern: "(?is)<input\\b[^>]*>")
+        let fullRange = NSRange(page.startIndex..<page.endIndex, in: page)
+        let tokenNames: Set<String> = ["hwonttoken", "onttoken", "x.x_hw_token", "x_hw_token"]
+
+        func attribute(_ name: String, in tag: String) -> String? {
+            let escapedName = NSRegularExpression.escapedPattern(for: name)
+            guard let regex = try? NSRegularExpression(
+                pattern: "(?is)\\b\(escapedName)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')"
+            ), let match = regex.firstMatch(in: tag, range: NSRange(tag.startIndex..<tag.endIndex, in: tag)) else {
+                return nil
+            }
+            for group in 1...2 {
+                if let range = Range(match.range(at: group), in: tag) { return String(tag[range]) }
+            }
+            return nil
+        }
+
+        for match in inputRegex.matches(in: page, range: fullRange) {
+            guard let range = Range(match.range, in: page) else { continue }
+            let tag = String(page[range])
+            let names = [attribute("id", in: tag), attribute("name", in: tag)]
+                .compactMap { $0?.lowercased() }
+            guard names.contains(where: tokenNames.contains),
+                  let value = attribute("value", in: tag), !value.isEmpty else { continue }
+            return HuaweiJs.clean(value)
+        }
+
+        if let regex = try? NSRegularExpression(
+            pattern: "(?is)(?:onttoken|x\\.x_hw_token|x_hw_token)\\s*[:=]\\s*['\"]([^'\"]+)['\"]"
+        ), let match = regex.firstMatch(in: page, range: fullRange),
+           let range = Range(match.range(at: 1), in: page) {
+            return HuaweiJs.clean(String(page[range]))
+        }
+        throw OntError.badResponse("WLAN page token")
+    }
+
+    private static let wlanConfigurationRoot = "InternetGatewayDevice.LANDevice.1.WLANConfiguration"
+    private static let wlanBasicRequestFile = "html/amp/wlanbasic/WlanBasic.asp"
+
+    private func checkedWifiWrite(_ request: OntRequest, token: String) async throws -> String {
+        var authorizedRequest = request
+        if !authorizedRequest.form.contains(where: { $0.0 == "x.X_HW_Token" }) {
+            authorizedRequest.form.append(("x.X_HW_Token", token))
+        }
+        let response = try await sendAuthenticated(authorizedRequest)
+        try Self.ensureWifiWriteAllowed(response)
+        return response
+    }
+
+    private static func ensureWifiWriteAllowed(_ response: String) throws {
+        let lower = response.lowercased()
+        if lower.contains("err_no_right") || lower.contains("no right") {
+            throw OntError.wifiModificationNotAllowed
+        }
+        if lower.contains("errinfo") {
+            let message = Self.wifiErrorInfo(in: response)
+            throw OntError.wifiWriteRejected(message.isEmpty ? "Router rejected the Wi-Fi change." : message)
+        }
+    }
+
+    private static func isTransientWifiWriteError(_ error: Error) -> Bool {
+        guard let url = error as? URLError else { return false }
+        return [.networkConnectionLost, .timedOut, .cannotConnectToHost, .notConnectedToInternet].contains(url.code)
+    }
+
+    private static func isSecondaryIndex(_ index: Int) -> Bool {
+        WifiFrequencyBand.allCases.contains { $0.secondaryIndices.contains(index) }
+    }
+
+    private static func band(for index: Int) -> WifiFrequencyBand? {
+        guard (1...8).contains(index) else { return nil }
+        return index <= 4 ? .twoPointFour : .five
+    }
+
+    private static func wifiSetRequest(index: Int, fields: [(String, String)], token: String) -> OntRequest {
+        let domain = "\(wlanConfigurationRoot).\(index)"
+        return OntRequest(
+            .post,
+            "/html/amp/wlanbasic/set.cgi?x=\(domain)&y=\(domain).PreSharedKey.1&RequestFile=\(wlanBasicRequestFile)",
+            form: fields + [("x.X_HW_Token", token)],
+            ajax: false,
+            timeoutInterval: 2.0
+        )
+    }
+
+    private static func wifiErrorInfo(in response: String) -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: "(?is)errinfo\\s*[:=]\\s*['\"]?([^'\";<>\\r\\n]+)"
+        ), let match = regex.firstMatch(in: response, range: NSRange(response.startIndex..<response.endIndex, in: response)),
+           let range = Range(match.range(at: 1), in: response) else { return "" }
+        return HuaweiJs.clean(String(response[range])).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func parseWlanBasic(_ text: String) -> [WifiSsidConfig] {
@@ -615,6 +1061,48 @@ public actor HuaweiOntClient {
         return result
     }
 
+    public func setWifiNetworkEnabled(ssidIndex: Int, enabled: Bool) async throws -> WifiUpdateResult {
+        guard Self.isSecondaryIndex(ssidIndex) else { throw OntError.badResponse("primary Wi-Fi network is protected") }
+        let configs = try await fetchWlanBasic()
+        guard let config = configs.first(where: { $0.ssidIndex == ssidIndex }), !config.ssid.isEmpty else {
+            throw OntError.badResponse("Wi-Fi network")
+        }
+        let bandSuffix = ssidIndex <= 4 ? "?2G" : "?5G"
+        let page = try await fetchWlanBasicPage(suffix: bandSuffix)
+        let token = try Self.wlanPageToken(in: page)
+        let request = Self.wifiSetRequest(index: ssidIndex, fields: [
+            ("x.Enable", enabled ? "1" : "0")
+        ], token: token)
+        do {
+            _ = try await checkedWifiWrite(request, token: token)
+        } catch let error as URLError where Self.isTransientWifiWriteError(error) {
+            return WifiUpdateResult(wifi: nil, connectionDropped: true)
+        }
+        return WifiUpdateResult(wifi: nil, connectionDropped: true)
+    }
+
+    public func deleteWifiNetwork(ssidIndex: Int) async throws -> WifiUpdateResult {
+        guard Self.isSecondaryIndex(ssidIndex) else { throw OntError.badResponse("primary Wi-Fi network is protected") }
+        let configs = try await fetchWlanBasic()
+        guard configs.contains(where: { $0.ssidIndex == ssidIndex && !$0.ssid.isEmpty }) else {
+            throw OntError.badResponse("Wi-Fi network")
+        }
+        let bandSuffix = ssidIndex <= 4 ? "?2G" : "?5G"
+        let page = try await fetchWlanBasicPage(suffix: bandSuffix)
+        let token = try Self.wlanPageToken(in: page)
+        let request = Self.wifiSetRequest(index: ssidIndex, fields: [
+            ("x.Enable", "0"),
+            ("x.SSID", ""),
+            ("x.SSIDAdvertisementEnabled", "0")
+        ], token: token)
+        do {
+            _ = try await checkedWifiWrite(request, token: token)
+        } catch let error as URLError where Self.isTransientWifiWriteError(error) {
+            return WifiUpdateResult(wifi: nil, connectionDropped: true)
+        }
+        return WifiUpdateResult(wifi: nil, connectionDropped: true)
+    }
+
     /// Turns a whole radio (2.4 GHz = 1, 5 GHz = 2) on or off, like the Wi-Fi page's switch.
     /// Refuses to switch off the last radio that is on, which would cut every Wi-Fi device off.
     public func setRadio(_ index: Int, enabled: Bool) async throws -> WifiState {
@@ -624,13 +1112,21 @@ public actor HuaweiOntClient {
         if !enabled && !before.radios.contains(where: { $0.index != index && $0.enabled }) {
             throw OntError.lastRadio
         }
-        let token = try await freshTokenLoggingIn()
+        let page = try await fetchWlanBasicPage()
+        let token = try Self.wlanPageToken(in: page)
         let flag = enabled ? "1" : "0"
-        _ = try await transport.send(.init(.post,
+        let request = OntRequest(.post,
             "/html/amp/wlanbasic/set.cgi?x=InternetGatewayDevice.X_HW_DEBUG.AMP.SetWifiCoverEnable"
                 + "&y=InternetGatewayDevice.LANDevice.1.WiFi.Radio.\(index)&RequestFile=html/amp/wlanbasic/WlanBasic.asp",
             form: [("x.Enable", flag), ("x.RadioInst", String(index)), ("y.Enable", flag), ("x.X_HW_Token", token)],
-            ajax: false), host: credentials.host)
+            ajax: false,
+            timeoutInterval: 2.0
+        )
+        do {
+            _ = try await sendAuthenticated(request)
+        } catch let error as URLError where Self.isTransientWifiWriteError(error) {
+            // A successful radio change can interrupt its own response. Continue to read back.
+        }
         // The radio restarts; read back until it reports the new state.
         for _ in 0..<6 {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -704,13 +1200,13 @@ public actor HuaweiOntClient {
             ("w.Enable", config.enable),
             ("w.Standard", config.standard),
             ("w.BasicAuthenticationMode", config.basicAuthenticationMode),
-            ("w.BasicEncryptionModes", encryptionMode),
-            ("w.WPAAuthenticationMode", "EAPAuthentication"),
-            ("w.WPAEncryptionModes", encryptionMode),
+            ("w.BasicEncryptionModes", config.basicEncryptionModes),
+            ("w.WPAAuthenticationMode", config.wpaAuthenticationMode),
+            ("w.WPAEncryptionModes", config.wpaEncryptionModes),
             ("w.IEEE11iAuthenticationMode", ieeeAuth),
             ("w.IEEE11iEncryptionModes", encryptionMode),
-            ("w.MixAuthenticationMode", "EAPAuthentication"),
-            ("w.MixEncryptionModes", encryptionMode),
+            ("w.MixAuthenticationMode", config.mixAuthenticationMode),
+            ("w.MixEncryptionModes", config.mixEncryptionModes),
             ("w.SSIDAdvertisementEnabled", config.wlHide),
             ("w.WMMEnable", config.wmmEnable),
             ("w.MaxAssociateNum", config.deviceNum),
@@ -723,7 +1219,7 @@ public actor HuaweiOntClient {
             ("c2.SSIDList", ssidInst),
             ("x.X_HW_Token", token)
         ]
-        return OntRequest(.post, path, form: form, ajax: false)
+        return OntRequest(.post, path, form: form, ajax: false, timeoutInterval: 2.0)
     }
 
     /// Saves an SSID name and passphrase (`#704`) and re-reads `wlan_list.asp`, handling expected Wi-Fi drops gracefully.
@@ -733,10 +1229,11 @@ public actor HuaweiOntClient {
         newPassword: String
     ) async throws -> WifiUpdateResult {
         _ = try Self.wifiEditRequest(config: config, newSsid: newSsid, newPassword: newPassword, token: "validate")
-        let token = try await freshTokenLoggingIn()
+        let page = try await fetchWlanBasicPage()
+        let token = try Self.wlanPageToken(in: page)
         let request = try Self.wifiEditRequest(config: config, newSsid: newSsid, newPassword: newPassword, token: token)
         do {
-            _ = try await transport.send(request, host: credentials.host)
+            _ = try await sendAuthenticated(request)
         } catch let url as URLError where [.networkConnectionLost, .timedOut, .cannotConnectToHost, .notConnectedToInternet].contains(url.code) {
             return WifiUpdateResult(wifi: nil, connectionDropped: true)
         }
@@ -780,14 +1277,17 @@ public actor HuaweiOntClient {
 
     static let userDeviceParams = ["Domain", "IpAddr", "MacAddr", "Port", "IpType", "DevType", "DevStatus", "PortType",
                                    "Time", "HostName", "IPv4Enabled", "IPv6Enabled", "DeviceType", "UserDevAlias",
-                                   "UserSpecifiedDeviceType", "LeaseTimeRemaining", "TrafficSendRate", "TrafficRecvRate"]
+                                   "UserSpecifiedDeviceType", "LeaseTimeRemaining", "TrafficSendRate", "TrafficRecvRate",
+                                   "VendorClassId", "Alias", "MACAddress", "IPAddress", "Name"]
 
     static let userDeviceNewParams = ["Domain", "IpAddr", "MacAddr", "Port", "IpType", "DevType", "DevStatus", "PortType",
                                       "Time", "HostName", "IPv4Enabled", "IPv6Enabled", "DeviceType", "UserDevAlias",
-                                      "UserSpecifiedDeviceType", "LeaseTimeRemaining", "RealMacAddr"]
+                                      "UserSpecifiedDeviceType", "LeaseTimeRemaining", "RealMacAddr",
+                                      "VendorClassId", "Alias", "MACAddress", "IPAddress", "Name"]
 
     static let dhcpInfoParams = ["domain", "name", "ip", "mac", "remaintime", "devtype", "interfacetype",
-                                 "AddressSource", "ConnectedTime"]
+                                 "AddressSource", "ConnectedTime", "hostname", "HostName", "Alias",
+                                 "VendorClassId", "MACAddress", "IPAddress"]
 
     private static func cleanPlaceholder(_ raw: String?) -> String {
         let trimmed = (raw ?? "").trimmingCharacters(in: .whitespaces)
@@ -800,39 +1300,123 @@ public actor HuaweiOntClient {
         return value
     }
 
+    private static func normalizedMac(_ raw: String?) -> String {
+        (raw ?? "").lowercased().filter { "0123456789abcdef".contains($0) }
+    }
+
+    private static func clientField(_ record: [String: String], names: [String]) -> String {
+        for name in names {
+            guard let pair = record.first(where: { $0.key.caseInsensitiveCompare(name) == .orderedSame }) else { continue }
+            let value = cleanPlaceholder(pair.value).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty && value != "*" { return value }
+        }
+        return ""
+    }
+
+    private static func clientNameField(_ record: [String: String], names: [String]) -> String {
+        let values = names.map { clientField(record, names: [$0]) }.filter { !$0.isEmpty }
+        return values.first(where: DeviceNameResolver.isUsefulName) ?? values.first ?? ""
+    }
+
+    private static func clientVendorField(_ record: [String: String], names: [String]) -> String {
+        for name in names {
+            let value = clientField(record, names: [name])
+            guard DeviceNameResolver.isUsefulName(value), value.contains(where: \.isLetter) else { continue }
+            return value
+        }
+        return ""
+    }
+
+    /// Reads RSSI fields from any router record that also identifies a client MAC. Huawei firmware
+    /// varies the associated-station record name, so inspect constructor field names instead of
+    /// depending on one endpoint-specific class name.
+    private static func wifiSignalByMac(in text: String) -> [String: Double] {
+        var result: [String: Double] = [:]
+        let definitions = HuaweiJs.definitions(in: text)
+        for (recordName, fields) in definitions {
+            let macField = fields.first { field in
+                let key = field.lowercased().filter(\.isLetter)
+                return key.contains("mac") && (key.contains("addr") || key == "mac")
+            }
+            let signalFields = fields.filter { field in
+                let key = field.lowercased().filter(\.isLetter)
+                return key.contains("rssi") || key.contains("signal")
+            }
+            guard let macField, !signalFields.isEmpty else { continue }
+
+            for record in HuaweiJs.records(of: recordName, in: text) {
+                guard let mac = record[macField], !normalizedMac(mac).isEmpty,
+                      let rssi = parseRssiDbm(in: record, keys: signalFields) else { continue }
+                result[normalizedMac(mac)] = rssi
+            }
+        }
+        return result
+    }
+
+    private static func parseRssiDbm(in record: [String: String], keys: [String]? = nil) -> Double? {
+        let candidates = keys ?? record.keys.filter { key in
+            let normalized = key.lowercased().filter(\.isLetter)
+            return normalized.contains("rssi") || normalized.contains("signal")
+        }
+        for key in candidates {
+            guard let raw = record[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { continue }
+            let pattern = #"-?\d+(?:\.\d+)?"#
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let match = regex.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
+                  let range = Range(match.range, in: raw),
+                  let value = Double(raw[range]),
+                  value <= 0, value >= -120 else { continue }
+            return value
+        }
+        return nil
+    }
+
     /// All known devices, online first, de-duplicated by MAC (the page lists some twice).
     /// Supports both 18-arg `USERDevice` (checked first so traffic rates are kept) and 17-arg `USERDeviceNew`.
     /// `ssidBands` maps SSID index to band from the Wi-Fi list; without it bands are guessed.
     static func parseDevices(_ text: String, ssidBands: [Int: String] = [:]) -> [OntDevice] {
-        var seen = Set<String>()
+        var deviceIndexByMAC: [String: Int] = [:]
         var devices: [OntDevice] = []
+        let signalByMac = wifiSignalByMac(in: text)
         let candidates = HuaweiJs.records(of: "USERDevice", in: text, fallbackParams: userDeviceParams)
             + HuaweiJs.records(of: "USERDeviceNew", in: text, fallbackParams: userDeviceNewParams)
 
         for r in candidates {
-            let primaryMac = cleanPlaceholder(r["MacAddr"]).lowercased()
-            let fallbackMac = cleanPlaceholder(r["RealMacAddr"]).lowercased()
+            let primaryMac = clientField(r, names: ["MacAddr", "MACAddress"])
+            let fallbackMac = clientField(r, names: ["RealMacAddr"])
             let mac = primaryMac.isEmpty ? fallbackMac : primaryMac
-            guard !mac.isEmpty, seen.insert(mac).inserted else { continue }
+            let macKey = normalizedMac(mac)
+            guard !macKey.isEmpty else { continue }
 
-            let rawType = cleanPlaceholder(r["UserSpecifiedDeviceType"])
-            let lease = Int(r["LeaseTimeRemaining"] ?? "").flatMap { $0 > 0 ? $0 : nil }
-
-            devices.append(OntDevice(
-                domain: r["Domain"] ?? "",
-                mac: mac,
-                ip: cleanPlaceholder(r["IpAddr"]),
-                hostName: cleanPlaceholder(r["HostName"]),
-                routerAlias: cleanPlaceholder(r["UserDevAlias"]),
-                dhcpVendor: cleanPlaceholder(r["DevType"]),
-                port: ConnectionPort(raw: cleanPlaceholder(r["Port"]), ssidBands: ssidBands),
-                isOnline: (r["DevStatus"] ?? "").lowercased() == "online",
-                connectedTime: r["Time"] ?? "",
+            let rawType = clientField(r, names: ["UserSpecifiedDeviceType"])
+            let lease = Int(clientField(r, names: ["LeaseTimeRemaining"])).flatMap { $0 > 0 ? $0 : nil }
+            let rawPort = clientField(r, names: ["Port"])
+            let interfaceType = clientField(r, names: ["PortType", "InterfaceType"])
+            let device = OntDevice(
+                domain: clientField(r, names: ["Domain"]),
+                mac: mac.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                ip: clientField(r, names: ["IpAddr", "IPAddress"]),
+                hostName: clientNameField(r, names: ["HostName", "Hostname", "Name", "DeviceName"]),
+                routerAlias: clientNameField(r, names: ["UserDevAlias", "Alias", "UserDevName"]),
+                // DevType is frequently just a numeric enum (for example, "0") on HG8145 firmware.
+                // Prefer vendor text and ignore enum values so DHCP lease details can enrich it later.
+                dhcpVendor: clientVendorField(r, names: ["VendorClassId", "DeviceType", "DevType"]),
+                port: ConnectionPort(raw: rawPort, ssidBands: ssidBands, fallbackRaw: interfaceType),
+                isOnline: clientField(r, names: ["DevStatus"]).lowercased() == "online",
+                connectedTime: clientField(r, names: ["Time"]),
                 userSpecifiedDeviceType: rawType.isEmpty ? "0" : rawType,
-                trafficSendRate: parseNonZeroRate(r["TrafficSendRate"]),
-                trafficRecvRate: parseNonZeroRate(r["TrafficRecvRate"]),
-                leaseSecondsRemaining: lease
-            ))
+                trafficSendRate: parseNonZeroRate(clientField(r, names: ["TrafficSendRate"])),
+                trafficRecvRate: parseNonZeroRate(clientField(r, names: ["TrafficRecvRate"])),
+                leaseSecondsRemaining: lease,
+                rssiDbm: parseRssiDbm(in: r) ?? signalByMac[macKey]
+            )
+
+            if let existingIndex = deviceIndexByMAC[macKey] {
+                devices[existingIndex] = mergeDevice(devices[existingIndex], with: device)
+            } else {
+                deviceIndexByMAC[macKey] = devices.count
+                devices.append(device)
+            }
         }
         return devices.sorted { a, b in
             if a.isOnline != b.isOnline { return a.isOnline }
@@ -844,23 +1428,68 @@ public actor HuaweiOntClient {
     static func enrichDevices(_ devices: [OntDevice], withDhcpInfo text: String) -> [OntDevice] {
         var byMac: [String: [String: String]] = [:]
         for r in HuaweiJs.records(of: "DHCPInfo", in: text, fallbackParams: dhcpInfoParams) {
-            let mac = cleanPlaceholder(r["mac"]).lowercased()
-            guard !mac.isEmpty, byMac[mac] == nil else { continue }
-            byMac[mac] = r
+            let mac = normalizedMac(clientField(r, names: ["mac", "MACAddress", "MacAddr"]))
+            guard !mac.isEmpty else { continue }
+            if byMac[mac] == nil {
+                byMac[mac] = r
+            } else {
+                for (key, value) in r where !cleanPlaceholder(value).isEmpty && cleanPlaceholder(value) != "*" {
+                    let oldValue = byMac[mac]?[key] ?? ""
+                    if oldValue.isEmpty || !DeviceNameResolver.isUsefulName(oldValue) {
+                        byMac[mac]?[key] = value
+                    }
+                }
+            }
         }
         guard !byMac.isEmpty else { return devices }
         return devices.map { device in
-            guard let lease = byMac[device.mac] else { return device }
+            guard let lease = byMac[normalizedMac(device.mac)] else { return device }
             var copy = device
-            if copy.hostName.isEmpty { copy.hostName = cleanPlaceholder(lease["name"]) }
-            if copy.dhcpVendor.isEmpty { copy.dhcpVendor = cleanPlaceholder(lease["devtype"]) }
-            if copy.ip.isEmpty { copy.ip = cleanPlaceholder(lease["ip"]) }
+            let leaseName = clientNameField(lease, names: ["hostname", "HostName", "name", "Alias"])
+            if !DeviceNameResolver.isUsefulName(copy.hostName), DeviceNameResolver.isUsefulName(leaseName) {
+                copy.hostName = leaseName
+            }
+            let leaseAlias = clientNameField(lease, names: ["Alias"])
+            if !DeviceNameResolver.isUsefulName(copy.routerAlias), DeviceNameResolver.isUsefulName(leaseAlias) {
+                copy.routerAlias = leaseAlias
+            }
+            if !DeviceNameResolver.isUsefulName(copy.dhcpVendor) || !copy.dhcpVendor.contains(where: \.isLetter) {
+                copy.dhcpVendor = clientVendorField(lease, names: ["VendorClassId", "devtype", "DeviceType"])
+            }
+            if copy.ip.isEmpty { copy.ip = clientField(lease, names: ["ip", "IPAddress"]) }
             if copy.leaseSecondsRemaining == nil,
-               let rem = Int(lease["remaintime"] ?? ""), rem > 0 {
+               let rem = Int(clientField(lease, names: ["remaintime"])), rem > 0 {
                 copy.leaseSecondsRemaining = rem
             }
             return copy
         }
+    }
+
+    private static func mergeDevice(_ current: OntDevice, with incoming: OntDevice) -> OntDevice {
+        var merged = current
+        if merged.domain.isEmpty { merged.domain = incoming.domain }
+        if merged.ip.isEmpty { merged.ip = incoming.ip }
+        if !DeviceNameResolver.isUsefulName(merged.hostName), DeviceNameResolver.isUsefulName(incoming.hostName) {
+            merged.hostName = incoming.hostName
+        }
+        if !DeviceNameResolver.isUsefulName(merged.routerAlias), DeviceNameResolver.isUsefulName(incoming.routerAlias) {
+            merged.routerAlias = incoming.routerAlias
+        }
+        if !DeviceNameResolver.isUsefulName(merged.dhcpVendor) || !merged.dhcpVendor.contains(where: \.isLetter) {
+            merged.dhcpVendor = incoming.dhcpVendor
+        }
+        if merged.port == .other(""), incoming.port != .other("") { merged.port = incoming.port }
+        if incoming.isOnline && !merged.isOnline {
+            merged.isOnline = true
+            merged.connectedTime = incoming.connectedTime
+            if incoming.port != .other("") { merged.port = incoming.port }
+        }
+        if merged.userSpecifiedDeviceType == "0" { merged.userSpecifiedDeviceType = incoming.userSpecifiedDeviceType }
+        merged.trafficSendRate = merged.trafficSendRate ?? incoming.trafficSendRate
+        merged.trafficRecvRate = merged.trafficRecvRate ?? incoming.trafficRecvRate
+        merged.leaseSecondsRemaining = merged.leaseSecondsRemaining ?? incoming.leaseSecondsRemaining
+        merged.rssiDbm = merged.rssiDbm ?? incoming.rssiDbm
+        return merged
     }
 
     // MARK: Actions
@@ -868,21 +1497,33 @@ public actor HuaweiOntClient {
     public func reboot() async throws {
         let token = try await freshTokenLoggingIn()
         // Same request the web UI's "Restart" button submits from the main page.
-        _ = try await transport.send(.init(.post,
+        _ = try await sendAuthenticated(.init(.post,
             "/CustomApp/set.cgi?x=InternetGatewayDevice.X_HW_DEBUG.SMP.DM.ResetBoard&RequestFile=../CustomApp/mainpage.asp",
-            form: [("x.X_HW_Token", token)], ajax: false), host: credentials.host)
-        loggedIn = false
-        lastCounters = nil
+            form: [("x.X_HW_Token", token)], ajax: false))
+        await invalidateSession()
+        resetTrafficCounterBaseline()
     }
 
     private func freshTokenLoggingIn() async throws -> String {
-        if !loggedIn { try await login() }
-        do {
-            return try await freshToken()
-        } catch {
+        let request = OntRequest(.post, "/html/ssmp/common/GetRandToken.asp", timeoutInterval: 5)
+        for attempt in 0..<2 {
+            let token = HuaweiJs.clean(try await sendAuthenticated(request))
+            if !token.isEmpty && !token.contains("<") { return token }
+            if attempt == 1 { throw OntError.sessionExpired }
+            let generation = await authCoordinator.currentGeneration()
+            await invalidateSession(ifGeneration: generation)
+        }
+        throw OntError.sessionExpired
+    }
+
+    private func invalidateSession() async {
+        loggedIn = false
+        await authCoordinator.invalidateSession()
+    }
+
+    private func invalidateSession(ifGeneration generation: UInt64) async {
+        if await authCoordinator.invalidateSession(ifGeneration: generation) {
             loggedIn = false
-            try await login()
-            return try await freshToken()
         }
     }
 }

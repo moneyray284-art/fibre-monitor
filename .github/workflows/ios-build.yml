@@ -9,11 +9,12 @@ on:
         description: 'Publish as a GitHub Release'
         required: false
         type: boolean
-        default: true
-      release_tag:
-        description: 'Release tag (default: v<MARKETING_VERSION>-ios)'
+        default: false
+      run_tests:
+        description: 'Run the unit-test suite before building'
         required: false
-        type: string
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -21,7 +22,7 @@ permissions:
 jobs:
   build-ios:
     name: Build Native iOS App
-    runs-on: macos-15
+    runs-on: macos-26-intel
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -40,12 +41,34 @@ jobs:
         run: |
           brew install xcodegen
 
+      - name: Generate LinkWave app icons
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Render app icon asset sets
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          python tools/generate_linkwave_icons.py
+
       - name: Generate Xcode Project
         working-directory: .
         run: |
           xcodegen generate
 
+      - name: Verify app icon asset build settings
+        run: |
+          for configuration in Debug Release; do
+            SETTINGS=$(xcodebuild -project FibreMonitor.xcodeproj -target FibreMonitor -configuration "$configuration" -showBuildSettings)
+            ICON_NAME=$(echo "$SETTINGS" | awk '$1 == "ASSETCATALOG_COMPILER_APPICON_NAME" { print $3; exit }')
+            [[ "$ICON_NAME" == "AppIcon" ]] || { echo "::error::Classic primary AppIcon is not selected in $configuration (found $ICON_NAME)"; exit 1; }
+            VALUE=$(echo "$SETTINGS" | awk '$1 == "ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS" { print $3; exit }')
+            [[ "$VALUE" == "YES" ]] || { echo "::error::ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS is not YES in $configuration"; exit 1; }
+            echo "Verified all app icon assets are included in $configuration."
+          done
+
       - name: Run Unit Tests
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
         run: |
           DEST=$(xcrun simctl list devices available | grep -m 1 "iPhone" | sed -E 's/.*\(([A-F0-9-]+)\).*/\1/')
           echo "Using Simulator ID: $DEST"
@@ -53,6 +76,8 @@ jobs:
             -project FibreMonitor.xcodeproj \
             -scheme FibreMonitor \
             -destination "id=$DEST" \
+            -destination-timeout 90 \
+            -parallel-testing-enabled NO \
             -derivedDataPath build_test
 
       - name: Build Application for Device
@@ -65,6 +90,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            SWIFT_OPTIMIZATION_LEVEL=-O \
             clean build
 
       - name: Verify Info.plist
@@ -74,35 +100,67 @@ jobs:
           for key in UILaunchScreen NSLocalNetworkUsageDescription NSAppTransportSecurity; do
             /usr/libexec/PlistBuddy -c "Print :$key" "$PLIST" > /dev/null || { echo "::error::$key missing from built Info.plist"; exit 1; }
           done
-          echo "Version: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST") ($(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST"))"
+          PRIMARY_ICON=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$PLIST" 2>/dev/null || true)
+          [[ -z "$PRIMARY_ICON" || "$PRIMARY_ICON" == "AppIcon" ]] || { echo "::error::Expected the untouched Classic primary icon AppIcon, found $PRIMARY_ICON"; exit 1; }
+          for icon in AppIconOrange AppIconBlue AppIconPurple AppIconGreen AppIconLaunchArcs AppIconMonogramI AppIconArcsI AppIconLinkRing AppIconWavefrontW \
+            AppIconLaunchArcsCyan AppIconLaunchArcsSky AppIconLaunchArcsMint AppIconLaunchArcsEmerald AppIconLaunchArcsIndigo AppIconLaunchArcsViolet AppIconLaunchArcsRose AppIconLaunchArcsAmber \
+            AppIconMonogramICyan AppIconMonogramISky AppIconMonogramIMint AppIconMonogramIEmerald AppIconMonogramIIndigo AppIconMonogramIViolet AppIconMonogramIRose AppIconMonogramIAmber \
+            AppIconArcsICyan AppIconArcsISky AppIconArcsIMint AppIconArcsIEmerald AppIconArcsIIndigo AppIconArcsIViolet AppIconArcsIRose AppIconArcsIAmber \
+            AppIconLinkRingCyan AppIconLinkRingSky AppIconLinkRingMint AppIconLinkRingEmerald AppIconLinkRingIndigo AppIconLinkRingViolet AppIconLinkRingRose AppIconLinkRingAmber \
+            AppIconWavefrontWCyan AppIconWavefrontWSky AppIconWavefrontWMint AppIconWavefrontWEmerald AppIconWavefrontWIndigo AppIconWavefrontWViolet AppIconWavefrontWRose AppIconWavefrontWAmber; do
+            /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundleAlternateIcons:$icon" "$PLIST" > /dev/null || { echo "::error::Alternate icon $icon missing from built Info.plist"; exit 1; }
+          done
+          APP=build/Build/Products/Release-iphoneos/FibreMonitor.app
+          test -f "$APP/FibreMonitor" || { echo "::error::Release app executable is missing"; exit 1; }
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")
+          BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Expected a numeric stable marketing version, found $VERSION"; exit 1; }
+          [[ "$BUILD" =~ ^[0-9]+$ ]] || { echo "::error::Expected a numeric build number, found $BUILD"; exit 1; }
+          echo "LINKWAVE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "LINKWAVE_IPA_NAME=LinkWave-v$VERSION.ipa" >> "$GITHUB_ENV"
+          echo "Version: $VERSION ($BUILD)"
+
+      - name: Sign app without restricted entitlements
+        run: |
+          APP=build/Build/Products/Release-iphoneos/FibreMonitor.app
+          codesign --force --sign - --timestamp=none "$APP"
+          ENTITLEMENTS=$(mktemp)
+          codesign -d --entitlements :- "$APP" > "$ENTITLEMENTS" 2>/dev/null || true
+          if grep -Eqi 'com\.apple\.security\.application-groups|keychain-access-groups' "$ENTITLEMENTS"; then
+            echo "::error::Restricted App Group or custom Keychain group found in LinkWave.app"
+            cat "$ENTITLEMENTS"
+            exit 1
+          fi
+          rm -f "$ENTITLEMENTS"
+          echo "Verified LinkWave.app has no App Group or custom Keychain group entitlement."
 
       - name: Package IPA
         run: |
           mkdir -p build/Payload
-          cp -r build/Build/Products/Release-iphoneos/FibreMonitor.app build/Payload/
+          cp -r build/Build/Products/Release-iphoneos/FibreMonitor.app build/Payload/LinkWave.app
+          test -f build/Payload/LinkWave.app/FibreMonitor || { echo "::error::LinkWave app executable is missing from Payload"; exit 1; }
           cd build
-          zip -r -q FibreMonitor.ipa Payload
+          zip -r -q "$LINKWAVE_IPA_NAME" Payload
+          echo "LINKWAVE_IPA_PATH=build/$LINKWAVE_IPA_NAME" >> "$GITHUB_ENV"
           echo "IPA Size:"
-          ls -lh FibreMonitor.ipa
+          ls -lh "$LINKWAVE_IPA_NAME"
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FibreMonitor-iOS-IPA
-          path: build/FibreMonitor.ipa
+          name: LinkWave-${{ env.LINKWAVE_VERSION }}-IPA
+          path: ${{ env.LINKWAVE_IPA_PATH }}
           retention-days: 30
 
       - name: Create GitHub Release
-        if: ${{ github.event.inputs.create_release == 'true' || github.event_name == 'release' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.inputs.release_tag }}"
-          if [ -z "$TAG" ]; then
-            TAG="v$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Build/Products/Release-iphoneos/FibreMonitor.app/Info.plist)-ios"
-          fi
-          gh release create "$TAG" build/FibreMonitor.ipa \
-            --title "Fibre Monitor for iOS ($TAG)" \
-            --notes "Unsigned build for Huawei OptiXstar HG8145X6 fibre routers. Install with Sideloadly, AltStore or SideStore." \
+          TAG="v${LINKWAVE_VERSION}"
+          gh release create "$TAG" "$LINKWAVE_IPA_PATH" \
+            --target "$GITHUB_SHA" \
+            --title "LinkWave $TAG" \
+            --notes-file "RELEASE_NOTES_v${LINKWAVE_VERSION}.md" \
             --draft=false \
-            --prerelease=false || gh release upload "$TAG" build/FibreMonitor.ipa --clobber
+            --prerelease=false

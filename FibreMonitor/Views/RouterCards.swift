@@ -50,11 +50,12 @@ struct HealthCard: View {
 
 struct LanCard: View {
     let lan: LanInfo
+    @Environment(\.linkWaveThemePalette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             CardHeader(icon: "network", title: "Home Network") {
-                Pill(text: lan.dhcpEnabled ? "DHCP on" : "DHCP off", color: lan.dhcpEnabled ? .green : .orange)
+                Pill(text: lan.dhcpEnabled ? "DHCP on" : "DHCP off", color: lan.dhcpEnabled ? palette.textAccent : .orange)
             }
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                 Readout(label: "Router address", value: lan.routerIp.isEmpty ? "—" : lan.routerIp)
@@ -75,6 +76,6 @@ struct LanCard: View {
                 )
             }
         }
-        .liquidGlassCard()
+        .linkWaveGlassCard()
     }
 }

@@ -12,6 +12,72 @@ public struct TrafficState: Equatable, Sendable {
     public var peakDownloadMbps: Double = 0
     public var peakUploadMbps: Double = 0
     public var history: [ThroughputSample] = []
+    /// Cumulative counters from the active WAN interface, used for persisted usage totals.
+    public var cumulativeDownloadBytes: UInt64?
+    public var cumulativeUploadBytes: UInt64?
+}
+
+public struct DataUsageSummary: Equatable, Sendable {
+    public var todayDownloadBytes: UInt64 = 0
+    public var todayUploadBytes: UInt64 = 0
+    public var monthDownloadBytes: UInt64 = 0
+    public var monthUploadBytes: UInt64 = 0
+    public var totalDownloadBytes: UInt64 = 0
+    public var totalUploadBytes: UInt64 = 0
+    public var lastSuccessfulSyncAt: Date? = nil
+    public var missingHistoryDayCount: Int = 0
+    public var dailyHistory: [DailyUsagePoint] = []
+    /// All persisted daily records for the active profile, used by the month chart.
+    public var historicalDailyHistory: [DailyUsagePoint] = []
+}
+
+public struct DailyUsagePoint: Equatable, Sendable, Identifiable {
+    public var id: Date { date }
+    public var date: Date
+    public var label: String
+    /// Nil when no traffic bytes were recorded for the day.
+    public var downloadBytes: UInt64?
+    public var uploadBytes: UInt64?
+    /// True when traffic was recorded, but the app did not observe the whole day.
+    public var isPartial: Bool = false
+
+    public var totalBytes: UInt64? {
+        guard let downloadBytes, let uploadBytes else { return nil }
+        let (total, overflow) = downloadBytes.addingReportingOverflow(uploadBytes)
+        return overflow ? UInt64.max : total
+    }
+}
+
+public struct ConnectionInterruption: Codable, Equatable, Sendable, Identifiable {
+    public var id: UUID
+    public var startedAt: Date
+    public var restoredAt: Date?
+    /// Filled only when the app observed the router throughout the interruption.
+    public var observedDurationSeconds: TimeInterval?
+
+    public init(
+        id: UUID = UUID(),
+        startedAt: Date,
+        restoredAt: Date? = nil,
+        observedDurationSeconds: TimeInterval? = nil
+    ) {
+        self.id = id
+        self.startedAt = startedAt
+        self.restoredAt = restoredAt
+        self.observedDurationSeconds = observedDurationSeconds
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, startedAt, restoredAt, observedDurationSeconds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? values.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
+        startedAt = (try? values.decodeIfPresent(Date.self, forKey: .startedAt)) ?? .distantPast
+        restoredAt = try? values.decodeIfPresent(Date.self, forKey: .restoredAt)
+        observedDurationSeconds = try? values.decodeIfPresent(TimeInterval.self, forKey: .observedDurationSeconds)
+    }
 }
 
 public struct WanInfo: Equatable, Sendable {
@@ -87,18 +153,37 @@ public enum ConnectionPort: Equatable, Sendable {
 
     /// `ssidBands` (SSID index -> "2.4GHz"/"5GHz", from the router's Wi-Fi list) decides the band.
     /// Without it, the usual Huawei layout is assumed: SSID1-4 on 2.4 GHz, SSID5-8 on 5 GHz.
-    public init(raw: String, ssidBands: [Int: String] = [:]) {
-        let upper = raw.uppercased()
-        if upper.hasPrefix("SSID"), let n = Int(upper.dropFirst(4)) {
-            if let band = ssidBands[n] {
-                self = band.hasPrefix("5") ? .wifi5(ssidIndex: n) : .wifi24(ssidIndex: n)
+    public init(raw: String, ssidBands: [Int: String] = [:], fallbackRaw: String? = nil) {
+        let primary = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = (fallbackRaw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidates = [primary, fallback].filter { !$0.isEmpty }
+        let upper = (candidates.first ?? "").uppercased()
+        let compact = upper.replacingOccurrences(of: " ", with: "")
+        if compact.hasPrefix("SSID"), let n = Int(compact.dropFirst(4).prefix(while: \.isNumber)) {
+            let explicitBand = candidates.map { $0.uppercased().replacingOccurrences(of: " ", with: "") }
+            let reportedBand = ssidBands[n]
+                ?? explicitBand.first(where: { $0.contains("5GHZ") || $0.contains("5G") || $0.contains("2.4GHZ") || $0.contains("2.4G") })
+                ?? ""
+            let resolvedBand = WifiFrequencyBand.label(for: n, fallback: reportedBand)
+            if resolvedBand == WifiFrequencyBand.five.rawValue {
+                self = .wifi5(ssidIndex: n)
             } else {
-                self = n >= 5 ? .wifi5(ssidIndex: n) : .wifi24(ssidIndex: n)
+                self = .wifi24(ssidIndex: n)
             }
-        } else if upper.hasPrefix("LAN"), let n = Int(upper.dropFirst(3)) {
-            self = .lan(n)
         } else {
-            self = .other(raw)
+            let normalized = candidates.map { $0.uppercased().replacingOccurrences(of: " ", with: "") }
+            if normalized.contains(where: { $0.contains("5GHZ") || $0.contains("5G") }) {
+                self = .wifi5(ssidIndex: 0)
+            } else if normalized.contains(where: { $0.contains("2.4GHZ") || $0.contains("2.4G") }) {
+                self = .wifi24(ssidIndex: 0)
+            } else if let lan = normalized.first(where: { $0.hasPrefix("LAN") || $0.contains("ETHERNET") || $0 == "ETH" || $0 == "WIRED" }) {
+                let digits = lan.drop(while: { !$0.isNumber }).prefix(while: \.isNumber)
+                self = .lan(Int(digits) ?? 0)
+            } else if normalized.contains(where: { $0.contains("WIFI") || $0.contains("WI-FI") || $0.contains("WLAN") || $0.contains("WIRELESS") }) {
+                self = .wifi24(ssidIndex: 0)
+            } else {
+                self = .other(primary.isEmpty ? fallback : primary)
+            }
         }
     }
 
@@ -106,8 +191,17 @@ public enum ConnectionPort: Equatable, Sendable {
         switch self {
         case .wifi24: return "2.4 GHz"
         case .wifi5: return "5 GHz"
-        case .lan(let n): return "LAN \(n)"
+        case .lan(let n): return n > 0 ? "LAN \(n)" : "LAN"
         case .other(let s): return s.isEmpty ? "—" : s
+        }
+    }
+
+    public var compactLabel: String {
+        switch self {
+        case .wifi24: return "2.4G"
+        case .wifi5: return "5G"
+        case .lan: return "LAN"
+        case .other(let value): return value.trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }
 
@@ -116,6 +210,15 @@ public enum ConnectionPort: Equatable, Sendable {
         case .wifi24, .wifi5: return true
         default: return false
         }
+    }
+
+    public var isLan: Bool {
+        if case .lan = self { return true }
+        if case .other(let value) = self {
+            let upper = value.uppercased()
+            return upper.contains("LAN") || upper.contains("ETHERNET") || upper == "ETH" || upper == "WIRED"
+        }
+        return false
     }
 }
 
@@ -136,6 +239,8 @@ public struct OntDevice: Identifiable, Equatable, Sendable {
     public var trafficSendRate: Int? = nil
     public var trafficRecvRate: Int? = nil
     public var leaseSecondsRemaining: Int? = nil
+    /// Wi-Fi signal strength reported by the router, in dBm. Nil when the router does not expose RSSI.
+    public var rssiDbm: Double? = nil
 
     public init(
         domain: String = "",
@@ -150,7 +255,8 @@ public struct OntDevice: Identifiable, Equatable, Sendable {
         userSpecifiedDeviceType: String = "0",
         trafficSendRate: Int? = nil,
         trafficRecvRate: Int? = nil,
-        leaseSecondsRemaining: Int? = nil
+        leaseSecondsRemaining: Int? = nil,
+        rssiDbm: Double? = nil
     ) {
         self.domain = domain
         self.mac = mac
@@ -165,6 +271,7 @@ public struct OntDevice: Identifiable, Equatable, Sendable {
         self.trafficSendRate = trafficSendRate
         self.trafficRecvRate = trafficRecvRate
         self.leaseSecondsRemaining = leaseSecondsRemaining
+        self.rssiDbm = rssiDbm
     }
 
     public var hasTrafficRates: Bool {
@@ -193,9 +300,42 @@ public struct OntDevice: Identifiable, Equatable, Sendable {
     }
 }
 
-public enum OntError: LocalizedError, Equatable {
+/// A device entry stored in the Huawei WLAN MAC blacklist.
+public struct BlockedRouterDevice: Identifiable, Equatable, Sendable {
+    public var id: String { domain }
+    public var domain: String
+    public var mac: String
+    public var ssidName: String
+    public var name: String
+
+    public init(domain: String, mac: String, ssidName: String, name: String = "") {
+        self.domain = domain
+        self.mac = mac
+        self.ssidName = ssidName
+        self.name = name
+    }
+}
+
+public struct WlanMacBlacklistState: Equatable, Sendable {
+    public var isEnabled: Bool
+    /// Huawei uses 0 for blacklist and 1 for whitelist.
+    public var policy: String
+    public var devices: [BlockedRouterDevice]
+
+    public var activeBlockedDevices: [BlockedRouterDevice] {
+        isEnabled && policy == "0" ? devices : []
+    }
+}
+
+public enum RouterAuthFailure: Equatable, Sendable {
+    case invalidCredentials
+    case temporarilyLocked(retryAt: Date)
+}
+
+public enum OntError: LocalizedError, Equatable, Sendable {
     case notConfigured
     case loginRejected
+    case loginTemporarilyLocked
     case sessionExpired
     case badResponse(String)
     case lastRadio
@@ -205,8 +345,11 @@ public enum OntError: LocalizedError, Equatable {
     case invalidDeviceAlias
     case invalidWifiSsid
     case invalidWifiPassword
+    case wifiModificationNotAllowed
+    case wifiWriteRejected(String)
     case unsupportedWifiSecurity(String)
     case incompleteWifiConfig([String])
+    case macFilterPolicyConflict
 
     public var errorDescription: String? {
         switch self {
@@ -214,6 +357,8 @@ public enum OntError: LocalizedError, Equatable {
             return "Enter the router password in Settings."
         case .loginRejected:
             return "The router rejected the login. Check the username and password in Settings. After several wrong attempts the router locks logins for a few minutes."
+        case .loginTemporarilyLocked:
+            return "Router login temporarily locked — retrying in 60s"
         case .sessionExpired:
             return "The router ended the session."
         case .badResponse(let what):
@@ -230,10 +375,16 @@ public enum OntError: LocalizedError, Equatable {
             return "Network name (SSID) must be 1 to 32 bytes without control characters."
         case .invalidWifiPassword:
             return "Wi-Fi password must be 8 to 63 printable ASCII characters."
+        case .wifiModificationNotAllowed:
+            return "Your router account doesn't allow modifying extra Wi-Fi networks on this firmware."
+        case .wifiWriteRejected(let message):
+            return message
         case .unsupportedWifiSecurity(let mode):
             return "This network uses \(mode). Change it in the router's web page."
         case .incompleteWifiConfig(let fields):
             return "Cannot edit this Wi-Fi network safely because required settings were missing from WlanBasic.asp: \(fields.joined(separator: ", "))."
+        case .macFilterPolicyConflict:
+            return "The router has existing access-control entries under a different policy. Clear those entries in router settings before enabling the blacklist."
         case .notConfirmed:
             return "Sent, but the router hasn't confirmed the change yet. If this iPhone was on that band, reconnect to Wi-Fi and refresh."
         }
@@ -259,6 +410,29 @@ public struct WifiRadio: Equatable, Sendable, Identifiable {
     public var index: Int          // 1 = 2.4 GHz, 2 = 5 GHz on this router
     public var band: String        // "2.4GHz" / "5GHz"
     public var enabled: Bool
+}
+
+public enum WifiFrequencyBand: String, CaseIterable, Equatable, Identifiable, Sendable {
+    case twoPointFour = "2.4GHz"
+    case five = "5GHz"
+
+    public var id: String { rawValue }
+    public var title: String { self == .twoPointFour ? "2.4 GHz" : "5 GHz" }
+    public var wlanIndices: [Int] { self == .twoPointFour ? [1, 2, 3, 4] : [5, 6, 7, 8] }
+    public var secondaryIndices: [Int] { Array(wlanIndices.dropFirst()) }
+
+    public static func label(for index: Int, fallback: String) -> String {
+        let normalized = fallback.lowercased().replacingOccurrences(of: " ", with: "")
+        if normalized.contains("5ghz") || normalized.contains("5g") { return WifiFrequencyBand.five.rawValue }
+        if normalized.contains("2.4ghz") || normalized.contains("2.4g") || normalized.contains("2g") {
+            return WifiFrequencyBand.twoPointFour.rawValue
+        }
+        if normalized.contains("radio.2") || normalized.contains("radio2") { return WifiFrequencyBand.five.rawValue }
+        if normalized.contains("radio.1") || normalized.contains("radio1") { return WifiFrequencyBand.twoPointFour.rawValue }
+        if (1...4).contains(index) { return WifiFrequencyBand.twoPointFour.rawValue }
+        if (5...8).contains(index) { return WifiFrequencyBand.five.rawValue }
+        return fallback
+    }
 }
 
 public struct WifiNetwork: Equatable, Sendable, Identifiable {
@@ -336,9 +510,9 @@ public enum WifiAuthMode: Equatable, Sendable {
         }
     }
 
-    /// Modes supported by the captured `#704` SSID/password edit flow (WPA2-PSK only).
+    /// Modes supported by the captured `#704` SSID/password edit flow.
     public var isEditableWpa2Or3Psk: Bool {
-        self == .wpa2Psk
+        self == .wpa2Psk || self == .wpaWpa2Psk
     }
 
     /// Authentication label shown in the UI and QR sheet.
@@ -499,9 +673,13 @@ public struct WifiSsidConfig: Equatable, Sendable, Identifiable {
         if encryptionLevel.isEmpty { missing.append("w.WEPEncryptionLevel") }
         if wpaRekey.isEmpty { missing.append("y.X_HW_GroupRekey") }
         if !hasWlanWifiRecord || standard.isEmpty { missing.append("w.Standard") }
-        if authMode == .wpa2Psk {
+        if authMode == .wpa2Psk || authMode == .wpaWpa2Psk {
             if ieee11iAuthenticationMode.isEmpty { missing.append("y.IEEE11iAuthenticationMode") }
             if ieee11iEncryptionModes.isEmpty { missing.append("y.IEEE11iEncryptionModes") }
+        }
+        if authMode == .wpaWpa2Psk {
+            if mixAuthenticationMode.isEmpty { missing.append("w.MixAuthenticationMode") }
+            if mixEncryptionModes.isEmpty { missing.append("w.MixEncryptionModes") }
         }
         if !hasPskRecord || isPasswordMasked || psk.isEmpty { missing.append("PreSharedKey") }
         if !hasWpsRecord || wpsEnable.isEmpty || wpsConfigMethod.isEmpty || wpsPinGenerator.isEmpty || wpsDevicePassword.isEmpty {

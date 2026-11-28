@@ -225,11 +225,12 @@ final class RouterPagesTests: XCTestCase {
         XCTAssertEqual(w.radios, [WifiRadio(index: 1, band: "2.4GHz", enabled: true),
                                   WifiRadio(index: 2, band: "5GHz", enabled: false)])
         XCTAssertEqual(w.networks.map(\.ssidIndex), [1, 2, 5])
+        XCTAssertEqual(w.networks(on: w.radios[0]).map(\.name), ["Test Home"])
         XCTAssertEqual(w.networks(on: w.radios[1]).map(\.name), ["Test Fast", "Test Extra"])
     }
 
     func testDeviceBandComesFromWifiList() {
-        // SSID2 is a 5 GHz network on this router, which the old SSID1-4 rule got wrong.
+        // Router-reported band metadata wins over the usual slot-number fallback.
         let text = """
         function USERDevice(Domain,IpAddr,MacAddr,Port,IpType,DevType,DevStatus,PortType,Time,HostName) { }
         var l = new Array(new USERDevice("d","192\\x2e168\\x2e100\\x2e9","aa\\x3abb\\x3acc\\x3a00\\x3a00\\x3a09","SSID2","DHCP","","Online","WIFI","0\\x3a5","Phone"),null);
@@ -252,6 +253,7 @@ final class RouterPagesTests: XCTestCase {
     func testRadioToggleSendsWebFormAndConfirms() async throws {
         let t = router()
         t.on("/html/amp/common/wlan_list.asp", Fixtures.wlanList(radio1: true, radio2: true), Fixtures.wlanList(radio1: true, radio2: false))
+        t.on("/html/amp/wlanbasic/WlanBasic.asp", Fixtures.gnmtnWlanBasic())
         t.on("/html/amp/wlanbasic/set.cgi", "")
         let client = HuaweiOntClient(credentials: creds, transport: t)
         let after = try await client.setRadio(2, enabled: false)

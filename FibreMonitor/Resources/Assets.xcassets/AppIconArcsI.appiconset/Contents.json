@@ -1,0 +1,38 @@
+{
+  "info": {
+    "author": "xcode",
+    "version": 1
+  },
+  "images": [
+    {
+      "size": "1024x1024",
+      "platform": "ios",
+      "filename": "AppIconArcsI.png",
+      "idiom": "universal"
+    },
+    {
+      "size": "1024x1024",
+      "appearances": [
+        {
+          "appearance": "luminosity",
+          "value": "dark"
+        }
+      ],
+      "platform": "ios",
+      "filename": "AppIconArcsI-Dark.png",
+      "idiom": "universal"
+    },
+    {
+      "size": "1024x1024",
+      "appearances": [
+        {
+          "appearance": "luminosity",
+          "value": "tinted"
+        }
+      ],
+      "platform": "ios",
+      "filename": "AppIconArcsI-Tinted.png",
+      "idiom": "universal"
+    }
+  ]
+}

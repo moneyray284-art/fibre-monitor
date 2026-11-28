@@ -275,9 +275,15 @@ final class Phase4WritesTests: XCTestCase {
 
         let all = HuaweiOntClient.parseWlanBasic(Fixtures.gnmtnWlanBasic())
         let c1WpaWpa2 = try XCTUnwrap(all.first { $0.ssidIndex == 1 })
-        XCTAssertThrowsError(try HuaweiOntClient.wifiEditRequest(config: c1WpaWpa2, newSsid: "X", newPassword: "Password123", token: "t")) { err in
-            XCTAssertEqual(err as? OntError, .unsupportedWifiSecurity("WPA/WPA2-PSK"))
-        }
+        XCTAssertTrue(c1WpaWpa2.authMode.isEditableWpa2Or3Psk)
+        let mixedRequest = try HuaweiOntClient.wifiEditRequest(config: c1WpaWpa2, newSsid: "MixedNet", newPassword: "Password123", token: "t")
+        let mixedFields = Dictionary(mixedRequest.form, uniquingKeysWith: { _, latest in latest })
+        XCTAssertEqual(mixedFields["y.BeaconType"], "WPAand11i")
+        XCTAssertEqual(mixedFields["y.SSID"], "MixedNet")
+        XCTAssertEqual(mixedFields["k.PreSharedKey"], "Password123")
+        XCTAssertEqual(mixedFields["w.MixAuthenticationMode"], "PSKAuthentication")
+        XCTAssertEqual(mixedFields["w.MixEncryptionModes"], "TKIPandAESEncryption")
+        XCTAssertEqual(mixedFields["w.WPAEncryptionModes"], "TKIPEncryption")
 
         let c5Open = try XCTUnwrap(all.first { $0.ssidIndex == 5 })
         XCTAssertThrowsError(try HuaweiOntClient.wifiEditRequest(config: c5Open, newSsid: "X", newPassword: "Password123", token: "t")) { err in
@@ -301,6 +307,7 @@ final class Phase4WritesTests: XCTestCase {
         dropping.on("/index.asp", Fixtures.indexPage)
         dropping.on("/asp/GetRandCount.asp", Fixtures.token)
         dropping.on("/html/ssmp/common/GetRandToken.asp", Fixtures.token)
+        dropping.on("/html/amp/wlanbasic/WlanBasic.asp", Fixtures.gnmtnWlanBasic())
         dropping.on("/login.cgi", Fixtures.loginOk)
 
         let dropClient = HuaweiOntClient(
@@ -320,6 +327,7 @@ final class Phase4WritesTests: XCTestCase {
         succeeding.on("/index.asp", Fixtures.indexPage)
         succeeding.on("/asp/GetRandCount.asp", Fixtures.token)
         succeeding.on("/html/ssmp/common/GetRandToken.asp", Fixtures.token)
+        succeeding.on("/html/amp/wlanbasic/WlanBasic.asp", Fixtures.gnmtnWlanBasic())
         succeeding.on("/login.cgi", Fixtures.loginOk)
         succeeding.on("/html/amp/wlanbasic/set.cgi", "")
         succeeding.on("/html/amp/common/wlan_list.asp", Fixtures.gnmtnWlanList())
@@ -346,6 +354,7 @@ final class Phase4WritesTests: XCTestCase {
         transport.on("/index.asp", Fixtures.indexPage)
         transport.on("/asp/GetRandCount.asp", Fixtures.token)
         transport.on("/html/ssmp/common/GetRandToken.asp", Fixtures.token)
+        transport.on("/html/amp/wlanbasic/WlanBasic.asp", Fixtures.gnmtnWlanBasic())
         transport.on("/login.cgi", Fixtures.loginOk)
         transport.on("/html/bbsp/userdevinfo/set.cgi", "")
         transport.on("/html/amp/common/wlan_list.asp", Fixtures.gnmtnWlanList())
