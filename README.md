@@ -1,40 +1,22 @@
-# LinkWave
+# Fibre Monitor
 
-LinkWave is a native iPhone app for monitoring Huawei fibre ONTs, including the OptiXstar HG8145X6-10 and HG8145V5. It connects to your router over your local Wi-Fi network.
+iPhone app for **Huawei OptiXstar HG8145X6** fibre routers (ONTs) across firmware variants (including HG8145X6-10 / `COMMON` and `GNMTNNCE`). It logs in to the router's web interface on the local network and provides:
 
-## Download
+- **Multi-router profiles:** save multiple routers (each with Keychain credentials, detected model and config mode, and per-router device nicknames), pick on launch when 2+ profiles exist, or switch live from Dashboard / Settings
+- **Dashboard:** live download/upload speed with a 60-second sparkline, optical Rx power range bar (`Good` / `Weak` / `Bad` / `Too strong`) and PON state, WAN connection details (PPPoE/IPoE, CGNAT flag, uptime, gateway, DNS), conditional ONT uptime / Tx laser power / CPU & memory load when reported by the firmware, and confirmed router restart
+- **Clients:** searchable online/offline device list with Wi-Fi band or LAN port badges, live per-device traffic rates (when non-zero), DHCP vendor & lease details, **Rename on Router** (`UserDevAlias`), local iPhone-only nicknames, and offline device removal
+- **Wi-Fi:** 2.4 GHz / 5 GHz radio switches (with connected-radio & last-radio safeguards), on-demand QR join code generation and passphrase reveal/copy (never saved on disk), and WPA2-PSK SSID & password editing (other security modes direct to the router's web page) with typed SSID confirmation
+- **Tools & LAN:** built-in router Ping / Traceroute diagnostics, LAN / DHCP pool & secondary subnet inspection, and explicit session logout
 
-**[Download the latest LinkWave IPA](https://github.com/moneyray284-art/fibre-monitor/releases/latest/download/LinkWave-v2.3.2.ipa)**
+Native SwiftUI, iOS 16+, with system Liquid Glass on iOS 26+.
 
-The IPA is unsigned. Install it with SideStore, AltStore, or Sideloadly; it is not an App Store install. You can download the `.ipa` directly from the GitHub Release without extracting a ZIP.
+## Layout
 
-## Requirements and setup
-
-- iPhone running iOS 16 or later
-- A supported Huawei ONT reachable on the same Wi-Fi network
-- Local Network access enabled for LinkWave
-
-Open LinkWave, choose **Add Router**, and enter your router credentials. Auto-detection can suggest the gateway and router profile when the iPhone is connected to the router's Wi-Fi. The common gateway addresses are `192.168.100.1` and `192.168.2.1`.
-
-## Features
-
-- **Home:** router connection state, live download and upload rates while LinkWave is open, optical receive power, and an internet speed test. The **Connection Check** card below Speed Test summarizes fibre, Wi-Fi band balance, and latency/speed status.
-- **Usage:** household download and upload totals from the router, monthly totals, and a calendar-month history chart.
-- **Clients:** connected-device list with All, Online, Offline, and Blocked filters, search, device details, and available block/unblock controls. Online devices can be sorted by Default, Strongest, or Lowest RSSI, with neutral Strong/Fair/Far signal labels.
-- **Wi-Fi:** 2.4 GHz and 5 GHz controls, network details, QR sharing, and Wi-Fi credential editing for supported security modes.
-- **Router profiles:** store multiple router profiles and switch between them.
-- **Appearance:** light, dark, or system theme with selectable accent colors and app icons.
-
-Connection Diagnosis shows three checks: Optical Fibre Line, Wi-Fi Band Balance, and Latency & Speed. Wi-Fi band balance can identify 2.4 GHz crowding and names the active 2.4 GHz and 5 GHz networks. Tapping **Wi-Fi** opens Wi-Fi settings; tapping **Run Test** starts Speed Test on Home. Client RSSI readings do not create connection alerts.
-
-Usage totals come from the router's counters. Live speed readings update while the app is in the foreground. LinkWave does not estimate this iPhone's personal data usage or provide a Home Screen widget in this release.
-
-## Privacy and credentials
-
-Router credentials are stored in the iOS Keychain. Router monitoring uses the local network connection to the selected router. Internet speed tests contact their test servers to measure network performance.
-
-## Release
-
-Current version: **2.3.2 (build 10)**.
-
-Download the IPA from [GitHub Releases](https://github.com/moneyray284-art/fibre-monitor/releases). Source code and the iOS build workflow are in this repository.
+```text
+FibreMonitor/Models      Data models, error types, router profiles
+FibreMonitor/Services    HuaweiOntClient, HuaweiJs, OntTransport, SettingsStore (Keychain)
+FibreMonitor/ViewModels  MonitorViewModel (polling, NWPathMonitor, actions, haptics)
+FibreMonitor/Views       4-tab Liquid Glass UI (Dashboard, Clients, Wi-Fi, Settings)
+FibreMonitorTests        Parser, session, multi-router, WlanBasic, and Phase 4 write unit tests
+tools/gen_icon.py        Regenerates the app icon
+```
